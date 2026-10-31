@@ -30,7 +30,9 @@ commands need no running gateway.
 
 add connects to the worker without asking for anything, so ssh must already
 trust the worker's host key and log in with a key. It checks that the worker
-has Git and the same operating system and architecture as this machine.
+has Git, the same operating system and architecture as this machine, and a
+systemd user manager with cgroup v2, which lets Gripi stop everything a
+session started.
 Sessions use the same paths on the worker as here, so add warns when the
 worker's home folder has another path. The worker will hold a full copy of
 Pi's configuration, including logins; keeping it secure is up to you.
@@ -69,9 +71,11 @@ type worker struct {
 	Destination string `json:"destination"`
 }
 
-// workerProbe prints the worker's system, architecture, user and home, then Git's path if it has Git.
+// workerProbe prints the worker's system, architecture, user and home, then "git" if it has Git and "systemd" if
+// systemd-run can start a command under the user's systemd with cgroup v2.
 // ssh runs it in the worker user's shell, so it uses only what both sh and fish accept.
-const workerProbe = `uname -s; uname -m; id -un; echo "$HOME"; command -v git`
+const workerProbe = `uname -s; uname -m; id -un; echo "$HOME"; command -v git >/dev/null && echo git; ` +
+	`systemd-run --user --pipe --quiet test -f /sys/fs/cgroup/cgroup.controllers && echo systemd`
 
 func manageWorkers(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) == 0 {
@@ -124,8 +128,11 @@ func addWorker(arguments []string, stdout, stderr io.Writer) int {
 	if system, local := strings.ToLower(lines[0])+"/"+architecture, runtime.GOOS+"/"+runtime.GOARCH; system != local {
 		return failure(stderr, "worker", fmt.Errorf("%s runs %s, but this machine runs %s; a worker needs the same operating system and architecture", destination, system, local))
 	}
-	if len(lines) < 5 {
+	if !slices.Contains(lines[4:], "git") {
 		return failure(stderr, "worker", fmt.Errorf("%s has no Git; install it there, then try again", destination))
+	}
+	if !slices.Contains(lines[4:], "systemd") {
+		return failure(stderr, "worker", fmt.Errorf("%s cannot start commands with 'systemd-run --user' under cgroup v2; Gripi needs that to stop everything a session started", destination))
 	}
 	if user, home := lines[2], lines[3]; home != cfg.Home {
 		fmt.Fprintf(stderr, `Warning: the home folder of %s on the worker is %s, but here it is %s.
@@ -153,7 +160,7 @@ func probeWorker(destination string) ([]string, error) {
 	command.Stderr = &errorOutput
 	output, err := command.Output()
 	var exit *exec.ExitError
-	// ssh exits with 255 when it fails, and otherwise with the probe's status, which is 1 without Git.
+	// ssh exits with 255 when it fails, and otherwise with the probe's status, which is 1 without systemd.
 	if errors.As(err, &exit) && exit.ExitCode() == 255 {
 		sshError := strings.TrimSpace(errorOutput.String())
 		switch {

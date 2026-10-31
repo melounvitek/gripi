@@ -28,13 +28,16 @@ for command; do :; done
 HOME=$FAKE_SSH_HOME exec sh -c "$command"
 `
 
-// fakeSSH puts fakeSSHScript on PATH as ssh, gives the test a home that the worker shares and a workers file,
-// and returns the file with ssh's arguments.
+// fakeSSH puts fakeSSHScript on PATH as ssh, and a systemd-run that succeeds, gives the test a home that the
+// worker shares and a workers file, and returns the file with ssh's arguments.
 func fakeSSH(t *testing.T) (arguments string) {
 	t.Helper()
 	isolateSettings(t)
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "ssh"), []byte(fakeSSHScript), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "systemd-run"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -161,9 +164,10 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 		otherSystem = "Linux"
 	}
 	for _, test := range []struct{ name, answer, reason string }{
-		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\n", "no Git"},
-		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\n/usr/bin/git\n", "same operating system and architecture"},
-		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\n/usr/bin/git\n", "same operating system and architecture"},
+		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\nsystemd\n", "no Git"},
+		{"no systemd", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\n", "systemd"},
+		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
+		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fakeSSH(t)
@@ -181,7 +185,7 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {
 	fakeSSH(t)
 	system, machine := thisSystem(t)
-	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n/home/gripi_worker\n/usr/bin/git\n")
+	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n")
 
 	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
 	if code != 0 || !strings.Contains(stdout, "beelink") {
