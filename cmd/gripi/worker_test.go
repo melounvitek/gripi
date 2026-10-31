@@ -330,6 +330,20 @@ func (workers *recordedWorkers) Unforward(folder string, port int) error {
 	return nil
 }
 
+func (workers *recordedWorkers) List() ([]gateway.Worker, error) { return nil, nil }
+
+func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) {
+	return gateway.WorkerLocation{}, false
+}
+
+func (workers *recordedWorkers) Repository(folder string) (string, []string, error) {
+	return folder, nil, nil
+}
+
+func (workers *recordedWorkers) Notices(string) []gateway.WorkerNotice { return nil }
+
+func (workers *recordedWorkers) DismissNotices(string) {}
+
 func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	workers := &recordedWorkers{}
@@ -391,5 +405,30 @@ func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
 	}
 	if workers := listedWorkers(t); len(workers) != 1 {
 		t.Fatalf("workers = %v", workers)
+	}
+}
+
+func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
+	fakeSSH(t)
+	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
+		t.Fatalf("worker add: %s", stderr)
+	}
+	placements, err := remote.LoadPlacements(os.Getenv("GRIPI_WORKER_PLACEMENTS_PATH"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := placements.Add(remote.Placement{Worker: "beelink", Unit: mirror.Unit{Main: "/work/project"}}); err != nil {
+		t.Fatal(err)
+	}
+	workers := gatewayWorkers{remote.NewManager(remote.ManagerOptions{Placements: placements}), os.Getenv("GRIPI_WORKERS_PATH")}
+
+	if list, err := workers.List(); err != nil || !reflect.DeepEqual(list, []gateway.Worker{{Name: "beelink", Destination: "gripi@beelink", State: "disconnected"}}) {
+		t.Fatalf("workers = %+v, %v", list, err)
+	}
+	if location, found := workers.Location("/work/project/src"); !found || !reflect.DeepEqual(location, gateway.WorkerLocation{Worker: "beelink", State: "disconnected", Repository: "/work/project", Ports: []gateway.WorkerPort{}}) {
+		t.Fatalf("location = %+v, %v", location, found)
+	}
+	if _, found := workers.Location("/work/other"); found {
+		t.Fatal("a folder on main runs on a worker")
 	}
 }

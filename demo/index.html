@@ -433,6 +433,12 @@
     .session-title-line { display: flex; align-items: center; gap: 0.5rem; }
     .session-external-indicator { display: inline-flex; flex: 0 0 0.875rem; color: var(--muted); }
     .session-external-indicator svg { width: 0.75rem; height: 0.75rem; stroke-width: 2; }
+    /* Sessions on a worker: the icon is coloured by the worker's state, and quiet while the worker isn't connected. */
+    .session-worker-indicator { display: inline-flex; flex: 0 0 0.875rem; color: var(--muted); }
+    .session-worker-indicator svg, .worker-icon svg { width: 0.75rem; height: 0.75rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    [data-worker-state="connected"] { color: var(--success); }
+    [data-worker-state="connecting"], [data-worker-state="copying"] { color: var(--gold); }
+    [data-worker-state="unreachable"], [data-worker-state="gone"] { color: var(--danger); }
     .session-title { overflow: hidden; color: var(--copy); font-size: 0.84rem; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
     .session-row:has(a.session.selected) .session-title { color: var(--text); }
     @media (max-width: 760px), (pointer: coarse) {

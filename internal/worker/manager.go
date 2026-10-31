@@ -248,6 +248,10 @@ func (manager *Manager) Location(folder string) (Location, bool) {
 		location = Location{Worker: placement.Worker, Repository: placement.Unit.Main}
 	}
 	location.Status = manager.Status(location.Worker)
+	if location.Copying.IsZero() && location.State == Copying {
+		// The worker is getting another repository, while it runs this one's sessions.
+		location.State = Connected
+	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if worker := manager.workers[location.Worker]; worker != nil {

@@ -10,7 +10,8 @@ import (
 	"strconv"
 )
 
-// Workers moves repositories, with all their worktrees and sessions, between this machine and workers.
+// Workers moves repositories, with all their worktrees and sessions, between this machine and workers, and says where
+// they are.
 type Workers interface {
 	// Move runs the sessions of the repository that holds folder on the named worker from now on. Before it copies
 	// anything, it calls stop with the repository's test for a folder, and stop ends the Pi of every session there.
@@ -22,6 +23,16 @@ type Workers interface {
 	Forward(ctx context.Context, folder string, port int) (local int, err error)
 	// Unforward stops forwarding a port of the worker that runs the repository of folder.
 	Unforward(folder string, port int) error
+	// List returns the workers.
+	List() ([]Worker, error)
+	// Location reports where the sessions of folder run while its repository is on a worker or is being copied to one.
+	Location(folder string) (WorkerLocation, bool)
+	// Repository returns the main folder and the worktrees of the repository that holds folder, which move together.
+	Repository(folder string) (main string, worktrees []string, err error)
+	// Notices returns the notices about files of the repository that holds folder that changed on this machine, until
+	// DismissNotices.
+	Notices(folder string) []WorkerNotice
+	DismissNotices(folder string)
 }
 
 // refused reports whether an error of Workers refuses what was asked, such as moving a repository that is on a worker
@@ -31,7 +42,7 @@ func refused(err error) bool {
 	return errors.As(err, &refusal) && refusal.Refused()
 }
 
-// SetWorkers lets gripi commands move repositories to workers and back. Call it before serving.
+// SetWorkers lets gripi commands and the browser move repositories to workers and back. Call it before serving.
 func (handler *Handler) SetWorkers(workers Workers) {
 	handler.app.workers = workers
 }
@@ -43,17 +54,27 @@ var errOtherUsersSessions = errors.New("the repository has sessions of other use
 
 func (app *application) moveToWorker(response http.ResponseWriter, request *http.Request) {
 	app.moveRepository(response, request, func(folder string, stop func(func(string) bool) error) error {
-		return app.workers.Move(request.Context(), folder, request.FormValue("worker"), stop)
+		return app.workers.Move(movingContext(request), folder, request.FormValue("worker"), stop)
 	})
 }
 
 func (app *application) returnFromWorker(response http.ResponseWriter, request *http.Request) {
 	app.moveRepository(response, request, func(folder string, stop func(func(string) bool) error) error {
-		return app.workers.Return(request.Context(), folder, stop)
+		return app.workers.Return(movingContext(request), folder, stop)
 	})
 }
 
-// workerFolder returns the folder of a request about the repository that holds it.
+// movingContext is the context of a move: a gripi command's ends with the command, but a page that reloads or closes
+// while a repository is copied must not stop the copy, whose progress every page shows.
+func movingContext(request *http.Request) context.Context {
+	if commandRequest(request) {
+		return request.Context()
+	}
+	return context.WithoutCancel(request.Context())
+}
+
+// workerFolder returns the folder of a request about the repository that holds it: the folder that a gripi command
+// names, or the folder of a session of the browser's user.
 func (app *application) workerFolder(response http.ResponseWriter, request *http.Request) (string, bool) {
 	if !parseForm(response, request) {
 		return "", false
@@ -63,6 +84,14 @@ func (app *application) workerFolder(response http.ResponseWriter, request *http
 		return "", false
 	}
 	folder := request.FormValue("folder")
+	if !commandRequest(request) {
+		session := request.FormValue("session")
+		if !app.validOwnedSessionPath(request, session) || !app.knownOrPendingSession(request, session) {
+			writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": "no such session"})
+			return "", false
+		}
+		folder = app.currentSessionCWD(session)
+	}
 	if !filepath.IsAbs(folder) {
 		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "folder must be an absolute path"})
 		return "", false

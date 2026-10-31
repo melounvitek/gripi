@@ -138,7 +138,7 @@ func newGateway(cfg config.Config, connection remote.Options) (http.Handler, *re
 	if workers, err = newWorkers(cfg, piAdapter, handler, connection); err != nil {
 		return nil, nil, err
 	}
-	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(gatewayWorkers{workers, cfg.WorkersPath})
 	return handler, workers, nil
 }
 

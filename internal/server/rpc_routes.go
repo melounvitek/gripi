@@ -30,7 +30,8 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	}
 	after, _ := strconv.ParseInt(request.URL.Query().Get("after"), 10, 64)
 	batch := app.rpcClients.EventsAfter(path, after)
-	payload := map[string]any{"events": batch.Events, "last_seq": batch.LastSeq, "missed": batch.Missed, "sudo_requests": app.sudoRequests.of(path)}
+	location, notices := app.sessionWorker(path)
+	payload := map[string]any{"events": batch.Events, "last_seq": batch.LastSeq, "missed": batch.Missed, "sudo_requests": app.sudoRequests.of(path), "worker": location, "worker_notices": notices}
 	if app.sessionStore.Exists(path) {
 		state := app.guard.InspectIfAvailable(request.Context(), path, false)
 		if state != nil {

@@ -576,6 +576,13 @@ func TestLocationSaysWhichWorkerRunsAFolderOrIsGettingIt(t *testing.T) {
 	if _, found := manager.Location("/work/other"); found {
 		t.Fatal("a folder on main has a worker")
 	}
+	// The worker gets another repository, while it runs this one's sessions.
+	manager.mu.Lock()
+	manager.workers["beelink"] = &remote{name: "beelink", state: Copying, mirrors: map[string]*liveMirror{}}
+	manager.mu.Unlock()
+	if location, _ := manager.Location("/work/project"); location.State != Connected {
+		t.Fatalf("location of a placed folder while the worker gets another = %+v", location)
+	}
 
 	// A move connects to the worker before it copies, which fails in this test.
 	moving := t.TempDir()
