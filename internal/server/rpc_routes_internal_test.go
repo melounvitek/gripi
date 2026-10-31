@@ -1422,6 +1422,7 @@ type followUpRaceClient struct {
 }
 
 func (*followUpRaceClient) Close() error                               { return nil }
+func (*followUpRaceClient) Exited() bool                               { return false }
 func (*followUpRaceClient) Compacting() bool                           { return false }
 func (*followUpRaceClient) DeferringCompactionPrompts() bool           { return false }
 func (*followUpRaceClient) EventsAfter(int64) agent.EventBatch         { return agent.EventBatch{} }

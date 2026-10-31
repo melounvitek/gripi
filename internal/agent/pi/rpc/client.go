@@ -1263,6 +1263,17 @@ func (client *Client) ContinueEventsAfter(sequence int64) {
 	}
 	client.rebuildCoalescedPointersLocked()
 }
+
+// Exited reports whether Pi's output has ended, as it does when Pi exits, so that Pi can answer nothing more.
+func (client *Client) Exited() bool {
+	select {
+	case <-client.readerDone:
+		return true
+	default:
+		return false
+	}
+}
+
 func (client *Client) Busy() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()

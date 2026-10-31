@@ -21,6 +21,7 @@ type Client struct{ *rpc.Client }
 var (
 	_ agent.Client                   = (*Client)(nil)
 	_ agent.CompactionPromptDeferrer = (*Client)(nil)
+	_ agent.Exiter                   = (*Client)(nil)
 	_ agent.QueueRestorer            = (*Client)(nil)
 	_ agent.QueueClearer             = (*Client)(nil)
 	_ agent.InterruptStater          = (*Client)(nil)
