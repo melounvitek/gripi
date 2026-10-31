@@ -40,7 +40,7 @@ GRIPI_TEST_SSH=localhost go test ./internal/worker/ -run RealSSH -v
 
 `GRIPI_TEST_SSH` can name any worker that `ssh` reaches without a prompt and that has a systemd user manager. The tests install the helper in `GRIPI_TEST_SSH_DIR` there (`~/gripi-helper-test` by default) and remove it afterwards.
 
-An end-to-end test moves a repository with a worktree to a real worker and back, with a gateway whose Pi folder, state and projects all live in `/tmp/gripi-e2e`, which the worker gets at the same paths, and a scripted model, so no real model is called. It needs another machine, because the worker must not share main's files:
+An end-to-end test moves a repository with a worktree to a real worker and back, with a gateway whose Pi folder, state and projects all live in `/tmp/gripi-e2e`, which the worker gets at the same paths, and a scripted model, so no real model is called. On the way, it checks that main's copies of the sessions follow the worker's and outlive a gateway restart, that a file edited on main is saved aside, and that a worktree made on the worker runs its sessions there. It needs another machine, because the worker must not share main's files:
 
 ```sh
 GRIPI_TEST_WORKER=gripi@beelink.example.ts.net go test ./cmd/gripi -run RealWorker -v

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -95,9 +96,10 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stopGateway func()
+	var workers *remote.Manager
 	startGateway := func() {
 		t.Helper()
-		handler, workers, err := newGateway(cfg, remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run")})
+		handler, manager, err := newGateway(cfg, remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,13 +107,14 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		workers = manager
 		stopped := false
 		stopGateway = func() {
 			if !stopped {
 				stopped = true
 				local.Close()
 				handler.(interface{ Close(context.Context) error }).Close(context.Background())
-				workers.Close()
+				manager.Close()
 			}
 		}
 	}
@@ -126,6 +129,49 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		}
 		return stdout
 	}
+	// replies returns the assistant's replies in a session, as main's copy of the session's file has them.
+	replies := func(id string) []string {
+		t.Helper()
+		var conversation []map[string]string
+		if err := json.Unmarshal([]byte(cli("show", id, "--all", "--json")), &conversation); err != nil {
+			t.Fatal(err)
+		}
+		var replies []string
+		for _, message := range conversation {
+			if message["role"] == "assistant" {
+				replies = append(replies, message["text"])
+			}
+		}
+		return replies
+	}
+	// repliesSoon waits a moment for main's copy of a session on the worker to have count replies.
+	repliesSoon := func(id string, count int) []string {
+		t.Helper()
+		started := time.Now()
+		for {
+			if got := replies(id); len(got) >= count {
+				t.Logf("main had reply %d of %s %s after the turn ended", count, id, time.Since(started).Round(time.Millisecond))
+				return got
+			}
+			if time.Since(started) > 3*time.Second {
+				t.Fatalf("main's copy of %s has no reply %d", id, count)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	// noTakeOver fails when the guard of the sessions' files took the mirror for another program.
+	noTakeOver := func() {
+		t.Helper()
+		var listed []gateway.LocalSession
+		if err := json.Unmarshal([]byte(cli("list", "--json")), &listed); err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range listed {
+			if session.State == "external" || session.State == "conflict" {
+				t.Fatalf("session %s in %s is %s", session.ID, session.CWD, session.State)
+			}
+		}
+	}
 	session := decodeSession(t, cli("new", feature, "--json"))
 	cli("send", session.ID, "Hello from main")
 	cli("wait", session.ID, "--timeout", "60")
@@ -137,11 +183,26 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A new gateway connects to the worker once the session needs it.
+	// A session that starts on the worker has its file on main, which outlives the gateway.
+	fresh := decodeSession(t, cli("new", project, "--json"))
+	cli("send", fresh.ID, "Hello on the worker")
+	cli("wait", fresh.ID, "--timeout", "60")
+	repliesSoon(fresh.ID, 1)
+	// A new gateway connects to the worker once a session needs it.
 	stopGateway()
 	startGateway()
-	// gripi on the worker reaches main and sees the session.
-	commit := `echo written on the worker > worker.txt && git add worker.txt && git commit -qm "From the worker" && hostname && gripi list --json | grep -c '"id"'`
+	if got := replies(fresh.ID); !slices.Equal(got, []string{"plain reply"}) {
+		t.Fatalf("after a restart, the replies of the session that started on the worker are %q", got)
+	}
+
+	// Main's copy is read-only, so what changes there is saved aside before the worker's version replaces it. Git's
+	// index doesn't count, which a plain git status on main rewrites.
+	if err := os.WriteFile(filepath.Join(feature, "README"), []byte("edited on main\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(feature, "status", "--porcelain")
+	// gripi on the worker reaches main and sees the sessions there.
+	commit := `echo written on the worker > worker.txt && echo changed on the worker > README && git add -A && git commit -qm "From the worker" && hostname && gripi list --json | grep -c '"id"'`
 	started = time.Now()
 	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":`+quote(commit)+`}}],[{"name":"bash","arguments":{"command":"sleep 10"}}]]`)
 	// The tool result waits until main has the commit, so main has it while the next step still runs.
@@ -162,6 +223,34 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		t.Fatalf("the session is %s, not still working on its next step", state)
 	}
 	cli("wait", session.ID, "--timeout", "60")
+	if got := repliesSoon(session.ID, 2); !strings.Contains(got[1], `"isError":false,"text":"`+workerHost+`\n2\n"`) {
+		t.Fatalf("main's copy of the session has the reply %q", got[1])
+	}
+	notices := workers.Notices(feature)
+	if len(notices) != 1 || !slices.Equal(notices[0].Paths, []string{filepath.Join(feature, "README")}) {
+		t.Fatalf("notices = %+v", notices)
+	}
+	if saved, _ := os.ReadFile(filepath.Join(notices[0].Aside, feature, "README")); string(saved) != "edited on main\n" {
+		t.Fatalf("main's version saved aside = %q", saved)
+	}
+	if readme, _ := os.ReadFile(filepath.Join(feature, "README")); string(readme) != "changed on the worker\n" {
+		t.Fatalf("main's README = %q", readme)
+	}
+
+	// A worktree made on the worker runs its sessions there too.
+	second := filepath.Join(realWorkerRoot, "projects", "repo-second")
+	cli("send", fresh.ID, `RUN [[{"name":"bash","arguments":{"command":"git worktree add -q -b second ../repo-second"}}]]`)
+	cli("wait", fresh.ID, "--timeout", "60")
+	if _, err := os.Stat(filepath.Join(second, "README")); err != nil {
+		t.Fatalf("the worktree made on the worker: %v", err)
+	}
+	inSecond := decodeSession(t, cli("new", second, "--json"))
+	cli("send", inSecond.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
+	cli("wait", inSecond.ID, "--timeout", "60")
+	if got := repliesSoon(inSecond.ID, 1); !strings.Contains(got[0], `"text":"`+workerHost+`\n"`) {
+		t.Fatalf("the session in the new worktree replied %q", got[0])
+	}
+	noTakeOver()
 
 	started = time.Now()
 	cli("worker", "return", project)
@@ -169,19 +258,10 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && git log -1 --format=%s"}}]]`)
 	cli("wait", session.ID, "--timeout", "60")
 	localHost, _ := os.Hostname()
-	var conversation []map[string]string
-	if err := json.Unmarshal([]byte(cli("show", session.ID, "--all", "--json")), &conversation); err != nil {
-		t.Fatal(err)
+	if got := replies(session.ID); len(got) != 3 || !strings.Contains(got[2], localHost+`\nFrom the worker`) {
+		t.Fatalf("replies = %q", got)
 	}
-	var replies []string
-	for _, message := range conversation {
-		if message["role"] == "assistant" {
-			replies = append(replies, message["text"])
-		}
-	}
-	if len(replies) != 3 || !strings.Contains(replies[1], `"isError":false,"text":"`+workerHost+`\n1\n"`) || !strings.Contains(replies[2], localHost+`\nFrom the worker`) {
-		t.Fatalf("replies = %q", replies)
-	}
+	noTakeOver()
 
 	stopGateway()
 	if output, _ := onWorker("systemctl --user is-active gripi-e2e; pgrep -af " + realWorkerRoot); output != "inactive" {
