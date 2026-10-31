@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,11 +47,13 @@ func shortTempDir(t *testing.T) string {
 
 func newTestManager(t *testing.T, options ManagerOptions) *Manager {
 	t.Helper()
-	placements, err := LoadPlacements(filepath.Join(t.TempDir(), "worker-placements.json"))
-	if err != nil {
-		t.Fatal(err)
+	if options.Placements == nil {
+		placements, err := LoadPlacements(filepath.Join(t.TempDir(), "worker-placements.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.Placements = placements
 	}
-	options.Placements = placements
 	options.Destination = func(name string) (string, error) {
 		if name != "beelink" {
 			return "", fmt.Errorf("no worker is named %q", name)
@@ -189,5 +192,46 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	manager.Close()
 	if manager.State("beelink") != Disconnected || socketsStopped != 1 {
 		t.Fatalf("after Close: state %s, %d sockets stopped", manager.State("beelink"), socketsStopped)
+	}
+}
+
+func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker-placements.json")
+	placements, err := LoadPlacements(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, Placements: placements})
+	unit := mirror.Unit{Main: "/work/project", Worktrees: []string{"/work/project-old"}, GitDir: "/work/project/.git"}
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: unit}); err != nil {
+		t.Fatal(err)
+	}
+	// The worker's mirror sends the folders of the unit, which Git there may have changed.
+	manager.applied(unit, false)(mirror.Checkpoint{Roots: []string{"/work/project", "/work/project-new"}}, "/state/aside/main/3", []string{"/work/project/README"})
+	beelink := manager.Placement("beelink")
+	if !beelink.Folder("/work/project-new/src") || beelink.Folder("/work/project-old") {
+		t.Fatalf("placement after a worktree was added and one removed: %+v", manager.options.Placements.All())
+	}
+	reloaded, err := LoadPlacements(path)
+	if err != nil || !slices.Equal(reloaded.All()[0].Unit.Worktrees, []string{"/work/project-new"}) {
+		t.Fatalf("saved placements: %+v, %v", reloaded.All(), err)
+	}
+	// The mirror of the sessions' folders has folders of its own.
+	manager.applied(unit, true)(mirror.Checkpoint{Roots: []string{"/sessions/--work-project--"}}, "/state/aside/main/4", []string{"/sessions/--work-project--/s.jsonl"})
+	if beelink.Folder("/work/project-new") != true {
+		t.Fatal("the sessions' folders changed the placement")
+	}
+
+	notices := manager.Notices("/work/project-new")
+	if len(notices) != 2 || notices[0].Aside != "/state/aside/main/3" || !slices.Equal(notices[0].Paths, []string{"/work/project/README"}) ||
+		notices[1].Repository.Main != unit.Main || !slices.Equal(notices[1].Paths, []string{"/sessions/--work-project--/s.jsonl"}) {
+		t.Fatalf("notices = %+v", notices)
+	}
+	if other := manager.Notices("/work/other"); len(other) != 0 {
+		t.Fatalf("notices of another folder = %+v", other)
+	}
+	manager.DismissNotices("/work/project")
+	if notices := manager.Notices("/work/project"); len(notices) != 0 {
+		t.Fatalf("notices after dismissing = %+v", notices)
 	}
 }

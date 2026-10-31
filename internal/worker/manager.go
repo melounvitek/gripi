@@ -75,6 +75,17 @@ type Manager struct {
 	workers     map[string]*remote
 	movingUnits []mirror.Unit       // units on their way to or from a worker, whose sessions can't start meanwhile
 	sessions    map[string]launched // by the session's ID on its worker
+	notices     []Notice
+}
+
+// Notice says that files of a repository on a worker, or of its sessions, changed on this machine, which keeps a
+// read-only copy of them: before the worker's versions replaced them, this machine's were saved in Aside, at their
+// paths.
+type Notice struct {
+	Repository mirror.Unit `json:"repository"`
+	Aside      string      `json:"aside"`
+	Paths      []string    `json:"paths"`
+	Time       time.Time   `json:"time"`
 }
 
 // remote is main's side of one worker. The manager's mutex guards it, except connecting.
@@ -112,6 +123,26 @@ func (live *liveMirror) running() bool {
 func NewManager(options ManagerOptions) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{options: options, ctx: ctx, cancel: cancel, workers: map[string]*remote{}, sessions: map[string]launched{}}
+}
+
+// Notices returns the notices of the repository that holds folder, oldest first, until DismissNotices.
+func (manager *Manager) Notices(folder string) []Notice {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	var notices []Notice
+	for _, notice := range manager.notices {
+		if notice.Repository.Contains(folder) {
+			notices = append(notices, notice)
+		}
+	}
+	return notices
+}
+
+// DismissNotices forgets the notices of the repository that holds folder. The files saved aside stay.
+func (manager *Manager) DismissNotices(folder string) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	manager.notices = slices.DeleteFunc(manager.notices, func(notice Notice) bool { return notice.Repository.Contains(folder) })
 }
 
 // State reports the connection to the worker of a name.
@@ -335,6 +366,7 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 			}
 		}
 	}
+	destination.Applied = manager.applied(repository, sessions)
 	if err := conn.StartMirror(ctx, unit, sessions); err != nil {
 		return err
 	}
@@ -377,6 +409,38 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 		}
 	}()
 	return nil
+}
+
+// applied takes what main's copy of a placed unit, or with sessions of the unit's sessions' folders, applied: files
+// that changed on main make a notice, and the unit's folders, which Git on the worker may have changed, are its
+// placement's from then on.
+func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirror.Checkpoint, string, []string) {
+	return func(checkpoint mirror.Checkpoint, aside string, saved []string) {
+		placement, placed := manager.options.Placements.Find(repository.Main)
+		placed = placed && placement.Unit.Main == repository.Main
+		if placed && !sessions {
+			worktrees := slices.DeleteFunc(slices.Clone(checkpoint.Roots), func(root string) bool {
+				return root == placement.Unit.Main || root == placement.Unit.GitDir
+			})
+			if !slices.Equal(slices.Sorted(slices.Values(worktrees)), slices.Sorted(slices.Values(placement.Unit.Worktrees))) {
+				placement.Unit.Worktrees = worktrees
+				if err := manager.options.Placements.Update(placement); err != nil {
+					log.Printf("note the worktrees of %s on worker %s: %v", repository.Main, placement.Worker, err)
+				}
+			}
+		}
+		if len(saved) == 0 {
+			return
+		}
+		unit := repository
+		if placed {
+			unit = placement.Unit
+		}
+		log.Printf("%d files of %s changed on this machine, which keeps a read-only copy; this machine's versions are in %s", len(saved), unit.Main, aside)
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		manager.notices = append(manager.notices, Notice{Repository: unit, Aside: aside, Paths: saved, Time: time.Now()})
+	}
 }
 
 // waitForMirror returns once main's copy of a unit has taken a barrier that started after since.

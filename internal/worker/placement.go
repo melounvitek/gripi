@@ -67,6 +67,20 @@ func (placements *Placements) Add(placement Placement) error {
 	return placements.save(append(slices.Clone(placements.list), placement))
 }
 
+// Update replaces the placement of the unit with the same main folder.
+func (placements *Placements) Update(placement Placement) error {
+	placements.mu.Lock()
+	defer placements.mu.Unlock()
+	list := slices.Clone(placements.list)
+	for i, existing := range list {
+		if existing.Unit.Main == placement.Unit.Main {
+			list[i] = placement
+			return placements.save(list)
+		}
+	}
+	return fmt.Errorf("%s is on no worker", placement.Unit.Main)
+}
+
 // Remove forgets the placement of the unit whose main folder is main.
 func (placements *Placements) Remove(main string) error {
 	placements.mu.Lock()
