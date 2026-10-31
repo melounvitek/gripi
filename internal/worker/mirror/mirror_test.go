@@ -404,6 +404,28 @@ func TestBarrierReportsFilesStillBeingWritten(t *testing.T) {
 	r.verify(t)
 }
 
+func TestAutoBarrierAppliesChangesWithoutBeingAsked(t *testing.T) {
+	folder := t.TempDir()
+	r := newRigWith(t, Unit{Main: folder}, func(s *Source) { s.opts.AutoBarrier = true })
+	first := r.d.Checkpoint().Barrier
+	started := time.Now()
+	writeFile(t, folder, "session.jsonl", "{\"id\":\"1\"}\n")
+	waitFor(t, "main to have the file", func() bool {
+		data, _ := os.ReadFile(r.dst + filepath.Join(folder, "session.jsonl"))
+		return string(data) == "{\"id\":\"1\"}\n"
+	})
+	t.Logf("applied after %s", time.Since(started).Round(time.Millisecond))
+	if r.d.Checkpoint().Barrier == first {
+		t.Fatal("no barrier applied the change")
+	}
+	time.Sleep(200 * time.Millisecond)
+	settled := r.d.Checkpoint().Barrier
+	time.Sleep(300 * time.Millisecond)
+	if last := r.d.Checkpoint().Barrier; last != settled {
+		t.Fatalf("barriers %d to %d followed without changes", settled, last)
+	}
+}
+
 func TestSyncCopiesTheUnitOnce(t *testing.T) {
 	unit := newRepo(t)
 	dst := t.TempDir()

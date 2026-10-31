@@ -41,6 +41,7 @@ type sender struct {
 	sent       map[string]entry
 	dirty      map[string]bool // path → still being written
 	firstDirty time.Time
+	marked     uint64            // changes seen so far
 	objDels    map[string]uint64 // object files gone before the barrier with this number
 	next       uint64            // the next barrier's number
 	writing    []string          // files left out of the current barrier
@@ -201,6 +202,7 @@ func (s *sender) mark(p string, writing bool) {
 		s.firstDirty = time.Now()
 	}
 	s.dirty[p] = writing
+	s.marked++
 }
 
 func entryOf(p string, info fs.FileInfo) entry {

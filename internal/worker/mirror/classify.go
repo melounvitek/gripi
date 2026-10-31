@@ -25,6 +25,9 @@ type Options struct {
 	// does the same with every link below a followed one. Links within the unit, links to nothing and links to a
 	// folder above them stay links. Only Sync supports it.
 	Dereference bool
+	// AutoBarrier makes a Source take a barrier by itself shortly after changes, so that the destination follows
+	// without being asked, as main follows Pi's session files.
+	AutoBarrier bool
 }
 
 // includesBelow reports whether a pattern can match something inside the folder rel.

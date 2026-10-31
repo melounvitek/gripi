@@ -55,6 +55,8 @@ type Source struct {
 	ignChanged   bool
 	indexes      map[string]string // index file → its worktree
 	indexChanged map[string]bool   // worktrees
+	barriered    uint64            // the changes seen before the last barrier
+	unbarriered  time.Time         // when AutoBarrier first saw changes after it
 }
 
 type rawEvent struct {
@@ -194,8 +196,20 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) error {
 				return err
 			}
 		case <-tick.C:
+			quiet := time.Since(lastEvent) > 50*time.Millisecond
+			if s.opts.AutoBarrier && s.marked != s.barriered {
+				if s.unbarriered.IsZero() {
+					s.unbarriered = time.Now()
+				}
+				if quiet || time.Since(s.unbarriered) > 500*time.Millisecond {
+					if err := s.runBarrier(nil); err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			// Send early, when quiet for a moment or soon after the first change, so barriers are quick.
-			if len(s.dirty) > 0 && (time.Since(lastEvent) > 50*time.Millisecond || time.Since(s.firstDirty) > 500*time.Millisecond) {
+			if len(s.dirty) > 0 && (quiet || time.Since(s.firstDirty) > 500*time.Millisecond) {
 				if err := s.flush(false, nil); err != nil {
 					return err
 				}
@@ -229,6 +243,7 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 	if err := s.flush(true, s.inWorktree); err != nil {
 		return err
 	}
+	s.barriered, s.unbarriered = s.marked, time.Time{}
 	n := s.next
 	s.next++
 	slices.Sort(s.writing)
