@@ -20,7 +20,8 @@ import (
 )
 
 // fakeSSHScript stands in for ssh. It records its arguments, then fails as ssh does with FAKE_SSH_ERROR, answers
-// FAKE_SSH_ANSWER, or runs the remote command on this machine with FAKE_SSH_HOME as its home.
+// FAKE_SSH_ANSWER, or runs the remote command on this machine with FAKE_SSH_HOME as its home. Like another machine,
+// it doesn't see the files that main leaves to find a worker that shares its files, unless FAKE_SSH_SHARED is set.
 const fakeSSHScript = `#!/bin/sh
 printf '%s\n' "$@" > "$FAKE_SSH_ARGUMENTS"
 if [ -n "$FAKE_SSH_ERROR" ]; then
@@ -32,6 +33,7 @@ if [ -n "$FAKE_SSH_ANSWER" ]; then
 	exit 0
 fi
 for command; do :; done
+case $command in *.gripi-worker-check-*) [ -n "$FAKE_SSH_SHARED" ] || command=$(printf '%s\n' "$command" | sed 's/\.gripi-worker-check-/.gripi-worker-elsewhere-/g') ;; esac
 HOME=$FAKE_SSH_HOME exec sh -c "$command"
 `
 
@@ -56,6 +58,7 @@ func fakeSSH(t *testing.T) (arguments string) {
 	t.Setenv("PI_CODING_AGENT_DIR", "")
 	t.Setenv("FAKE_SSH_ERROR", "")
 	t.Setenv("FAKE_SSH_ANSWER", "")
+	t.Setenv("FAKE_SSH_SHARED", "")
 	arguments = filepath.Join(directory, "arguments")
 	t.Setenv("FAKE_SSH_ARGUMENTS", arguments)
 	return arguments
@@ -232,6 +235,23 @@ func TestWorkerAddChecksThatTheWorkerCanWriteToPisAgentFolder(t *testing.T) {
 		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	assertNoWorkersFile(t)
+}
+
+// A worker that is this machine as the same user, or that mounts its home folder, would get main's own files instead
+// of copies, such as Pi's logins.
+func TestWorkerAddRefusesAWorkerThatSharesThisMachinesFiles(t *testing.T) {
+	fakeSSH(t)
+	t.Setenv("FAKE_SSH_SHARED", "1")
+	agentDir := filepath.Join(os.Getenv("HOME"), ".pi", "agent")
+
+	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "shares this machine's "+agentDir) {
+		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	assertNoWorkersFile(t)
+	if left, _ := filepath.Glob(filepath.Join(agentDir, ".gripi-worker-check-*")); len(left) != 0 {
+		t.Fatalf("left in Pi's folder: %q", left)
+	}
 }
 
 func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {

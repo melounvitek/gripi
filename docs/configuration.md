@@ -310,7 +310,7 @@ Then add the worker on main:
 gripi worker add gripi@beelink.example.ts.net
 ```
 
-`add` checks the system, Git and systemd, and fails when the worker’s user cannot create Pi’s agent folder at its path on main. When only the home folder differs, it warns and prints the `usermod` command, because projects can also be created at the same paths by hand. The worker is named after the first part of the host name, `beelink` here, unless `--name` names it. `gripi worker list` lists the workers.
+`add` checks the system, Git and systemd, and fails when the worker’s user cannot create Pi’s agent folder at its path on main, or when the worker shares main’s files, as main itself or a home folder mounted on both would: the worker’s files would replace main’s, such as Pi’s logins. Main checks that again whenever it connects. When only the home folder differs, it warns and prints the `usermod` command, because projects can also be created at the same paths by hand. The worker is named after the first part of the host name, `beelink` here, unless `--name` names it. `gripi worker list` lists the workers.
 
 ### What a worker gets
 

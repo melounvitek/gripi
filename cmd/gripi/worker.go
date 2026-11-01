@@ -50,9 +50,10 @@ systemd user manager with cgroup v2, which lets Gripi stop everything a
 session started.
 Sessions use the same paths on the worker as here, so add fails when the
 worker's user cannot create Pi's folder (~/.pi/agent) at its path here, and
-warns when the worker's home folder has another path. The worker will hold a
-full copy of Pi's configuration, including logins; keeping it secure is up to
-you.
+warns when the worker's home folder has another path. It also fails when the
+worker shares this machine's files, as this machine itself or a home folder
+mounted on both would. The worker will hold a full copy of Pi's
+configuration, including logins; keeping it secure is up to you.
 
 list prints each worker's name and SSH destination.
 
@@ -215,6 +216,13 @@ The home folder of %s there is %s, but here it is %s. Move it by running
 this on the worker as an administrator, while %s is logged out:
   sudo usermod -m -d %s %s`, err, user, home, cfg.Home, user, cfg.Home, user)
 		}
+		return failure(stderr, "worker", err)
+	}
+	if err := remote.CheckSeparate(destination, func(script string, arguments ...string) (string, error) {
+		remoteCommand := remote.ShellQuote(append([]string{"sh", "-c", script, "sh"}, arguments...)...)
+		output, err := exec.Command("ssh", "-o", "BatchMode=yes", "--", destination, remoteCommand).Output()
+		return string(output), err
+	}, cfg.PiAgentDir, filepath.Dir(cfg.SocketPath)); err != nil {
 		return failure(stderr, "worker", err)
 	}
 	if home != cfg.Home {

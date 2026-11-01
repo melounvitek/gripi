@@ -384,6 +384,15 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 		manager.setState(worker, Disconnected)
 		return err
 	}
+	socketDir := ""
+	if manager.options.SocketPath != "" {
+		socketDir = filepath.Dir(manager.options.SocketPath)
+	}
+	if err := CheckSeparate(options.Destination, func(script string, arguments ...string) (string, error) {
+		return runScript(ctx, conn.Pool, nil, script, arguments...)
+	}, manager.options.Pi.AgentDir, socketDir); err != nil {
+		return fail(err)
+	}
 	installation, err := conn.Bootstrap(ctx, manager.options.Pi)
 	if err != nil {
 		return fail(err)

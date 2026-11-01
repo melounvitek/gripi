@@ -141,9 +141,10 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	unitName := make([]byte, 6)
 	rand.Read(unitName)
 	var socketsStopped int
+	socket := filepath.Join(t.TempDir(), "gripi.sock")
 	manager := newTestManager(t, ManagerOptions{
 		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
-		SocketPath: "/run/gripi.sock", Store: fakeStore{sessions: map[string]string{key: project}}, SessionsRoot: sessions,
+		SocketPath: socket, Store: fakeStore{sessions: map[string]string{key: project}}, SessionsRoot: sessions,
 		ServeSocket: func(name string, placement WorkerPlacement) (string, func() error, error) {
 			if name != "beelink" || !placement.Folder(project) {
 				t.Errorf("socket for %s, whose placement has %s: %v", name, project, placement.Folder(project))
@@ -179,10 +180,10 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	if args, _ := output.ReadString('\n'); args != fmt.Sprintf("args=--approve --mode rpc --extension %s --session %s --extension %s\n", tree, key, manager.options.WorkerExtension) {
 		t.Fatalf("Pi on the worker got %q", args)
 	}
-	if environment, _ := output.ReadString('\n'); environment != fmt.Sprintf("cwd=%s socket=set gripi=/run/gripi.sock agent=%s saved=1\n", project, rig.pi.AgentDir) {
+	if environment, _ := output.ReadString('\n'); environment != fmt.Sprintf("cwd=%s socket=set gripi=%s agent=%s saved=1\n", project, socket, rig.pi.AgentDir) {
 		t.Fatalf("Pi on the worker says %q", environment)
 	}
-	// The worker and main share this machine's files here, so the worker's logins replaced main's.
+	// The fake worker shares this machine's files, though it hides that, so the worker's logins replaced main's.
 	if logins, _ := os.ReadFile(filepath.Join(rig.pi.AgentDir, "auth.json")); !strings.Contains(string(logins), "gripi:refresh-on-main") {
 		t.Fatalf("the worker's auth.json = %s", logins)
 	}
@@ -199,6 +200,58 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	manager.Close()
 	if status := manager.Status("beelink"); status != (Status{State: Disconnected}) || socketsStopped != 1 {
 		t.Fatalf("after Close: status %+v, %d sockets stopped", status, socketsStopped)
+	}
+}
+
+// A worker that is this machine as the same user, or that mounts its home folder, would get main's own files instead
+// of copies: the worker's logins would replace main's, and the worker's gripi socket main's.
+func TestMainRefusesAWorkerThatSharesItsFiles(t *testing.T) {
+	requireSystemd(t)
+	rig := newBootstrapRig(t)
+	t.Setenv("FAKE_SSH_SHARED", "1")
+	logins := `{"anthropic":{"type":"oauth","access":"a","refresh":"main's","expires":1}}`
+	writeTestFile(t, filepath.Join(rig.pi.AgentDir, "auth.json"), logins, 0600)
+	socket := filepath.Join(shortTempDir(t), "gripi.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	project := t.TempDir()
+	gripi, _ := buildExecutables(t)
+	unitName := make([]byte, 6)
+	rand.Read(unitName)
+	manager := newTestManager(t, ManagerOptions{
+		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
+		SocketPath: socket, Store: fakeStore{}, SessionsRoot: t.TempDir(),
+		ServeSocket: func(string, WorkerPlacement) (string, func() error, error) {
+			t.Error("the worker got a gripi socket")
+			return "", nil, errors.New("no socket in this test")
+		},
+		Connection: Options{Executable: gripi, InstallDir: "gripi-worker", Unit: "gripi-test-" + hex.EncodeToString(unitName), RuntimeDir: shortTempDir(t)},
+	})
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = manager.Launch(agent.Process{Dir: project, Command: []string{"pi", "--mode", "rpc"}})
+	if err == nil || !strings.Contains(err.Error(), "shares") || !strings.Contains(err.Error(), rig.pi.AgentDir) {
+		t.Fatalf("Launch on a worker that shares main's files = %v", err)
+	}
+	if contents, _ := os.ReadFile(filepath.Join(rig.pi.AgentDir, "auth.json")); string(contents) != logins {
+		t.Fatalf("main's auth.json = %s", contents)
+	}
+	if _, err := os.Stat(socket); err != nil {
+		t.Fatalf("main's gripi socket: %v", err)
+	}
+	if copies := sshCalls(t, "receive"); len(copies) != 0 {
+		t.Fatalf("copies to the worker: %q", copies)
+	}
+	if markers, _ := filepath.Glob(filepath.Join(rig.pi.AgentDir, ".gripi-worker-check-*")); len(markers) != 0 {
+		t.Fatalf("left in Pi's folder: %q", markers)
+	}
+	if status := manager.Status("beelink"); status.State != Disconnected {
+		t.Fatalf("status = %+v", status)
 	}
 }
 
@@ -458,7 +511,7 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	var socketsStarted, socketsStopped atomic.Int32
 	manager := newTestManager(t, ManagerOptions{
 		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
-		SocketPath: "/run/gripi.sock", Store: fakeStore{sessions: map[string]string{key: project}}, SessionsRoot: sessions,
+		SocketPath: filepath.Join(t.TempDir(), "gripi.sock"), Store: fakeStore{sessions: map[string]string{key: project}}, SessionsRoot: sessions,
 		ServeSocket: func(string, WorkerPlacement) (string, func() error, error) {
 			socketsStarted.Add(1)
 			return filepath.Join(t.TempDir(), "beelink.sock"), func() error { socketsStopped.Add(1); return nil }, nil

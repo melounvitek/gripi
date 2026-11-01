@@ -17,7 +17,8 @@ import (
 
 // fakeSSHScript stands in for ssh. It logs its arguments, keeps a master running for -M, answers -O check, accepts
 // other -O operations, and runs remote commands on this machine, in FAKE_SSH_HOME. Like sshd, it refuses to forward
-// a socket over a file that exists.
+// a socket over a file that exists. Like another machine, it doesn't see the files that main leaves to find a worker
+// that shares its files, unless FAKE_SSH_SHARED is set.
 const fakeSSHScript = `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
 socket= operation= master= remote=
@@ -39,7 +40,10 @@ fi
 case $operation in
 check) exec kill -0 "$(cat "$socket")" 2>/dev/null ;;
 forward) case $remote in /*) [ ! -e "${remote%%:*}" ] || { echo "remote port forwarding failed for listen path ${remote%%:*}" >&2; exit 255; } ;; esac ;;
-'') cd "$FAKE_SSH_HOME" && HOME=$FAKE_SSH_HOME exec sh -c "$*" ;;
+'')
+	command=$*
+	case $command in *.gripi-worker-check-*) [ -n "$FAKE_SSH_SHARED" ] || command=$(printf '%s\n' "$command" | sed 's/\.gripi-worker-check-/.gripi-worker-elsewhere-/g') ;; esac
+	cd "$FAKE_SSH_HOME" && HOME=$FAKE_SSH_HOME exec sh -c "$command" ;;
 esac
 `
 
@@ -54,6 +58,7 @@ func fakeSSH(t *testing.T) (home string) {
 	t.Setenv("FAKE_SSH_LOG", filepath.Join(directory, "log"))
 	home = t.TempDir()
 	t.Setenv("FAKE_SSH_HOME", home)
+	t.Setenv("FAKE_SSH_SHARED", "")
 	return home
 }
 
