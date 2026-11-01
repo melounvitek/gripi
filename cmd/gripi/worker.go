@@ -174,6 +174,8 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return receiveWorker(arguments[1:], stdin, stdout, stderr)
 	case "mirror":
 		return mirrorWorker(arguments[1:], stdin, stdout, stderr)
+	case "move-host":
+		return hostMove(arguments[1:], stdin, stdout, stderr)
 	case "enter":
 		return enterWorker(arguments[1:], stdin, stdout, stderr)
 	}

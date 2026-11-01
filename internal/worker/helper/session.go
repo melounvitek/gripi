@@ -20,6 +20,7 @@ import (
 type session struct {
 	cgroup    string
 	cwd       string         // Pi's folder, which tells the unit whose mirror answers its barriers
+	move      string         // the move that the session runs in, if any
 	listeners []net.Listener // the attach and extension sockets
 
 	// While Pi runs:
@@ -30,11 +31,12 @@ type session struct {
 	attached bool
 }
 
-var validSession = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+var validID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-func checkSession(id string) error {
-	if !validSession.MatchString(id) {
-		return fmt.Errorf("session %q is not 1 to 64 letters, digits, '-' or '_'", id)
+// checkID checks the ID of a session or a move.
+func checkID(kind, id string) error {
+	if !validID.MatchString(id) {
+		return fmt.Errorf("%s %q is not 1 to 64 letters, digits, '-' or '_'", kind, id)
 	}
 	return nil
 }
@@ -46,10 +48,11 @@ const closeTimeout = 5 * time.Second
 const releaseTimeout = 5 * time.Second
 
 // create starts Pi for a session, in the session's cgroup, with the helper's environment, request.Env, the helper's
-// DOCKER_HOST if it serves one, and GRIPI_WORKER_SOCKET.
-func (s *server) create(request Message) error {
+// DOCKER_HOST if it serves one, and GRIPI_WORKER_SOCKET. With inMove, it starts Pi in the move's view, with the
+// move's DOCKER_HOST.
+func (s *server) create(request Message, inMove *move) error {
 	id := request.Session
-	if err := checkSession(id); err != nil {
+	if err := checkID("session", id); err != nil {
 		return err
 	}
 	if len(request.Args) == 0 {
@@ -77,6 +80,9 @@ func (s *server) create(request Message) error {
 			}
 			current.listeners = append(current.listeners, listener)
 		}
+		if inMove != nil {
+			current.move = inMove.id
+		}
 		s.sessions[id] = current
 		go s.serveAttach(current, current.listeners[0])
 		go s.serveExtension(id, current.listeners[1])
@@ -84,15 +90,27 @@ func (s *server) create(request Message) error {
 	if current.pi != nil {
 		return fmt.Errorf("Pi already runs for session %s", id)
 	}
+	if inMove == nil && current.move != "" || inMove != nil && current.move != inMove.id {
+		return fmt.Errorf("session %s runs in another move", id)
+	}
 	current.cwd = request.Cwd
 
 	environment := append(append(os.Environ(), request.Env...), "GRIPI_WORKER_SOCKET="+current.listeners[1].Addr().String())
-	if s.docker != "" {
+	switch {
+	case inMove != nil:
+		environment = append(environment, "DOCKER_HOST=unix://"+filepath.Join(s.options.RuntimeDir, inMove.id+".docker.sock"))
+	case s.docker != "":
 		environment = append(environment, "DOCKER_HOST="+s.docker)
 	}
 	path, err := lookPath(request.Args[0], environment)
 	if err != nil {
 		return err
+	}
+	pi := &exec.Cmd{Path: path, Args: request.Args, Env: environment, Dir: request.Cwd}
+	if inMove != nil {
+		if pi, err = s.view(inMove).Command(request.Cwd, append([]string{path}, request.Args[1:]...), environment); err != nil {
+			return err
+		}
 	}
 	stdinReader, stdin, err := os.Pipe()
 	if err != nil {
@@ -104,7 +122,7 @@ func (s *server) create(request Message) error {
 		stdin.Close()
 		return err
 	}
-	pi := &exec.Cmd{Path: path, Args: request.Args, Env: environment, Dir: request.Cwd, Stdin: stdinReader, Stdout: stdoutWriter}
+	pi.Stdin, pi.Stdout = stdinReader, stdoutWriter
 	err = startInCgroup(pi, current.cgroup)
 	stdinReader.Close()
 	stdoutWriter.Close()
@@ -159,8 +177,15 @@ func (s *server) close(id string) error {
 
 // release kills every process of the sessions and forgets them. It waits at most timeout for the processes to die.
 func (s *server) release(timeout time.Duration, ids ...string) error {
-	var cgroups []string
 	s.mu.Lock()
+	cgroups := s.forget(ids...)
+	s.mu.Unlock()
+	return killCgroups(timeout, cgroups...)
+}
+
+// forget forgets the sessions, with s.mu held, and returns their cgroups.
+func (s *server) forget(ids ...string) []string {
+	var cgroups []string
 	for _, id := range ids {
 		if current := s.sessions[id]; current != nil {
 			delete(s.sessions, id)
@@ -168,8 +193,7 @@ func (s *server) release(timeout time.Duration, ids ...string) error {
 			cgroups = append(cgroups, current.cgroup)
 		}
 	}
-	s.mu.Unlock()
-	return killCgroups(timeout, cgroups...)
+	return cgroups
 }
 
 func (s *server) signalPis(signal syscall.Signal) {
@@ -273,7 +297,7 @@ func passOutput(connection net.Conn, stdout *os.File, exited <-chan struct{}) {
 // Attach passes stdin and stdout through to the Pi of a session, as `gripi worker attach` does, if the helper that
 // runs it is instance. It returns when Pi's output ends.
 func Attach(runtimeDir, id, instance string, stdin io.Reader, stdout io.Writer) error {
-	if err := checkSession(id); err != nil {
+	if err := checkID("session", id); err != nil {
 		return err
 	}
 	return pass(filepath.Join(runtimeDir, id+".attach"), Message{Instance: instance}, stdin, stdout)

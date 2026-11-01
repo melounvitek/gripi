@@ -31,20 +31,36 @@ func (s *server) serveReceives(ctx context.Context, listener net.Listener) {
 }
 
 // receive makes the folder hello.To a copy of main's folder hello.Path, which main sends with mirror.Sync over the
-// connection. While it runs, it keeps the copy's state next to the copy, on the same file system.
+// connection: with hello.Move, the move's copy, and with hello.File, main's file at the same path, leaving the other
+// files in its folder as they are. While it runs, it keeps the copy's state next to the copy, on the same file system.
 func (s *server) receive(ctx context.Context, connection net.Conn) {
 	defer connection.Close()
 	hello, reader, err := readHello(connection)
 	if err != nil {
 		return
 	}
-	state := filepath.Join(filepath.Dir(hello.To), "."+filepath.Base(hello.To)+".gripi-receive")
 	var destination *mirror.Destination
+	var state string
 	if hello.Instance != s.instance {
 		err = fmt.Errorf("the helper on the worker is %s, not %s", s.instance, hello.Instance)
 	} else {
-		defer os.RemoveAll(state)
-		destination, err = newCopy(state, hello.Path, hello.To, hello.Aside != "")
+		from, to := hello.Path, hello.To
+		switch {
+		case hello.Move != "":
+			if _, err = s.move(hello.Move); err == nil {
+				to = s.copyFolder(hello.Move)
+			}
+		case hello.File != "":
+			from, to = hello.File, hello.File
+		}
+		state = filepath.Join(filepath.Dir(to), "."+filepath.Base(to)+".gripi-receive")
+		if err == nil {
+			defer os.RemoveAll(state)
+			destination, err = newCopy(state, from, to, hello.Aside != "")
+		}
+		if err == nil {
+			destination.File = hello.File
+		}
 	}
 	if !replyHello(connection, err) {
 		return
@@ -91,4 +107,16 @@ func newCopy(state, from, to string, saveAside bool) (*mirror.Destination, error
 // or deletes goes there first, at main's paths.
 func AttachReceive(runtimeDir, from, to, aside, instance string, stdin io.Reader, stdout io.Writer) error {
 	return pass(filepath.Join(runtimeDir, receiveSocket), Message{Instance: instance, Path: from, To: to, Aside: aside}, stdin, stdout)
+}
+
+// AttachReceiveMove is AttachReceive into the copy of a move, which main's folder from, its shadow of its home
+// folder, fills as it is.
+func AttachReceiveMove(runtimeDir, move, from, instance string, stdin io.Reader, stdout io.Writer) error {
+	return pass(filepath.Join(runtimeDir, receiveSocket), Message{Instance: instance, Path: from, Move: move}, stdin, stdout)
+}
+
+// AttachReceiveFile is AttachReceive of main's file at the same path, such as a session's, which needn't exist, and
+// whose folder's other files stay as they are.
+func AttachReceiveFile(runtimeDir, file, instance string, stdin io.Reader, stdout io.Writer) error {
+	return pass(filepath.Join(runtimeDir, receiveSocket), Message{Instance: instance, File: file}, stdin, stdout)
 }
