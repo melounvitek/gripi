@@ -844,12 +844,10 @@ func (manager *Manager) claim(main string, roots, sessionFolders []string, keep 
 		if folder, found := shared(roots, append(ownedRoots, unitFolders(owner.unit)...)); found {
 			return refuse("%s and %s, which is %s, would share %s", main, owner.unit.Main, owner.where, folder)
 		}
-		ownedFolders, err := manager.covered(manager.sessionsMain(owner.unit))
+		ownedFolders, err := manager.ownedSessionFolders(owner.unit, owner.worker)
 		if err != nil {
 			return err
 		}
-		folders, _ := manager.sessionFolders(owner.unit, owner.worker)
-		ownedFolders = append(ownedFolders, folders...)
 		for _, folder := range sessionFolders {
 			if slices.Contains(ownedFolders, folder) {
 				return refuse("%s and %s, which is %s, would share Pi's session folder %s", main, owner.unit.Main, owner.where, folder)
@@ -864,6 +862,16 @@ func (manager *Manager) claim(main string, roots, sessionFolders []string, keep 
 		manager.accepted[sessions] = append(manager.accepted[sessions], sessionFolders...)
 	}
 	return nil
+}
+
+// ownedSessionFolders returns the session folders that a unit on the worker of a name, or moving, owns (see claim).
+func (manager *Manager) ownedSessionFolders(unit mirror.Unit, worker string) ([]string, error) {
+	owned, err := manager.covered(manager.sessionsMain(unit))
+	if err != nil {
+		return nil, err
+	}
+	folders, _ := manager.sessionFolders(unit, worker)
+	return append(owned, folders...), nil
 }
 
 // foreignSessions refuses session folders that a unit's mirror would add while this machine has sessions of another
@@ -1245,15 +1253,22 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 		}
 	}
 	// The worker's copies of sessions that are no longer the unit's, which its mirror leaves alone, go aside there,
-	// unless they are another unit's there.
+	// unless they are another unit's there, which a later move keeps aside once that unit has left the worker.
 	var others []string
 	for _, cwd := range copies[worker.name].SessionCwds {
 		if manager.owns(unit, cwd) {
 			continue
 		}
-		others = append(others, cwd)
 		folder := sessionFolder(manager.options.SessionsRoot, cwd)
-		if slices.Contains(folders, folder) || manager.heldOn(worker.name, unit, cwd) {
+		owned, err := manager.ownedOn(worker.name, unit, folder)
+		if err != nil {
+			return err
+		}
+		if owned {
+			continue
+		}
+		others = append(others, cwd)
+		if slices.Contains(folders, folder) {
 			continue
 		}
 		aside := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".gripi-aside", now, folder)
@@ -1447,18 +1462,35 @@ func (manager *Manager) owns(unit mirror.Unit, cwd string) bool {
 	})
 }
 
-// heldOn reports whether a unit other than unit that is on the worker of a name, or on its way there, holds cwd, so
-// that the worker's copies of the sessions that started in cwd are that unit's.
-func (manager *Manager) heldOn(name string, unit mirror.Unit, cwd string) bool {
-	holds := func(worker string, other mirror.Unit) bool {
-		return worker == name && other.Main != unit.Main && other.Contains(cwd)
-	}
-	if slices.ContainsFunc(manager.options.Placements.All(), func(placement Placement) bool { return holds(placement.Worker, placement.Unit) }) {
-		return true
+// ownedOn reports whether a unit other than unit that is on the worker of a name, or on its way there, owns a session
+// folder, so that the worker's copy of the folder is that unit's.
+func (manager *Manager) ownedOn(name string, unit mirror.Unit, folder string) (bool, error) {
+	var others []mirror.Unit
+	for _, placement := range manager.options.Placements.All() {
+		if placement.Worker == name {
+			others = append(others, placement.Unit)
+		}
 	}
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	return slices.ContainsFunc(manager.copying, func(copying copying) bool { return holds(copying.worker, copying.unit) })
+	for _, copying := range manager.copying {
+		if copying.worker == name {
+			others = append(others, copying.unit)
+		}
+	}
+	manager.mu.Unlock()
+	for _, other := range others {
+		if other.Main == unit.Main {
+			continue
+		}
+		owned, err := manager.ownedSessionFolders(other, name)
+		if err != nil {
+			return false, err
+		}
+		if slices.Contains(owned, folder) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // goneAt is when the worker of a name must have stopped the sessions of every connection that main lost, including

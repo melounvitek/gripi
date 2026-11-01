@@ -848,8 +848,8 @@ func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
 }
 
 // The sessions that started in a folder of a repository are another's once a worktree of another repository on a
-// worker is there, and the worker's copies of them are another's while that repository is on the worker or on its way
-// there.
+// worker is there, and the worker's copy of a session folder is another's while that repository owns the folder and is
+// on the worker or on its way there.
 func TestTheSessionFoldersOfAWorktreeOfAnotherRepositoryOnAWorkerAreItsOwn(t *testing.T) {
 	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: t.TempDir(), SessionsRoot: "/sessions"})
 	project := mirror.Unit{Main: "/work/project"}
@@ -864,13 +864,21 @@ func TestTheSessionFoldersOfAWorktreeOfAnotherRepositoryOnAWorkerAreItsOwn(t *te
 	}
 
 	manager.copying = append(manager.copying, copying{unit: mirror.Unit{Main: "/work/third"}, worker: "beelink"})
-	for name, held := range map[string]bool{"nuc": true, "beelink": false} {
-		if manager.heldOn(name, project, "/work/project/other/src") != held {
-			t.Errorf("the other repository holds its worktree on %s: %v", name, !held)
+	owned := func(name string, unit mirror.Unit, folder string) bool {
+		t.Helper()
+		owned, err := manager.ownedOn(name, unit, folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return owned
+	}
+	for name, want := range map[string]bool{"nuc": true, "beelink": false} {
+		if owned(name, project, "/sessions/--work-project-other--") != want {
+			t.Errorf("the other repository owns the session folder of its worktree on %s: %v", name, !want)
 		}
 	}
-	if !manager.heldOn("beelink", project, "/work/third/src") || manager.heldOn("beelink", mirror.Unit{Main: "/work/third"}, "/work/third/src") {
-		t.Error("a repository on its way to beelink holds its folders there for others only")
+	if !owned("beelink", project, "/sessions/--work-third--") || owned("beelink", mirror.Unit{Main: "/work/third"}, "/sessions/--work-third--") {
+		t.Error("a repository on its way to beelink owns its session folders there for others only")
 	}
 }
 
@@ -1404,6 +1412,61 @@ func TestAMoveLeavesTheSessionsOfAFolderThatAnotherRepositoryHasNow(t *testing.T
 				t.Fatalf("the worker's copy of the other repository's sessions: %v", err)
 			}
 		})
+	}
+}
+
+// A move leaves on the worker its copy of a session folder that another repository there owns, such as one that the
+// mirror of that repository's sessions keeps after the worker removed its worktree, and keeps it aside only once that
+// repository has left the worker.
+func TestAMoveLeavesASessionFolderThatAnotherRepositoryOnTheWorkerOwns(t *testing.T) {
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	manager := newTestManager(t, options)
+	base := t.TempDir()
+	other, worktree, project := filepath.Join(base, "other"), filepath.Join(base, "feature"), filepath.Join(base, "project")
+	git(t, base, "init", "-q", other)
+	git(t, other, "commit", "-q", "--allow-empty", "-m", "first")
+	git(t, other, "worktree", "add", "-q", worktree)
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// The worker is this machine, so its copy of the session folder is main's.
+	session := filepath.Join(sessionFolder(options.SessionsRoot, worktree), "s.jsonl")
+	writeTestFile(t, session, "{}\n", 0600)
+	// The worker has sessions of the project in the worktree's folder from earlier, when the folder was the project's.
+	if err := manager.rememberSessions(project, "beelink", []string{worktree}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	stop := func(func(string) bool) error { return nil }
+	if err := manager.Move(ctx, other, "beelink", stop); err != nil {
+		t.Fatal(err)
+	}
+	// The worker removes the worktree, whose session folder the mirror of the other repository's sessions keeps.
+	git(t, other, "worktree", "remove", worktree)
+	placement, _ := manager.options.Placements.Find(other)
+	placement.Unit.Worktrees = nil
+	if err := manager.options.Placements.Update(placement); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := manager.Move(ctx, project, "beelink", stop); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(session); err != nil {
+		t.Fatalf("the move kept aside the session folder of the other repository: %v", err)
+	}
+
+	for _, folder := range []string{other, project} {
+		if err := manager.Return(ctx, folder, stop); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manager.Move(ctx, project, "beelink", stop); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(session); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the worker's copy of the session folder once the other repository has left the worker: %v", err)
 	}
 }
 
