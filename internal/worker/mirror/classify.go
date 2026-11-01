@@ -32,7 +32,9 @@ type Options struct {
 	// that is still being written, as with Pi's session files. As with any file, the destination appends what a file
 	// gained to it, and replaces a file that was rewritten. A Source sends these files at barriers only, and one that
 	// doesn't start with what the destination has only once its writer has closed it, because what it reads of a
-	// rewrite in progress may be only its start; until then, barriers list the file as still being written.
+	// rewrite in progress may be only its start; until then, barriers list the file as still being written. Where it
+	// hasn't seen the writer close the file, as when it starts or rescans, it looks for a process that has the file
+	// open for writing, and takes the file for still being written if it can't tell.
 	CompleteLines bool
 }
 

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -162,6 +163,136 @@ func TestAnUnfinishedRewriteOfASessionKeepsMainsCopy(t *testing.T) {
 		t.Fatalf("main has %q after the rewrite", got)
 	}
 	checkFiles(t, unit, r.dst)
+}
+
+// Pi's session file before and after a migration rewrote it.
+const (
+	sessionTurns    = "{\"type\":\"session\",\"version\":2}\n{\"id\":\"1\",\"role\":\"user\"}\n"
+	sessionHeader   = "{\"type\":\"session\",\"version\":3}\n"
+	sessionMigrated = sessionHeader + "{\"id\":\"1\",\"role\":\"user\",\"v\":3}\n{\"id\":\"2\",\"role\":\"assistant\",\"v\":3}\n"
+)
+
+// sessionMirror sets a source up as Gripi's mirror of Pi's session folders.
+func sessionMirror(s *Source) { s.opts.CompleteLines, s.opts.AutoBarrier = true, true }
+
+// A restart doesn't show whether Pi still has a session file open, and mustn't take the start of a rewrite in
+// progress for the whole file.
+func TestARestartDuringARewriteOfASessionKeepsMainsCopy(t *testing.T) {
+	folder := t.TempDir()
+	session := filepath.Join(folder, "session.jsonl")
+	writeFile(t, folder, "session.jsonl", sessionTurns)
+	r := newRigWith(t, Unit{Main: folder}, sessionMirror)
+	onMain := func() string {
+		data, _ := os.ReadFile(r.dst + session)
+		return string(data)
+	}
+
+	// Lines added while the mirror was away to a file that its writer keeps open still reach main.
+	f, err := os.OpenFile(session, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.stop()
+	turns := sessionTurns + "{\"id\":\"2\",\"role\":\"assistant\"}\n"
+	f.WriteString(turns[len(sessionTurns):])
+	r.start(t, sessionMirror)
+	r.barrier(t)
+	if got := onMain(); got != turns {
+		t.Fatalf("main has %q", got)
+	}
+	f.Close()
+
+	// As Pi's _rewriteFile, which has truncated the file and written the new header so far.
+	if f, err = os.OpenFile(session, os.O_WRONLY|os.O_TRUNC, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.WriteString(sessionHeader)
+	r.stop()
+	r.start(t, sessionMirror)
+	if writing := r.barrierWriting(t); !slices.Equal(writing, []string{session}) {
+		t.Fatalf("still being written after a restart during the rewrite: %v", writing)
+	}
+	if got := onMain(); got != turns {
+		t.Fatalf("main has %q after a restart during the rewrite", got)
+	}
+	f.WriteString(sessionMigrated[len(sessionHeader):])
+	f.Close()
+	r.barrier(t)
+	checkFiles(t, Unit{Main: folder}, r.dst)
+}
+
+func TestARewriteOfASessionFinishedWhileTheMirrorWasAwayReachesMain(t *testing.T) {
+	folder := t.TempDir()
+	writeFile(t, folder, "session.jsonl", sessionTurns)
+	r := newRigWith(t, Unit{Main: folder}, sessionMirror)
+	r.stop()
+	writeFile(t, folder, "session.jsonl", sessionMigrated)
+	r.start(t, sessionMirror)
+	r.barrier(t)
+	checkFiles(t, Unit{Main: folder}, r.dst)
+}
+
+// Nor does a rescan after the kernel lost file events.
+func TestARescanDuringARewriteOfASessionKeepsMainsCopy(t *testing.T) {
+	folder := t.TempDir()
+	session := filepath.Join(folder, "session.jsonl")
+	writeFile(t, folder, "session.jsonl", sessionTurns)
+	var stalled atomic.Bool
+	release := make(chan struct{})
+	r := newRigWith(t, Unit{Main: folder}, func(s *Source) {
+		sessionMirror(s)
+		s.beforeRead = func() {
+			if stalled.Load() {
+				<-release
+			}
+		}
+	})
+	stalled.Store(true)
+	writeFile(t, folder, "wake.txt", "x") // the reader stops after this event
+	time.Sleep(100 * time.Millisecond)
+
+	f, err := os.OpenFile(session, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.WriteString(sessionHeader)
+	// Writes to two files in turn, which the kernel doesn't merge into one event, until its queue overflows.
+	data, err := os.ReadFile("/proc/sys/fs/inotify/max_queued_events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flood [2]*os.File
+	for i := range flood {
+		if flood[i], err = os.Create(filepath.Join(folder, fmt.Sprintf("flood%d.txt", i))); err != nil {
+			t.Fatal(err)
+		}
+		defer flood[i].Close()
+	}
+	for i := range limit + 100 {
+		flood[i%2].WriteString("x")
+	}
+	stalled.Store(false)
+	close(release)
+
+	if writing := r.barrierWriting(t); !slices.Equal(writing, []string{session}) {
+		t.Fatalf("still being written after a rescan during the rewrite: %v", writing)
+	}
+	if r.src.overflows.Load() == 0 {
+		t.Fatal("the kernel's event queue didn't overflow")
+	}
+	if data, _ := os.ReadFile(r.dst + session); string(data) != sessionTurns {
+		t.Fatalf("main has %q after a rescan during the rewrite", data)
+	}
+	f.WriteString(sessionMigrated[len(sessionHeader):])
+	f.Close()
+	r.barrier(t)
+	checkFiles(t, Unit{Main: folder}, r.dst)
 }
 
 func TestMainsChangesAreSavedAsideBeforeTheWorkersReplaceThem(t *testing.T) {
@@ -430,6 +561,25 @@ func TestTheDestinationRefusesFoldersItDoesntAllow(t *testing.T) {
 	if _, err := os.Lstat(r.dst + added); err == nil {
 		t.Fatal("main got the refused worktree")
 	}
+}
+
+// stop stops the source, as when the worker's helper restarts or loses main.
+func (r *rig) stop() {
+	r.conn.Close()
+	<-r.served
+	<-r.ran
+}
+
+// barrierWriting takes a barrier and returns the files it left out as still being written.
+func (r *rig) barrierWriting(t *testing.T) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	_, writing, err := r.src.Barrier(ctx)
+	if err != nil {
+		t.Fatalf("barrier: %v", err)
+	}
+	return writing
 }
 
 func inodeOf(t *testing.T, path string) uint64 {

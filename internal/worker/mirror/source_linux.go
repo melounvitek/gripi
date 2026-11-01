@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -301,9 +303,9 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 	return nil
 }
 
-// sendSettled sends the CompleteLines files that the barrier found closed, once the events up to another sentinel
-// show that their writers left them so: what was read of a file that Pi started to rewrite meanwhile may be only its
-// start. A file that changed is left out as still being written, and its events bring another barrier.
+// sendSettled sends the CompleteLines files that the barrier found or took for closed, once the events up to another
+// sentinel show that their writers left them so: what was read of a file that Pi started to rewrite meanwhile may be
+// only its start. A file that changed is left out as still being written, and its events bring another barrier.
 func (s *Source) sendSettled() error {
 	if len(s.settling) == 0 {
 		return nil
@@ -511,7 +513,7 @@ func (s *Source) handleEvent(e rawEvent) error {
 	}
 	if e.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 		if s.isRoot(dir) {
-			s.mark(dir, false)
+			s.mark(dir, writesUnknown)
 		}
 		return nil
 	}
@@ -537,11 +539,14 @@ func (s *Source) handleEvent(e rawEvent) error {
 		if e.mask&unix.IN_DELETE != 0 && isDir {
 			s.unwatch(p)
 		}
-		writing := e.mask&unix.IN_MODIFY != 0
-		if e.mask&unix.IN_ATTRIB != 0 {
-			writing = s.dirty[p] // a change of mode or time doesn't end a write
+		w := writesClosed // IN_CLOSE_WRITE, or a deletion
+		if e.mask&unix.IN_MODIFY != 0 {
+			w = writesOpen
 		}
-		s.mark(p, writing)
+		if e.mask&unix.IN_ATTRIB != 0 {
+			w = s.dirty[p] // a change of mode or time doesn't end a write
+		}
+		s.mark(p, w)
 	}
 	return nil
 }
@@ -570,7 +575,7 @@ func (s *Source) noteGitChange(p string) {
 
 func (s *Source) created(p string, isDir bool) error {
 	if !isDir {
-		s.mark(p, false)
+		s.mark(p, writesUnknown)
 		return nil
 	}
 	if s.excluded(p, true, 0) {
@@ -590,7 +595,7 @@ func (s *Source) gone(p string, isDir bool) {
 	if isDir {
 		s.unwatch(p)
 	}
-	s.mark(p, false)
+	s.mark(p, writesUnknown)
 }
 
 func rewrite(p, from, to string) (string, bool) {
@@ -614,9 +619,9 @@ func (s *Source) moved(from, to string, isDir bool) error {
 			e.Path, e.ino = to, 0
 			s.sent[to] = e
 		} else {
-			s.mark(from, false)
+			s.mark(from, writesUnknown)
 		}
-		s.mark(to, false) // only checked if it was moved
+		s.mark(to, writesUnknown) // only checked if it was moved
 		return nil
 	}
 	outside := func(p string) bool { return s.rootOf(p) == "" || s.excluded(p, true, 0) }
@@ -637,10 +642,10 @@ func (s *Source) moved(from, to string, isDir bool) error {
 			s.pathWd[np] = wd
 		}
 	}
-	dirty := map[string]bool{}
-	for p, writing := range s.dirty {
+	dirty := map[string]writes{}
+	for p, w := range s.dirty {
 		np, _ := rewrite(p, from, to)
-		dirty[np] = writing
+		dirty[np] = w
 	}
 	s.dirty = dirty
 	if s.sentUnder(from) {
@@ -683,7 +688,7 @@ func (s *Source) refreshWorktrees() error {
 		if !slices.Contains(worktrees, r) && r != s.gitDir {
 			s.removeRoot(r)
 			s.unwatch(r)
-			s.mark(r, false)
+			s.mark(r, writesUnknown)
 		}
 	}
 	s.current.Store(&Unit{Main: s.main, Worktrees: worktrees[1:], GitDir: s.gitDir})
@@ -712,6 +717,53 @@ func (s *Source) rescan() error {
 		}
 	}
 	return nil
+}
+
+// openForWriting reports whether a process has the file open for writing, as /proc shows, or whether that can't be
+// told. It leaves out the processes whose files /proc doesn't show: other users', and this user's that are more
+// privileged than the source, such as its systemd manager or ssh-agent. Pi, which writes the session files, is
+// neither.
+func openForWriting(file fs.FileInfo) bool {
+	want, ok := file.Sys().(*syscall.Stat_t)
+	if !ok {
+		return true
+	}
+	procs, err := os.ReadDir("/proc")
+	if err != nil {
+		return true
+	}
+	for _, proc := range procs {
+		if _, err := strconv.Atoi(proc.Name()); err != nil {
+			continue
+		}
+		dir := "/proc/" + proc.Name()
+		// Here and below, ErrPermission is a process that /proc doesn't show, and ErrNotExist one that ended or a file
+		// that it closed meanwhile.
+		fds, err := os.ReadDir(dir + "/fd")
+		if err != nil && !errors.Is(err, fs.ErrPermission) && !errors.Is(err, fs.ErrNotExist) {
+			return true
+		}
+		for _, fd := range fds {
+			var st syscall.Stat_t
+			if err := syscall.Stat(dir+"/fd/"+fd.Name(), &st); err != nil || st.Dev != want.Dev || st.Ino != want.Ino {
+				if err != nil && !errors.Is(err, fs.ErrPermission) && !errors.Is(err, fs.ErrNotExist) {
+					return true
+				}
+				continue
+			}
+			info, err := os.ReadFile(dir + "/fdinfo/" + fd.Name())
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			_, flags, _ := strings.Cut(string(info), "\nflags:\t")
+			flags, _, _ = strings.Cut(flags, "\n")
+			mode, perr := strconv.ParseUint(flags, 8, 64)
+			if err != nil || perr != nil || mode&syscall.O_ACCMODE != syscall.O_RDONLY {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Source) mapIndexes() {

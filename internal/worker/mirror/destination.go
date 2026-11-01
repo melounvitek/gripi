@@ -1085,6 +1085,8 @@ func (r *receiver) handle(f *frame) error {
 		return r.put(f)
 	case kindSigRequest:
 		return r.signatures(f)
+	case kindSumRequest:
+		return r.hash(f)
 	case kindMkdir, kindSymlink, kindDelete:
 		if err := r.check(f.Path); err != nil {
 			return err
@@ -1178,6 +1180,25 @@ func (r *receiver) signatures(f *frame) error {
 		}
 	}
 	if err := r.c.send(&frame{Kind: kindSigs, Path: f.Path, BlockSize: size, Sums: sums}); err != nil {
+		return err
+	}
+	return r.c.flush()
+}
+
+func (r *receiver) hash(f *frame) error {
+	if err := r.check(f.Path); err != nil {
+		return err
+	}
+	answer := &frame{Kind: kindSum, Path: f.Path}
+	if file, err := r.view(f.Path); err == nil {
+		sum := sha256.New()
+		answer.Size, err = io.Copy(sum, file)
+		file.Close()
+		if err == nil {
+			answer.Hash = sum.Sum(nil)
+		}
+	}
+	if err := r.c.send(answer); err != nil {
 		return err
 	}
 	return r.c.flush()

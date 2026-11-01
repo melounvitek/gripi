@@ -41,7 +41,7 @@ type sender struct {
 	c        *conn
 
 	sent       map[string]entry
-	dirty      map[string]bool // path → still being written
+	dirty      map[string]writes
 	firstDirty time.Time
 	marked     uint64            // changes seen so far
 	objDels    map[string]uint64 // object files gone before the barrier with this number
@@ -56,16 +56,26 @@ type sender struct {
 	watch func(dir string) (bool, error)
 
 	sigs    chan *frame
+	hashes  chan *frame
 	stopped chan struct{} // closed when the destination's answers stop
 	mu      sync.Mutex
 	waiters map[uint64][]chan error
 }
 
+// writes is what the source knows of whether a changed file is still being written.
+type writes uint8
+
+const (
+	writesUnknown writes = iota // as after a scan, which doesn't show whether its writer closed it
+	writesClosed                // its writer closed it after the last change
+	writesOpen                  // still being written
+)
+
 func newSender(u Unit, opts Options, rw io.ReadWriter) *sender {
 	s := &sender{
 		opts: opts, main: u.Main, gitDir: u.GitDir, cls: map[string]*classifier{}, skipped: map[string]bool{}, followed: map[string]bool{},
-		sent: map[string]entry{}, dirty: map[string]bool{}, objDels: map[string]uint64{}, unread: map[string]error{},
-		sigs: make(chan *frame, sigBatch), stopped: make(chan struct{}), waiters: map[uint64][]chan error{},
+		sent: map[string]entry{}, dirty: map[string]writes{}, objDels: map[string]uint64{}, unread: map[string]error{},
+		sigs: make(chan *frame, sigBatch), hashes: make(chan *frame, 1), stopped: make(chan struct{}), waiters: map[uint64][]chan error{},
 	}
 	if rw != nil {
 		s.c = newConn(rw)
@@ -198,14 +208,14 @@ func (s *sender) skip(p string) {
 	}
 }
 
-func (s *sender) mark(p string, writing bool) {
+func (s *sender) mark(p string, w writes) {
 	if s.inGit(p) && gitTemporary(filepath.Base(p)) {
 		return
 	}
 	if len(s.dirty) == 0 {
 		s.firstDirty = time.Now()
 	}
-	s.dirty[p] = writing
+	s.dirty[p] = w
 	s.marked++
 	delete(s.settling, p)
 }
@@ -229,7 +239,7 @@ func (s *sender) retryUnread() error {
 	unread := s.unread
 	s.unread = map[string]error{}
 	for p := range unread {
-		s.mark(p, false)
+		s.mark(p, s.dirty[p])
 		if info, err := s.lstat(p); err == nil && info.IsDir() && !s.excluded(p, true, 0) && !s.excludedAbove(p) {
 			if err := s.walk(p, nil); err != nil { // a folder that couldn't be read or watched
 				return err
@@ -315,7 +325,7 @@ func (s *sender) walk(dir string, seen map[string]bool) error {
 			seen[p] = true
 		}
 		if old, ok := s.sent[p]; !ok || !s.same(old, entryOf(p, info)) || old.Type == 'l' {
-			s.mark(p, false)
+			s.mark(p, writesUnknown)
 		}
 		return nil
 	}
@@ -396,7 +406,7 @@ func (s *sender) scan() (map[string]bool, error) {
 func (s *sender) markMissing(seen map[string]bool) {
 	for p, e := range s.sent {
 		if !seen[p] && !s.kept(p, e) {
-			s.mark(p, false)
+			s.mark(p, writesUnknown)
 		}
 	}
 }
@@ -453,6 +463,8 @@ func (s *sender) receive() error {
 		switch f.Kind {
 		case kindSigs:
 			s.sigs <- f
+		case kindSum:
+			s.hashes <- f
 		case kindAck:
 			var err error
 			if f.Error != "" {
@@ -525,7 +537,7 @@ func (s *sender) forgetUnder(p string) {
 // being written wait; at a barrier they are sent unless large.
 func (s *sender) flush(barrier bool, sel func(string) bool) error {
 	var dirs, files, links, gone []string
-	for p, writing := range s.dirty {
+	for p, w := range s.dirty {
 		if sel != nil && !sel(p) {
 			continue
 		}
@@ -588,17 +600,17 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 				continue
 			}
 			if s.settling != nil && s.lineFile(p) {
-				// What is read of a rewrite in progress may be only its start, so these go at barriers only: one still
-				// being written if it only grew, and a closed one once the source has made sure that it stayed so.
+				// What is read of a rewrite in progress may be only its start, so these go at barriers only: a closed
+				// one once the source has made sure that it stayed so, and the rest as held decides.
 				if !barrier {
 					continue
 				}
-				if !writing {
+				if w == writesClosed {
 					s.settling[p] = stampOf(p, info)
 					continue
 				}
 			}
-			if writing {
+			if w == writesOpen {
 				if !barrier {
 					continue
 				}
@@ -801,13 +813,17 @@ func (s *sender) sendFile(p string, plan deltaPlan) error {
 			if err != nil {
 				s.cantRead(p, err)
 			}
-			s.mark(p, false) // the next flush sees what it is
+			s.mark(p, s.dirty[p]) // the next flush sees what it is
 			return nil
 		}
-		if s.settling != nil && s.lineFile(p) && s.held(f, info, p) {
-			f.Close()
-			s.writing = append(s.writing, p)
-			return nil
+		if s.settling != nil && s.lineFile(p) {
+			if held, err := s.held(f, info, p); held || err != nil {
+				f.Close()
+				if _, settling := s.settling[p]; !settling { // or sendSettled lists it if it must wait
+					s.writing = append(s.writing, p)
+				}
+				return err
+			}
 		}
 		ok, e, err := s.stream(f, info, p, plan)
 		f.Close()
@@ -825,7 +841,7 @@ func (s *sender) sendFile(p string, plan deltaPlan) error {
 		time.Sleep(2 * time.Millisecond)
 	}
 	s.writing = append(s.writing, p)
-	s.mark(p, true)
+	s.mark(p, writesOpen)
 	return nil
 }
 
@@ -833,26 +849,60 @@ func (s *sender) lineFile(p string) bool {
 	return s.opts.CompleteLines && strings.HasSuffix(p, ".jsonl")
 }
 
-// held reports whether the CompleteLines file p, open as f, is held back for a later barrier as still being written:
-// a file that the barrier found closed unless it is as it was then, and one still being written unless it only grew
-// since the destination got it.
-func (s *sender) held(f *os.File, info fs.FileInfo, p string) bool {
+// held reports whether the CompleteLines file p, open as f, isn't sent now. A file that only gained lines since the
+// destination got it goes now, and any other only once its writer has closed it: one that the barrier found closed
+// if it is still as it was then. One whose writes the source didn't see, as after a scan, is taken for closed when
+// no process has it open for writing, and settles like one found closed until the end of the barrier.
+func (s *sender) held(f *os.File, info fs.FileInfo, p string) (bool, error) {
 	if st, ok := s.settling[p]; ok {
-		return st != stampOf(p, info)
+		return st != stampOf(p, info), nil
 	}
 	old, ok := s.sent[p]
 	if !ok || old.Type != 'f' {
-		return false
+		return false, nil
 	}
-	if old.linesSum == nil {
-		return true // the destination had it before this source ran
+	if old.linesSum == nil && info.Size() >= old.Size { // the destination had it before this source ran
+		main, err := s.destinationHash(p)
+		if err != nil {
+			return true, err
+		}
+		old.lines, old.linesSum = main.Size, main.Hash
+		s.sent[p] = old
 	}
-	sum := sha256.New()
-	if _, err := io.Copy(sum, io.NewSectionReader(f, 0, old.lines)); err != nil {
-		s.cantRead(p, err)
-		return true
+	if old.linesSum != nil {
+		sum := sha256.New()
+		if _, err := io.Copy(sum, io.NewSectionReader(f, 0, old.lines)); err != nil {
+			s.cantRead(p, err)
+			return true, nil
+		}
+		if bytes.Equal(sum.Sum(nil), old.linesSum) {
+			return false, nil
+		}
 	}
-	return !bytes.Equal(sum.Sum(nil), old.linesSum)
+	if s.dirty[p] == writesUnknown && !openForWriting(info) {
+		s.settling[p] = stampOf(p, info)
+	}
+	return true, nil
+}
+
+// destinationHash asks the destination for the size and SHA-256 of what it has at p; Hash is nil if it has no file
+// there.
+func (s *sender) destinationHash(p string) (*frame, error) {
+	if err := s.c.send(&frame{Kind: kindSumRequest, Path: p}); err != nil {
+		return nil, err
+	}
+	if err := s.c.flush(); err != nil {
+		return nil, err
+	}
+	select {
+	case f := <-s.hashes:
+		if f.Path != p {
+			return nil, fmt.Errorf("mirror: the hash of %s arrived instead of %s", f.Path, p)
+		}
+		return f, nil
+	case <-s.stopped:
+		return nil, errors.New("mirror stream closed")
+	}
 }
 
 // stream sends p as f holds it, or with CompleteLines, its complete lines. The entry it returns is the whole file's,

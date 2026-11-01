@@ -10,7 +10,7 @@ import (
 )
 
 // version changes whenever frames change; both ends must run the same Gripi.
-const version = 1
+const version = 2
 
 type kind uint8
 
@@ -28,6 +28,8 @@ const (
 	kindBarrier                    // source → destination: apply everything received so far
 	kindAck                        // destination → source: the barrier is applied durably, or Error
 	kindFail                       // destination → source: the destination stopped because of Error
+	kindSumRequest                 // source → destination: the size and SHA-256 of what it has at Path
+	kindSum                        // destination → source: Size and Hash, or no Hash if it has no file there
 )
 
 type frame struct {
