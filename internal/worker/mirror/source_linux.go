@@ -687,8 +687,11 @@ func (s *Source) refreshWorktrees() error {
 		return nil // the main folder is gone, which is mirrored as such
 	}
 	added := false
-	for _, w := range worktrees {
+	for i, w := range worktrees {
 		if !s.isRoot(w) {
+			if !joins(s.within, w, i == 0) {
+				continue
+			}
 			s.addRoot(w)
 			added = true
 		}
@@ -705,7 +708,8 @@ func (s *Source) refreshWorktrees() error {
 			s.mark(r, writesUnknown)
 		}
 	}
-	s.current.Store(&Unit{Main: s.main, Worktrees: worktrees[1:], GitDir: s.gitDir})
+	linked := slices.DeleteFunc(slices.Clone(s.roots), func(r string) bool { return r == s.main || r == s.gitDir })
+	s.current.Store(&Unit{Main: s.main, Worktrees: linked, GitDir: s.gitDir, Within: s.within})
 	s.mapIndexes()
 	if added {
 		return s.c.send(&frame{Kind: kindRoots, Roots: s.roots})
