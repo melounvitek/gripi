@@ -188,6 +188,19 @@ func TestBootstrapFailsWhenTheWorkersPiHasAnotherVersion(t *testing.T) {
 	}
 }
 
+func TestBootstrapRefusesAPiOlderThanWorkersNeed(t *testing.T) {
+	rig := newBootstrapRig(t)
+	rig.setVersions(t, "0.87.1", "0.87.1")
+
+	_, err := rig.conn.Bootstrap(context.Background(), rig.pi)
+	if err == nil || !strings.Contains(err.Error(), "0.87.1") || !strings.Contains(err.Error(), "0.99.0") {
+		t.Fatalf("Bootstrap = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(rig.workerDir, "lib")); err == nil {
+		t.Fatal("Bootstrap copied Pi to the worker")
+	}
+}
+
 func TestBootstrapCopiesPisAgentFolderWithoutLoginsOrSessions(t *testing.T) {
 	rig := newBootstrapRig(t)
 	main, worker, outside := rig.pi.AgentDir, filepath.Join(t.TempDir(), "agent"), t.TempDir()

@@ -289,6 +289,7 @@ A worker is another computer that runs the sessions of chosen repositories for t
 The worker needs:
 
 - Linux on the same architecture as main, which must run Linux too.
+- Pi 0.99.0 or later on main. Gripi copies main’s Pi to the worker, and refuses to connect to a worker with an older one.
 - A systemd user manager with cgroup v2. Gripi runs its helper there with `systemd-run --user`, which lets it stop everything that a session started.
 - Git, and the tools that the projects need, on the `PATH` of the user’s login shell. Gripi brings only Node and Pi.
 - Unprivileged user namespaces, when the worker user’s home folder has another path than the gateway user’s on main (see below). Arch, Fedora and Debian allow them. Ubuntu 23.10 and later block them with AppArmor; allow them with `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`, and put `kernel.apparmor_restrict_unprivileged_userns=0` in a file in `/etc/sysctl.d/` to keep that after a restart.

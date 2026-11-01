@@ -38,6 +38,9 @@ func installedPi(t *testing.T) (command, authStorage string) {
 		t.Skipf("Pi's auth storage not found next to %s", script)
 	}
 	t.Setenv("HOME", t.TempDir())
+	if version, err := exec.Command(command, "--version").Output(); err != nil || OlderPi(string(version)) {
+		t.Skipf("the installed Pi (%s) is older than %s, which workers need", strings.TrimSpace(string(version)), MinimumPiVersion)
+	}
 	return command, authStorage
 }
 

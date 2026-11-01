@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const piExecutable = process.env.GRIPI_PI || execFileSync("sh", ["-c", "command -v pi"], { encoding: "utf8" }).trim();
+// Workers need Pi 0.99.0 or later (MinimumPiVersion in internal/worker/auth), so older ones skip these tests.
+const piVersion = execFileSync(piExecutable, ["--version"], {
+  encoding: "utf8",
+  env: { ...process.env, PI_CODING_AGENT_DIR: mkdtempSync(path.join(tmpdir(), "gripi-pi-version-")) },
+}).trim();
+const [major, minor] = (piVersion.match(/(\d+)\.(\d+)\.\d+/) || [0, 0, 0]).slice(1).map(Number);
+const skip = major === 0 && minor < 99 ? `Pi ${piVersion} is older than 0.99.0, which workers need` : false;
+const test = (name, options, fn) => nodeTest(name, { ...options, skip }, fn);
 const extensionPath = path.resolve("pi_extensions/gripi-worker.ts");
 const providerPath = path.resolve("test/helpers/fake_provider.ts");
 const bash = (command) => ({ name: "bash", arguments: { command } });

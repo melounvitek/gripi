@@ -57,6 +57,9 @@ func (conn *Conn) Bootstrap(ctx context.Context, pi Pi) (*Installation, error) {
 	if err != nil {
 		return nil, err
 	}
+	if auth.OlderPi(version) {
+		return nil, fmt.Errorf("workers need Pi %s or later, but this machine has Pi %s", auth.MinimumPiVersion, version)
+	}
 	ports, err := localPorts(pi.AgentDir)
 	if err != nil {
 		return nil, err
