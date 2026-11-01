@@ -500,7 +500,7 @@ func (r *reconciler) planFiles(root string, others, made []string, onMain bool) 
 			base[p] = e
 		}
 	}
-	worker, err := r.shadow.walk(r.ctx, root, others, base)
+	worker, err := r.shadow.walk(r.ctx, root, others)
 	if err != nil {
 		return err
 	}
@@ -611,7 +611,7 @@ func (r *reconciler) aside(p string, b, m, w entry, reason string) error {
 // planGitFiles keeps the worker's changes to the repository's config and hooks aside: main keeps its own.
 func (r *reconciler) planGitFiles() error {
 	hooks := filepath.Join(r.base.GitDir, "hooks")
-	worker, err := r.shadow.walk(r.ctx, hooks, nil, r.base.GitFiles)
+	worker, err := r.shadow.walk(r.ctx, hooks, nil)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}

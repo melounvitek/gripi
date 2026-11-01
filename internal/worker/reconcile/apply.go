@@ -269,7 +269,7 @@ func (r *reconciler) applyWorktree(w worktree) error {
 	if mw.Head != w.Head || index != "" && index != w.Index {
 		return r.keepWorktree(w, "made on the worker, but main has a worktree of its own there")
 	}
-	worker, err := r.shadow.walk(ctx, w.Root, r.others(w.Root, r.plan.Worktrees), nil)
+	worker, err := r.shadow.walk(ctx, w.Root, r.others(w.Root, r.plan.Worktrees))
 	if err != nil {
 		return err
 	}

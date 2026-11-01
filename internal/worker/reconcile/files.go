@@ -21,18 +21,10 @@ type entry struct {
 	Mode   uint32 `json:"mode,omitempty"` // a file's permissions
 	OID    string `json:"oid,omitempty"`  // a file's blob
 	Target string `json:"target,omitempty"`
-	Stamp  stamp  `json:"stamp,omitzero"` // how the shadow's copy of a file looked when it was recorded
 }
 
 func (e entry) same(o entry) bool {
 	return e.Type == o.Type && e.Mode == o.Mode && e.OID == o.OID && e.Target == o.Target && e.Type != "x"
-}
-
-// stamp tells whether the shadow's copy of a file is still the one recorded: the mirror replaces files with new
-// ones, or appends to them.
-type stamp struct {
-	Size, Mtime int64
-	Ino         uint64
 }
 
 // lstat reads what p holds, except a file's blob ID.
@@ -51,8 +43,7 @@ func lstat(p string) (entry, error) {
 		target, err := os.Readlink(p)
 		return entry{Type: "l", Target: target}, err
 	case info.Mode().IsRegular():
-		ino := info.Sys().(*syscall.Stat_t).Ino
-		return entry{Type: "f", Mode: uint32(info.Mode().Perm()), Stamp: stamp{info.Size(), info.ModTime().UnixNano(), uint64(ino)}}, nil
+		return entry{Type: "f", Mode: uint32(info.Mode().Perm())}, nil
 	}
 	return entry{Type: "x"}, nil
 }
@@ -94,8 +85,7 @@ func (r repo) hashInto(ctx context.Context, found map[string]entry, paths []stri
 }
 
 // walk lists what the shadow has in the worktree at root, leaving out the worktree's .git and other worktrees in it.
-// Files whose stamps match base get base's blob IDs; the rest are hashed.
-func (r repo) walk(ctx context.Context, root string, others []string, base map[string]entry) (map[string]entry, error) {
+func (r repo) walk(ctx context.Context, root string, others []string) (map[string]entry, error) {
 	found := map[string]entry{}
 	var files []string
 	err := filepath.WalkDir(r.path(root), func(local string, d fs.DirEntry, err error) error {
@@ -116,9 +106,7 @@ func (r repo) walk(ctx context.Context, root string, others []string, base map[s
 		if err != nil || e.Type == "x" {
 			return err
 		}
-		if b := base[p]; e.Type == "f" && b.Type == "f" && b.Stamp == e.Stamp {
-			e.OID = b.OID
-		} else if e.Type == "f" {
+		if e.Type == "f" {
 			files = append(files, p)
 		}
 		found[p] = e
