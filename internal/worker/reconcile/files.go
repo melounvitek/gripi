@@ -332,10 +332,11 @@ func syncDir(dir string) error {
 	return d.Sync()
 }
 
-// syncFilesystems makes everything written to the file systems of the folders durable.
+// syncFilesystems makes everything written to the file systems of the folders durable. A folder that's missing, or
+// that main has a file above, got nothing.
 func syncFilesystems(dirs ...string) error {
 	for _, dir := range dirs {
-		if err := syncFilesystem(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := syncFilesystem(dir); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
 			return err
 		}
 	}

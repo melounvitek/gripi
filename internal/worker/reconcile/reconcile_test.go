@@ -632,26 +632,32 @@ func TestAWorktreeMadeOnTheWorkerAtATakenPathIsLeftAlone(t *testing.T) {
 	}
 }
 
-func TestAWorktreeMadeOnTheWorkerBelowALinkOnMainIsLeftAlone(t *testing.T) {
-	r := newRig(t)
-	r.snapshot(r.main)
-	parent := filepath.Join(filepath.Dir(r.feat), "new-parent")
-	made := filepath.Join(parent, "made")
-	r.workerWorktree(made, "made")
-	r.write(r.shadow+made, "untracked.txt", "u\n")
-	if err := os.Symlink(r.other, parent); err != nil {
-		t.Fatal(err)
-	}
+func TestAWorktreeMadeOnTheWorkerBelowALinkOrFileOnMainIsLeftAlone(t *testing.T) {
+	for _, above := range []string{"a link", "a file"} {
+		r := newRig(t)
+		r.snapshot(r.main)
+		parent := filepath.Join(filepath.Dir(r.feat), "new-parent")
+		made := filepath.Join(parent, "made")
+		r.workerWorktree(made, "made")
+		r.write(r.shadow+made, "untracked.txt", "u\n")
+		if above == "a link" {
+			if err := os.Symlink(r.other, parent); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			r.write(filepath.Dir(parent), "new-parent", "main's\n")
+		}
 
-	result := r.reconcile()
+		result := r.reconcile()
 
-	r.expectMissing(r.other + "/made")
-	if strings.Contains(r.git(r.main, "worktree", "list"), "made") {
-		t.Errorf("main lists the worktree")
-	}
-	r.expectFile(r.recovery+"/worker"+made+"/untracked.txt", "u\n")
-	if _, ok := asideOf(result, made); !ok {
-		t.Errorf("kept aside %v", result.Aside)
+		r.expectMissing(r.other + "/made")
+		if strings.Contains(r.git(r.main, "worktree", "list"), "made") {
+			t.Errorf("below %s: main lists the worktree", above)
+		}
+		r.expectFile(r.recovery+"/worker"+made+"/untracked.txt", "u\n")
+		if _, ok := asideOf(result, made); !ok {
+			t.Errorf("below %s: kept aside %v", above, result.Aside)
+		}
 	}
 }
 
