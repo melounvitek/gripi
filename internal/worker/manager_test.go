@@ -72,6 +72,9 @@ func newTestManager(t *testing.T, options ManagerOptions) *Manager {
 	if options.SessionsRoot == "" {
 		options.SessionsRoot = "/home/me/.pi/agent/sessions"
 	}
+	if options.StopSessions == nil {
+		options.StopSessions = func(func(string) bool) error { return nil }
+	}
 	manager := NewManager(options)
 	t.Cleanup(manager.Close)
 	return manager
@@ -670,6 +673,67 @@ func TestARunningMirrorNeverTakesASessionFolderOfAnotherRepository(t *testing.T)
 				t.Fatalf("Launch of the session after a reconnect = %v", err)
 			}
 		})
+	}
+}
+
+// A new session on this machine that Pi has not saved yet, in a folder whose sessions Pi keeps in the session folder
+// of a new folder of a repository on a worker, would save its file where the worker's copy of the session folder
+// replaces it: the running mirror of the repository's sessions takes the folder only once the gateway has stopped the
+// session's Pi, and never while the session works.
+func TestARunningMirrorTakesASessionFolderOnlyOnceTheUnsavedSessionsThereHaveStopped(t *testing.T) {
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	project := t.TempDir()
+	sessionsMain := sessionFolder(options.SessionsRoot, project)
+	// The blank session started in a folder whose sessions Pi keeps in the session folder of project/x-y.
+	other := project + "-x/y"
+	folder := sessionFolder(options.SessionsRoot, other)
+	var manager *Manager
+	working, running := true, true
+	options.StopSessions = func(inFolder func(string) bool) error {
+		if inFolder(project) || inFolder(filepath.Join(project, "x-y")) {
+			t.Error("the mirror stops the repository's own sessions")
+		}
+		if !inFolder(other) {
+			return nil
+		}
+		if covered, err := manager.covered(sessionsMain); err != nil || slices.Contains(covered, folder) {
+			t.Errorf("the mirror had the session's folder before the session stopped: %v", err)
+		}
+		if working {
+			return refusal{errors.New("the session is working")}
+		}
+		running = false
+		return nil
+	}
+	manager = newTestManager(t, options)
+	if err := manager.Move(context.Background(), project, "beelink", func(func(string) bool) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	process := agent.Process{Dir: filepath.Join(project, "x-y"), Command: []string{"pi", "--mode", "rpc"}}
+	if err := os.Mkdir(process.Dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := manager.Launch(process); !refused(err) || !strings.Contains(err.Error(), folder) || !strings.Contains(err.Error(), "working") || !running {
+		t.Fatalf("Launch while the blank session works = %v; the session runs: %v", err, running)
+	}
+	if covered, err := manager.covered(sessionsMain); err != nil || slices.Contains(covered, folder) {
+		t.Fatalf("the mirror's folders after the refused session = %q (%v)", covered, err)
+	}
+
+	// The session stopped working without a reply, so Pi has still not saved it.
+	working = false
+	command, release, err := manager.Launch(process)
+	if err != nil || running {
+		t.Fatalf("Launch once the blank session is idle = %v; the session runs: %v", err, running)
+	}
+	if err := command.Run(); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if covered, err := manager.covered(sessionsMain); err != nil || !slices.Contains(covered, folder) {
+		t.Fatalf("the mirror's folders = %q (%v)", covered, err)
 	}
 }
 

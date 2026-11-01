@@ -102,6 +102,9 @@ type ManagerOptions struct {
 	SocketPath string
 	// Store finds the folders of saved sessions.
 	Store agent.Store
+	// StopSessions stops the Pi of every session on this machine, of any user, whose folder passes inFolder, as Move's
+	// stop does, and refuses with an error that has a Refused method while one of them is working.
+	StopSessions func(inFolder func(folder string) bool) error
 	// Rewritten tells the guard of the sessions' files that main's copy of a session's file on a worker was written
 	// anew, as the worker's Pi rewrote it (agent.Guard's Rewritten).
 	Rewritten func(key string)
@@ -384,7 +387,7 @@ func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mir
 		if err := manager.claim(unit.Main, nil, folders, false); err != nil {
 			return err
 		}
-		if err := manager.foreignSessions(unit, added); err != nil {
+		if err := manager.admitSessionFolders(unit, added); err != nil {
 			return err
 		}
 		// The worker's helper watches only the folders that its mirror started with.
@@ -623,7 +626,7 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 		if err := manager.claim(repository.Main, nil, unitFolders(unit), false); err != nil {
 			return err
 		}
-		if err := manager.foreignSessions(repository, added); err != nil {
+		if err := manager.admitSessionFolders(repository, added); err != nil {
 			return err
 		}
 		// The worker's helper makes the folders that the worker doesn't have yet.
@@ -886,6 +889,23 @@ func (manager *Manager) foreignSessions(unit mirror.Unit, folders []string) erro
 		if folder := filepath.Dir(session.Path); slices.Contains(folders, folder) && !unit.Contains(session.CWD) {
 			return refuse("%s and %s, which has sessions on this machine, would share Pi's session folder %s", unit.Main, session.CWD, folder)
 		}
+	}
+	return nil
+}
+
+// admitSessionFolders refuses session folders that the mirror of a placed unit's sessions would add, as foreignSessions
+// does, and stops the Pi of this machine's sessions of other folders there, such as a new session that Pi has not
+// saved yet, which would save its file where the worker's copy of the folder replaces it, or refuses while one of
+// them works.
+func (manager *Manager) admitSessionFolders(unit mirror.Unit, folders []string) error {
+	if err := manager.foreignSessions(unit, folders); err != nil {
+		return err
+	}
+	err := manager.options.StopSessions(func(folder string) bool {
+		return !unit.Contains(folder) && slices.Contains(folders, sessionFolder(manager.options.SessionsRoot, folder))
+	})
+	if err != nil {
+		return fmt.Errorf("stop the sessions on this machine that Pi would keep in %s: %w", strings.Join(folders, ", "), err)
 	}
 	return nil
 }

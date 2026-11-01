@@ -186,6 +186,51 @@ func TestMovingARepositoryStopsItsSessionsUnlessOneIsWorking(t *testing.T) {
 	}
 }
 
+// The workers stop the Pi of the sessions on this machine that Pi would keep in a session folder that a repository on a
+// worker takes, such as a new session that Pi has not saved yet, whose file the worker's copy of the folder would
+// replace, and refuse while one of them works.
+func TestTheWorkersStopTheSessionsOfAFolderUnlessOneIsWorking(t *testing.T) {
+	handler, _, _, project := fakePiGateway(t)
+	local := localHandler(t, handler)
+	newSession := func(cwd string) string {
+		t.Helper()
+		response := serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": cwd}, true))
+		var created struct{ Session string }
+		if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil || response.Code != http.StatusOK {
+			t.Fatalf("new session = %d %s", response.Code, response.Body.String())
+		}
+		return created.Session
+	}
+	idleFolder, workingFolder := t.TempDir(), t.TempDir()
+	idle, working := newSession(idleFolder), newSession(workingFolder)
+	if response := postPrompt(local, socketHost, url.Values{"session": {working}, "message": {"Start the abort scenario"}}); response.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
+	}
+	waitForLocalSession(t, local, working, func(session gateway.LocalSession) bool { return session.State == "working" })
+	stop := handler.(interface{ StopSessions(func(string) bool) error }).StopSessions
+
+	err := stop(func(folder string) bool { return folder == idleFolder || folder == workingFolder })
+	var refusal interface{ Refused() bool }
+	if !errors.As(err, &refusal) || !strings.Contains(err.Error(), working) {
+		t.Fatalf("stop while a session works = %v", err)
+	}
+	for _, session := range []string{idle, working} {
+		if started, stopped := fakePiPIDs(t, session); len(started) != 1 || len(stopped) != 0 {
+			t.Fatalf("after the refused stop: Pi of %s started %v, stopped %v", session, started, stopped)
+		}
+	}
+
+	if err := stop(func(folder string) bool { return folder == idleFolder || folder == project }); err != nil {
+		t.Fatal(err)
+	}
+	if started, stopped := fakePiPIDs(t, idle); len(started) != 1 || len(stopped) != 1 {
+		t.Fatalf("after the stop: Pi of the idle session started %v, stopped %v", started, stopped)
+	}
+	if _, stopped := fakePiPIDs(t, working); len(stopped) != 0 {
+		t.Fatalf("the stop ended the Pi of a session in another folder: %v", stopped)
+	}
+}
+
 // Main's copy of a session on a worker comes back from there, so deleting it would only lose its name, tags and
 // attachments.
 func TestASessionOnAWorkerIsDeletedOnlyOnceItContinuesOnMain(t *testing.T) {

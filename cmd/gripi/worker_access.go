@@ -45,7 +45,8 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, 
 		},
 		Pi:              remote.Pi{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, ExtensionDir: filepath.Dir(tree)},
 		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, SocketPath: cfg.SocketPath, Store: piAdapter.Store(),
-		Rewritten: handler.(interface{ Guard() agent.Guard }).Guard().Rewritten,
+		Rewritten:    handler.(interface{ Guard() agent.Guard }).Guard().Rewritten,
+		StopSessions: handler.(interface{ StopSessions(func(string) bool) error }).StopSessions,
 		ServeSocket: func(name string, placement remote.WorkerPlacement) (string, func() error, error) {
 			return startWorkerSocket(cfg, handler, name, placement)
 		},

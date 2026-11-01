@@ -56,8 +56,25 @@ func (handler *Handler) Guard() agent.Guard {
 	return handler.app.guard
 }
 
-// errSessionWorking refuses a move while a session of the repository works, which would lose the step it is on.
-var errSessionWorking = errors.New("working")
+// StopSessions ends the Pi of every Pi session of any user whose folder passes inFolder, unless one of them is working,
+// for the workers, whose copy of a session folder that a repository on a worker takes would replace what such a session
+// saves there.
+func (handler *Handler) StopSessions(inFolder func(folder string) bool) error {
+	_, err := handler.app.stopSessionsIn(context.Background(), nil, inFolder)
+	return err
+}
+
+// errSessionWorking refuses to stop a session while it works, which would lose the step it is on, for a move or for
+// the workers' StopSessions.
+var errSessionWorking error = sessionWorking{}
+
+type sessionWorking struct{}
+
+func (sessionWorking) Error() string { return "working" }
+
+// Refused makes the error a refusal for the workers, such as of a session that would start on a worker, which the
+// gateway answers with a conflict.
+func (sessionWorking) Refused() bool { return true }
 
 var errOtherUsersSessions = errors.New("the repository has sessions of other users, which only they may move")
 
@@ -124,9 +141,13 @@ func (app *application) moveRepository(response http.ResponseWriter, request *ht
 		return
 	}
 	var stopped []string
+	var owns func(key string) bool
+	if app.ownsSession != nil {
+		owns = func(key string) bool { return app.ownsSession(request, key) }
+	}
 	err := move(folder, func(inRepository func(string) bool) error {
 		var err error
-		stopped, err = app.stopSessionsIn(request, inRepository)
+		stopped, err = app.stopSessionsIn(request.Context(), owns, inRepository)
 		return err
 	})
 	// The sessions' files may have come back from the worker, which the guard must not take for another program's.
@@ -186,8 +207,9 @@ func (app *application) unforwardPort(response http.ResponseWriter, request *htt
 	writeJSON(response, map[string]int{"port": port})
 }
 
-// stopSessionsIn ends the Pi of every Pi session in a repository, unless one of them is working, and returns their keys.
-func (app *application) stopSessionsIn(request *http.Request, inRepository func(string) bool) ([]string, error) {
+// stopSessionsIn ends the Pi of every Pi session in a repository, unless one of them is working or, with owns, is not
+// the user's, and returns their keys.
+func (app *application) stopSessionsIn(ctx context.Context, owns func(key string) bool, inRepository func(string) bool) ([]string, error) {
 	saved, err := app.sessionStore.Sessions()
 	if err != nil {
 		return nil, err
@@ -205,7 +227,7 @@ func (app *application) stopSessionsIn(request *http.Request, inRepository func(
 	}
 	keys = slices.DeleteFunc(keys, func(key string) bool { return app.agentOf(key) == "hermes" })
 	for _, key := range keys {
-		if app.ownsSession != nil && !app.ownsSession(request, key) {
+		if owns != nil && !owns(key) {
 			return nil, errOtherUsersSessions
 		}
 		if app.rpcClients.Busy(key) {
@@ -213,7 +235,7 @@ func (app *application) stopSessionsIn(request *http.Request, inRepository func(
 		}
 	}
 	for _, key := range keys {
-		err := app.retireRPCClient(request.Context(), key, func() (bool, error) { return app.rpcClients.CloseClientIfIdle(key) })
+		err := app.retireRPCClient(ctx, key, func() (bool, error) { return app.rpcClients.CloseClientIfIdle(key) })
 		if err == nil && app.rpcClients.Registered(key) {
 			err = fmt.Errorf("session %s is %w; wait until it finishes or stop it", key, errSessionWorking)
 		}
