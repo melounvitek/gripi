@@ -510,7 +510,8 @@ func TestPisAndGripisOwnFoldersNeverMoveToAWorker(t *testing.T) {
 }
 
 // Two repositories on workers, or on their way to one, never share a folder: no folder of one, its main folder, a
-// worktree or its Git folder, holds or is in a folder of the other.
+// worktree or its Git folder, holds or is in a folder of the other, and they never share one of Pi's session folders,
+// which Pi names alike for paths such as /work/a-b and /work/a/b.
 func TestAMoveRefusesARepositoryThatSharesAFolderWithAnother(t *testing.T) {
 	base := t.TempDir()
 	project, feature := filepath.Join(base, "project"), filepath.Join(base, "worktrees", "feature")
@@ -529,10 +530,15 @@ func TestAMoveRefusesARepositoryThatSharesAFolderWithAnother(t *testing.T) {
 		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{feature}}},
 		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{filepath.Dir(feature)}}},
 		{other: mirror.Unit{Main: filepath.Join(feature, "vendor")}},
+		{other: mirror.Unit{Main: filepath.Join(base, "worktrees-feature")}},
+		{other: mirror.Unit{Main: filepath.Join(base, "project-x", "y")}},
 		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{filepath.Join(project, "vendor")}}, moving: true},
+		{other: mirror.Unit{Main: filepath.Join(base, "worktrees-feature")}, moving: true},
 		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{feature}}, moving: true},
 	} {
-		manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: t.TempDir()})
+		// A session started in a folder of the project.
+		store := fakeStore{sessions: map[string]string{"s.jsonl": filepath.Join(project, "x-y")}}
+		manager := newTestManager(t, ManagerOptions{Store: store, StateDir: t.TempDir()})
 		if test.moving {
 			done, err := manager.startMoving(test.other)
 			if err != nil {
@@ -547,6 +553,50 @@ func TestAMoveRefusesARepositoryThatSharesAFolderWithAnother(t *testing.T) {
 		if !refused(err) || !strings.Contains(err.Error(), project) || !strings.Contains(err.Error(), test.other.Main) {
 			t.Errorf("Move while %+v is on a worker or moving (%v) = %v", test.other, test.moving, err)
 		}
+	}
+}
+
+// A session that starts in a new folder of a repository on a worker needs the folder's session folder in the running
+// mirror of the repository's sessions, unless another repository on a worker has it.
+func TestARunningMirrorNeverTakesASessionFolderOfAnotherRepository(t *testing.T) {
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	manager := newTestManager(t, options)
+	project := t.TempDir()
+	ctx := context.Background()
+	if err := manager.Move(ctx, project, "beelink", func(func(string) bool) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	manager.mu.Lock()
+	sessions := manager.workers["beelink"].mirrors[manager.sessionsMain(mirror.Unit{Main: project})]
+	manager.mu.Unlock()
+	// Pi keeps the sessions of project/x-y in the folder of the other repository's.
+	other := project + "-x/y"
+	if err := manager.options.Placements.Add(Placement{Worker: "nuc", Unit: mirror.Unit{Main: other}}); err != nil {
+		t.Fatal(err)
+	}
+
+	process := agent.Process{Dir: filepath.Join(project, "x-y"), Command: []string{"pi", "--mode", "rpc"}}
+	_, _, err := manager.Launch(process)
+	if !refused(err) || !strings.Contains(err.Error(), project) || !strings.Contains(err.Error(), other) {
+		t.Fatalf("Launch of a session whose session folder is another repository's = %v", err)
+	}
+	manager.mu.Lock()
+	running := manager.workers["beelink"].mirrors[sessions.unit.Main]
+	manager.mu.Unlock()
+	if running != sessions || !sessions.running() {
+		t.Fatal("the refused session stopped the mirror of the repository's sessions")
+	}
+
+	// The mirror starts anew after a reconnect.
+	killHelper(t, options.Connection.Unit)
+	for deadline := time.Now().Add(5 * time.Second); manager.Status("beelink").State != Unreachable; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("status of the lost worker = %+v", manager.Status("beelink"))
+		}
+	}
+	if _, _, err := manager.Launch(process); !refused(err) || !strings.Contains(err.Error(), other) {
+		t.Fatalf("Launch of the session after a reconnect = %v", err)
 	}
 }
 

@@ -370,8 +370,13 @@ func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mir
 		}
 	}
 	if sessions != nil && sessions.running() {
-		if folders, _ := manager.sessionFolders(unit, worker.name); !slices.ContainsFunc(folders, func(folder string) bool { return !sessions.unit.Contains(folder) }) {
+		folders, _ := manager.sessionFolders(unit, worker.name)
+		if !slices.ContainsFunc(folders, func(folder string) bool { return !sessions.unit.Contains(folder) }) {
 			return nil
+		}
+		// The running mirror keeps running when another repository has a new folder.
+		if err := manager.claim(unit.Main, nil, folders); err != nil {
+			return err
 		}
 		// The worker's helper watches only the folders that its mirror started with.
 		if err := manager.stopMirror(ctx, worker, sessions.unit.Main); err != nil {
@@ -577,12 +582,10 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 		return err
 	}
 	unit := repository
+	var cwds []string
 	if sessions {
-		folders, cwds := manager.sessionFolders(repository, worker.name)
-		// The worker's helper makes the folders that the worker doesn't have yet.
-		if err := manager.rememberSessions(repository.Main, worker.name, cwds); err != nil {
-			return err
-		}
+		var folders []string
+		folders, cwds = manager.sessionFolders(repository, worker.name)
 		unit = mirror.Unit{Main: folders[0], Worktrees: folders[1:]}
 	}
 	folder := manager.mirrorFolder(unit.Main)
@@ -596,6 +599,13 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 			if !unit.Contains(root) {
 				unit.Worktrees = append(unit.Worktrees, root)
 			}
+		}
+		if err := manager.claim(repository.Main, nil, unitFolders(unit)); err != nil {
+			return err
+		}
+		// The worker's helper makes the folders that the worker doesn't have yet.
+		if err := manager.rememberSessions(repository.Main, worker.name, cwds); err != nil {
+			return err
 		}
 	}
 	destination.Applied = manager.applied(repository, sessions)
@@ -715,7 +725,7 @@ func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root str
 		if slices.Contains(folders, root) {
 			return nil
 		}
-		if err := manager.claim(unit.Main, []string{root}); err != nil {
+		if err := manager.claim(unit.Main, []string{root}, []string{sessionFolder(manager.options.SessionsRoot, root)}); err != nil {
 			return err
 		}
 		info, err := os.Lstat(root)
@@ -779,20 +789,21 @@ func shared(folders, others []string) (string, bool) {
 }
 
 // claim refuses the folders that the repository whose main folder is main would take, roots such as its main folder
-// and worktrees, when another repository on a worker, or moving to one, owns one of them: no root of one may be or be
-// in a root of the other.
-func (manager *Manager) claim(main string, roots []string) error {
+// and worktrees, and Pi's session folders, when another repository on a worker, or moving to one, owns one of them: no
+// root of one may be or be in a root of the other, and they never share a session folder, which Pi names alike for
+// paths such as /work/a-b and /work/a/b.
+func (manager *Manager) claim(main string, roots, sessionFolders []string) error {
 	type owner struct {
-		unit  mirror.Unit
-		where string
+		unit          mirror.Unit
+		worker, where string
 	}
 	var owners []owner
 	for _, placement := range manager.options.Placements.All() {
-		owners = append(owners, owner{placement.Unit, "on worker " + placement.Worker})
+		owners = append(owners, owner{placement.Unit, placement.Worker, "on worker " + placement.Worker})
 	}
 	manager.mu.Lock()
 	for _, unit := range manager.movingUnits {
-		owners = append(owners, owner{unit, "moving to a worker"})
+		owners = append(owners, owner{unit, "", "moving to a worker"})
 	}
 	manager.mu.Unlock()
 	for _, owner := range owners {
@@ -801,6 +812,12 @@ func (manager *Manager) claim(main string, roots []string) error {
 		}
 		if folder, found := shared(roots, unitFolders(owner.unit)); found {
 			return refuse("%s and %s, which is %s, would share %s", main, owner.unit.Main, owner.where, folder)
+		}
+		owned, _ := manager.sessionFolders(owner.unit, owner.worker)
+		for _, folder := range sessionFolders {
+			if slices.Contains(owned, folder) {
+				return refuse("%s and %s, which is %s, would share Pi's session folder %s", main, owner.unit.Main, owner.where, folder)
+			}
 		}
 	}
 	return nil
@@ -1056,7 +1073,8 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 	}
 	defer done()
 	// Once the unit is moving, a move of another unit with a shared folder is refused too.
-	if err := manager.claim(unit.Main, unitFolders(unit)); err != nil {
+	sessionFolders, _ := manager.sessionFolders(unit, name)
+	if err := manager.claim(unit.Main, unitFolders(unit), sessionFolders); err != nil {
 		return err
 	}
 	if err := stop(unit.Contains); err != nil {
