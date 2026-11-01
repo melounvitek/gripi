@@ -843,3 +843,18 @@ test("a run that settles without a tool's result leaves the tool's outcome unkno
   assert.equal(running.children.length, 0);
   assert.equal(finished.className, "message message--tool-call");
 });
+
+test("a new run's tool call is pending while one that an earlier run left without a result stays unknown, as history shows them", () => {
+  const conversation = { element: new FakeElement("section"), followLiveOutput: () => false, afterLiveOutputChange() {}, resetOversizedFollow() {} };
+  const renderer = new LiveMessageRenderer(new FakeDocument(), conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("section");
+  renderer.conversationScroll = conversation.element;
+  const lost = new FakeElement("article");
+  lost.className = "message message--tool-call message--tool-unknown";
+  conversation.element.append(lost, renderer.liveOutput);
+
+  renderer.renderMessageEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "bash-2", name: "bash", arguments: { command: "make check" } }] } });
+  const running = renderer.liveOutput.children[0];
+  assert.match(running.className, /message--tool-pending/);
+  assert.equal(lost.className, "message message--tool-call message--tool-unknown");
+});

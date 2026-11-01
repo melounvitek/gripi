@@ -1196,13 +1196,20 @@ type unit struct {
 	Dependencies []entry
 	Estimate     int64
 	ToolPending  bool
+	ToolUnknown  bool
 }
 
 func projectedUnits(entries []entry) ([]unit, bool) {
 	pending := make(map[string]int)
 	subagentSources := make(map[string]entry)
 	results := make(map[string]bool)
-	for _, item := range entries {
+	// Pi runs every call of a turn before anything but the calls' results follows them, so a call without a result can
+	// still run only in the latest turn. A later message means that the run that made it ended without the result.
+	latestTurn := -1
+	for index, item := range entries {
+		if item.Type == "custom_message" || item.Type == "message" && item.Role != "toolResult" {
+			latestTurn = index
+		}
 		// Results with empty content have no segment but still complete their call.
 		if item.ResultToolCallID != "" {
 			results[item.ResultToolCallID] = true
@@ -1214,7 +1221,7 @@ func projectedUnits(entries []entry) ([]unit, bool) {
 		}
 	}
 	var result []unit
-	for _, item := range entries {
+	for index, item := range entries {
 		for segmentIndex, part := range item.Segments {
 			if part.Role == "toolResult" {
 				if position, ok := pending[part.ToolCallID]; ok {
@@ -1227,7 +1234,8 @@ func projectedUnits(entries []entry) ([]unit, bool) {
 					continue
 				}
 			}
-			created := unit{Key: [2]int{item.Ordinal, segmentIndex}, Entry: item, Estimate: part.Minimum, ToolPending: part.Role == "assistant" && part.ToolCallID != "" && !results[part.ToolCallID]}
+			missing := part.Role == "assistant" && part.ToolCallID != "" && !results[part.ToolCallID]
+			created := unit{Key: [2]int{item.Ordinal, segmentIndex}, Entry: item, Estimate: part.Minimum, ToolPending: missing && index == latestTurn, ToolUnknown: missing && index < latestTurn}
 			if part.Role == "toolResult" && part.ToolName == "subagent" {
 				if source, ok := subagentSources[part.ToolCallID]; ok {
 					created.Dependencies = append(created.Dependencies, source)
@@ -1282,7 +1290,7 @@ func renderWindow(path string, indexed *index, units []unit, end int, after *int
 		if retainedBytes+messageRetainedBytes > MaxRetainedWindowBytes {
 			break
 		}
-		rendered[0].ToolPending = item.ToolPending
+		rendered[0].ToolPending, rendered[0].ToolUnknown = item.ToolPending, item.ToolUnknown
 		messages = append(messages, rendered[0])
 		bytesUsed += messageBytes
 		retainedBytes += messageRetainedBytes

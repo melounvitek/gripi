@@ -940,9 +940,9 @@ func messageRoleKey(role string) string {
 	}
 }
 
-// messageClass names the classes of a message. A tool call without a result is pending while the session's agent runs;
-// once the run has ended without one, such as when Pi or the worker that ran it was lost, nobody knows how the call
-// went, which the live renderer shows the same way when the run settles.
+// messageClass names the classes of a message. A tool call without a result is pending while the run that made it goes
+// on; once that run has ended without one, such as when Pi or the worker that ran it was lost, nobody knows how the
+// call went, which the live renderer shows the same way when the run settles.
 func messageClass(message *agent.Message, running bool) string {
 	values := []string{"message", "message--" + messageRoleKey(message.Role)}
 	if message.Compact {
@@ -977,7 +977,7 @@ func messageClass(message *agent.Message, running bool) string {
 	}
 	if message.ToolPending && running {
 		values = append(values, "message--tool-pending")
-	} else if message.ToolPending {
+	} else if message.ToolPending || message.ToolUnknown {
 		values = append(values, "message--tool-unknown")
 	}
 	if message.Omitted {

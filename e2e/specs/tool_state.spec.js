@@ -68,4 +68,11 @@ test("a run that settles without a tool's result leaves its outcome unknown, as 
   await expect(page.locator("article.message--error").last()).toContainText("The outcome of the running step is unknown.");
   await page.getByRole("group", { name: "Agent activity", exact: true }).getByRole("button", { name: "Brief", exact: true }).click();
   await expect(page.locator(".focus-activity-summary").last()).toHaveClass(/has-unknown/);
+
+  // The next run's call is pending, and the lost one stays unknown, as history shows them during that run.
+  const next = [call("next-step", "bash", { command: "make check" })];
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant(next) }, { type: "message_end", message: assistant(next) }, start("next-step", "bash", next[0].arguments));
+  await expect(page.locator('[data-tool-call-id="next-step"]')).toHaveClass(/message--tool-pending/);
+  await expect(lost).toHaveClass(/message--tool-unknown/);
+  await expect(lost).not.toHaveClass(/message--tool-pending/);
 });
