@@ -142,13 +142,14 @@ func (conn *Conn) CopyUnit(ctx context.Context, unit mirror.Unit, aside string) 
 	return conn.send(ctx, unit, unit.Main, aside, mirror.Options{})
 }
 
-// send copies main's unit to the folder to on the worker with `gripi worker receive`.
+// send copies main's unit to the folder to on the worker with `gripi worker receive`, in the view of main's home
+// folder.
 func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to, aside string, options mirror.Options) error {
 	words := []string{conn.installDir + "/bin/gripi", "worker", "receive"}
 	if aside != "" {
 		words = append(words, "--aside", aside)
 	}
-	command, release, err := conn.Command(ctx, ShellQuote(append(words, unit.Main, to)...))
+	command, release, err := conn.Command(ctx, ShellQuote(conn.inView(append(words, unit.Main, to)...)...))
 	if err != nil {
 		return err
 	}

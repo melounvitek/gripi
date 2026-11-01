@@ -85,28 +85,28 @@ func TestInstallHelperUploadsOnlyAnotherVersion(t *testing.T) {
 	ctx := context.Background()
 	installed := filepath.Join(home, "gripi", "worker", "bin", "gripi")
 
-	dir, err := installHelper(ctx, pool, gripi, version, "gripi/worker")
-	if err != nil || dir != filepath.Join(home, "gripi", "worker") || must(helper.FileVersion(installed)) != version {
-		t.Fatalf("installHelper = %q, %v", dir, err)
+	dir, workerHome, err := installHelper(ctx, pool, gripi, version, "gripi/worker")
+	if err != nil || dir != filepath.Join(home, "gripi", "worker") || workerHome != home || must(helper.FileVersion(installed)) != version {
+		t.Fatalf("installHelper = %q, %q, %v", dir, workerHome, err)
 	}
 	for _, path := range []string{filepath.Join(home, "gripi"), filepath.Dir(installed), installed} {
 		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0700 {
 			t.Fatalf("%s = %v, %v", path, info, err)
 		}
 	}
-	if _, err := installHelper(ctx, pool, gripi, version, "gripi/worker"); err != nil || len(sshCalls(t, "mktemp")) != 1 {
+	if _, _, err := installHelper(ctx, pool, gripi, version, "gripi/worker"); err != nil || len(sshCalls(t, "mktemp")) != 1 {
 		t.Fatalf("installHelper of the installed version = %v, uploads %d", err, len(sshCalls(t, "mktemp")))
 	}
 
 	os.WriteFile(installed, []byte("an older helper"), 0700)
-	if _, err := installHelper(ctx, pool, gripi, version, "gripi/worker"); err != nil || must(helper.FileVersion(installed)) != version {
+	if _, _, err := installHelper(ctx, pool, gripi, version, "gripi/worker"); err != nil || must(helper.FileVersion(installed)) != version {
 		t.Fatalf("installHelper over another version = %v", err)
 	}
 	if entries, _ := os.ReadDir(filepath.Dir(installed)); len(entries) != 1 {
 		t.Fatalf("bin holds %v", entries)
 	}
 	absolute := filepath.Join(t.TempDir(), "worker")
-	if dir, err := installHelper(ctx, pool, gripi, version, absolute); err != nil || dir != absolute {
+	if dir, _, err := installHelper(ctx, pool, gripi, version, absolute); err != nil || dir != absolute {
 		t.Fatalf("installHelper into %s = %q, %v", absolute, dir, err)
 	}
 }
@@ -117,11 +117,11 @@ func TestInstallHelperKeepsTheHelperWhenTheNewOneDoesNotRun(t *testing.T) {
 	pool := newTestPool(t)
 	ctx := context.Background()
 	installed := filepath.Join(home, "worker", "bin", "gripi")
-	if _, err := installHelper(ctx, pool, gripi, must(HelperVersion(gripi)), "worker"); err != nil {
+	if _, _, err := installHelper(ctx, pool, gripi, must(HelperVersion(gripi)), "worker"); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := installHelper(ctx, pool, failing, must(HelperVersion(failing)), "worker")
+	_, _, err := installHelper(ctx, pool, failing, must(HelperVersion(failing)), "worker")
 	if err == nil || !strings.Contains(err.Error(), "does not run") {
 		t.Fatalf("installHelper of a failing helper = %v", err)
 	}

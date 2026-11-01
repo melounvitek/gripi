@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,10 @@ type Options struct {
 	RuntimeDir string
 	// Lease is helper.DefaultLease when zero.
 	Lease time.Duration
+	// Home is main's home folder. When the worker user's home folder has another path, what runs on the worker with
+	// main's paths, such as the helper and the copies, runs in a private view in which Home shows the worker user's
+	// home folder (package view). Without it, they see the worker's files as they are.
+	Home string
 }
 
 // Conn is main's connection to a worker: ssh channels and forwards from its Pool, and the helper's Control.
@@ -48,6 +53,7 @@ type Conn struct {
 	options    Options
 	socketDir  string
 	installDir string // absolute, on the worker
+	home       string // the worker user's home folder, outside the view
 	serving    chan struct{}
 }
 
@@ -85,14 +91,18 @@ func Connect(ctx context.Context, options Options) (*Conn, error) {
 
 func (conn *Conn) start(ctx context.Context, version string) error {
 	var err error
-	if conn.installDir, err = installHelper(ctx, conn.Pool, conn.options.Executable, version, conn.options.InstallDir); err != nil {
+	if conn.installDir, conn.home, err = installHelper(ctx, conn.Pool, conn.options.Executable, version, conn.options.InstallDir); err != nil {
 		return err
 	}
+	// In the view, the helper is not the unit's main process, so NotifyAccess=all lets it feed systemd's watchdog.
 	serve := []string{"systemd-run", "--user", "--pipe", "--quiet", "--collect", "--unit", conn.options.Unit,
-		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL",
+		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL", "-p", "NotifyAccess=all",
 		conn.installDir + "/bin/gripi", "worker", "serve", "--lease", conn.options.Lease.String()}
 	if conn.options.RuntimeDir != "" {
 		serve = append(serve, "--runtime-dir", conn.options.RuntimeDir)
+	}
+	if conn.options.Home != "" {
+		serve = append(serve, "--home", conn.options.Home)
 	}
 	command, release, err := conn.Command(ctx, ShellQuote(serve...))
 	if err != nil {
@@ -143,6 +153,32 @@ func (conn *Conn) stream(ctx context.Context, subcommand, name string) (*exec.Cm
 		words = append(words, "--runtime-dir", conn.options.RuntimeDir)
 	}
 	return conn.Command(ctx, ShellQuote(append(words, name, conn.Instance())...))
+}
+
+// inView returns the words that run a command on the worker in the view of main's home folder.
+func (conn *Conn) inView(words ...string) []string {
+	return viewWords(conn.installDir, conn.options.Home, words...)
+}
+
+func viewWords(installDir, home string, words ...string) []string {
+	if home == "" {
+		return words
+	}
+	return append([]string{installDir + "/bin/gripi", "worker", "enter", "--home", home, "--"}, words...)
+}
+
+// runInView runs a sh script on the worker in the view of main's home folder, and returns its output.
+func (conn *Conn) runInView(ctx context.Context, script string, arguments ...string) (string, error) {
+	return runWords(ctx, conn.Pool, nil, conn.inView(append([]string{"sh", "-c", script, "sh"}, arguments...)...)...)
+}
+
+// workerPath returns where a path of main's is on the worker for what runs outside the view, such as sshd: in the
+// worker user's home folder when it is in main's.
+func (conn *Conn) workerPath(path string) string {
+	if home := conn.options.Home; home != "" && (path == home || strings.HasPrefix(path, home+"/")) {
+		return conn.home + strings.TrimPrefix(path, home)
+	}
+	return path
 }
 
 // Close stops the helper, which kills every session's processes, and closes the connection.

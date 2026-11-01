@@ -14,8 +14,9 @@ import (
 )
 
 // newWorkers runs the sessions of the repositories placed on workers there, with Pi's adapter's launcher. It connects
-// to workers with the options of connection.
+// to workers with the options of connection, in the view of the gateway user's home folder.
 func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, connection remote.Options) (*remote.Manager, error) {
+	connection.Home = cfg.Home
 	placements, err := remote.LoadPlacements(cfg.WorkerPlacementsPath)
 	if err != nil {
 		return nil, err

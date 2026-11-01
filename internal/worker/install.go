@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/worker/helper"
@@ -29,8 +30,10 @@ func HelperVersion(executable string) (string, error) {
 	return helper.FileVersion(executable)
 }
 
-// installedScript prints the install folder as an absolute path, then the SHA-256 of the helper in it, if any.
+// installedScript prints the worker user's home folder and the install folder as an absolute path, then the SHA-256
+// of the helper in it, if any.
 const installedScript = `umask 077
+echo "$HOME"
 case $1 in /*) dir=$1 ;; *) dir=$HOME/$1 ;; esac
 mkdir -p "$dir/bin" && cd "$dir" && pwd -P || exit
 sha256sum 2>/dev/null < bin/gripi || true
@@ -50,30 +53,44 @@ mv -f "$temporary" bin/gripi
 `
 
 // installHelper makes sure that the worker's helper is the executable of version, and returns the install folder as an
-// absolute path on the worker. dir is relative to the worker's home unless it is absolute.
-func installHelper(ctx context.Context, pool *Pool, executable, version, dir string) (string, error) {
+// absolute path on the worker, and the worker user's home folder. dir is relative to that home unless it is absolute.
+func installHelper(ctx context.Context, pool commander, executable, version, dir string) (installed, home string, err error) {
 	output, err := runScript(ctx, pool, nil, installedScript, dir)
 	if err != nil {
-		return "", fmt.Errorf("check the helper on the worker: %w", err)
+		return "", "", fmt.Errorf("check the helper on the worker: %w", err)
 	}
-	dir, installed, _ := strings.Cut(output, "\n")
-	if installed, _, _ = strings.Cut(installed, " "); installed == version {
-		return dir, nil
+	lines := strings.SplitN(output, "\n", 3)
+	if len(lines) < 3 {
+		return "", "", fmt.Errorf("unexpected answer from the worker: %q", output)
+	}
+	home, installed = lines[0], lines[1]
+	if hash, _, _ := strings.Cut(lines[2], " "); hash == version {
+		return installed, home, nil
 	}
 	file, err := os.Open(executable)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer file.Close()
-	if _, err := runScript(ctx, pool, file, uploadScript, dir, version); err != nil {
-		return "", fmt.Errorf("upload the helper: %w", err)
+	if _, err := runScript(ctx, pool, file, uploadScript, installed, version); err != nil {
+		return "", "", fmt.Errorf("upload the helper: %w", err)
 	}
-	return dir, nil
+	return installed, home, nil
+}
+
+// commander starts commands for the worker user's shell, each in an ssh channel of its own, as a Pool does.
+type commander interface {
+	Command(ctx context.Context, remote string) (command *exec.Cmd, release func(), err error)
 }
 
 // runScript runs a sh script on the worker, whatever the user's shell is, and returns its output.
-func runScript(ctx context.Context, pool *Pool, input io.Reader, script string, arguments ...string) (string, error) {
-	command, release, err := pool.Command(ctx, ShellQuote(append([]string{"sh", "-c", script, "sh"}, arguments...)...))
+func runScript(ctx context.Context, pool commander, input io.Reader, script string, arguments ...string) (string, error) {
+	return runWords(ctx, pool, input, append([]string{"sh", "-c", script, "sh"}, arguments...)...)
+}
+
+// runWords runs a command on the worker and returns its output.
+func runWords(ctx context.Context, pool commander, input io.Reader, words ...string) (string, error) {
+	command, release, err := pool.Command(ctx, ShellQuote(words...))
 	if err != nil {
 		return "", err
 	}

@@ -55,9 +55,13 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// buildGripi builds Gripi as main uploads it to workers.
+// buildGripi builds Gripi as main uploads it to workers, unless GRIPI_TEST_GRIPI names such a build, for a worker
+// without Go.
 func buildGripi(t *testing.T) string {
 	t.Helper()
+	if built := os.Getenv("GRIPI_TEST_GRIPI"); built != "" {
+		return built
+	}
 	gripiBuild.once.Do(func() {
 		if gripiBuild.folder, gripiBuild.err = os.MkdirTemp("", "gripi-helper-test-"); gripiBuild.err != nil {
 			return
@@ -75,7 +79,8 @@ func buildGripi(t *testing.T) string {
 	return gripiBuild.binary
 }
 
-// unitHelper is `gripi worker serve` running under systemd as main runs it on a worker.
+// unitHelper is `gripi worker serve` running under systemd as main runs it on a worker. With GRIPI_TEST_VIEW_HOME,
+// main's home folder there, it runs in the private view of it.
 type unitHelper struct {
 	*fakeMain
 	runtimeDir string
@@ -98,8 +103,8 @@ func startUnitHelper(t *testing.T, lease time.Duration) *unitHelper {
 	rand.Read(unit)
 	runtimeDir := filepath.Join(folder, "run")
 	command := exec.Command("systemd-run", "--user", "--pipe", "--quiet", "--collect", "--unit", "gripi-test-"+hex.EncodeToString(unit),
-		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL",
-		gripi, "worker", "serve", "--lease", lease.String(), "--runtime-dir", runtimeDir)
+		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL", "-p", "NotifyAccess=all",
+		gripi, "worker", "serve", "--lease", lease.String(), "--runtime-dir", runtimeDir, "--home", os.Getenv("GRIPI_TEST_VIEW_HOME"))
 	command.Stderr = os.Stderr
 	input, err := command.StdinPipe()
 	if err != nil {

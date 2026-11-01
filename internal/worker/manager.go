@@ -438,7 +438,7 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 		socketDir = filepath.Dir(manager.options.SocketPath)
 	}
 	if err := CheckSeparate(options.Destination, func(script string, arguments ...string) (string, error) {
-		return runScript(ctx, conn.Pool, nil, script, arguments...)
+		return conn.runInView(ctx, script, arguments...)
 	}, manager.options.Pi.AgentDir, socketDir); err != nil {
 		return fail(err)
 	}
@@ -450,7 +450,8 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 	if err != nil {
 		return fail(err)
 	}
-	if _, err := conn.Forward(ctx, Forward{Remote: true, ListenSocket: manager.options.SocketPath, ConnectSocket: socket}); err != nil {
+	// sshd creates the socket outside the view, where the worker's processes find it at main's path in the view.
+	if _, err := conn.Forward(ctx, Forward{Remote: true, ListenSocket: conn.workerPath(manager.options.SocketPath), ConnectSocket: socket}); err != nil {
 		stopSocket()
 		return fail(err)
 	}
@@ -1292,7 +1293,7 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 			continue
 		}
 		aside := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".gripi-aside", now, folder)
-		moved, err := runScript(ctx, conn.Pool, nil, `[ ! -e "$1" ] || { mkdir -p "$(dirname "$2")" && mv "$1" "$2" && echo moved; }`, folder, aside)
+		moved, err := conn.runInView(ctx, `[ ! -e "$1" ] || { mkdir -p "$(dirname "$2")" && mv "$1" "$2" && echo moved; }`, folder, aside)
 		if err != nil {
 			return fmt.Errorf("keep aside the copy of %s on worker %s: %w", folder, worker.name, err)
 		}

@@ -39,7 +39,7 @@ func newBootstrapRig(t *testing.T) *bootstrapRig {
 	t.Setenv("HOME", rig.mainHome)
 	ctx := context.Background()
 	pool := newTestPool(t)
-	dir, err := installHelper(ctx, pool, gripi, must(HelperVersion(gripi)), "gripi-worker")
+	dir, _, err := installHelper(ctx, pool, gripi, must(HelperVersion(gripi)), "gripi-worker")
 	if err != nil {
 		t.Fatal(err)
 	}

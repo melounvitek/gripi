@@ -13,7 +13,8 @@ import (
 // such as when it is this machine as the same user, or mounts the same home folder. Gripi would then replace main's
 // own files there with the worker's, such as Pi's logins with logins without refresh tokens, or main's gripi socket.
 // It leaves a file with a random name in each of the folders that exist here, and run runs a sh script with their
-// paths on the worker and returns what the script printed.
+// paths on the worker, as the worker's sessions see them in the view of main's home folder, and returns what the
+// script printed. Another user on this machine sees its own home folder there, which is safe.
 func CheckSeparate(destination string, run func(script string, arguments ...string) (string, error), folders ...string) error {
 	var markers []string
 	defer func() {

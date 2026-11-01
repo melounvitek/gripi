@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -23,7 +24,8 @@ import (
 
 // These tests connect with the real ssh to GRIPI_TEST_SSH, such as localhost, and install the helper in
 // GRIPI_TEST_SSH_DIR there (gripi-helper-test in the home folder when unset), which they remove afterwards. The
-// worker needs a systemd user manager, and no other helper may run there.
+// worker needs a systemd user manager, and no other helper may run there. When the worker user's home folder differs
+// from this one's, the helper runs in the private view of this one.
 
 type realWorker struct {
 	t           *testing.T
@@ -52,8 +54,12 @@ func connectRealWorker(t *testing.T, lease time.Duration) *realWorker {
 	t.Cleanup(func() { os.RemoveAll(socketDir) })
 	unit := make([]byte, 4)
 	rand.Read(unit)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	worker := &realWorker{t: t, destination: destination, ssh: ssh, options: Options{
-		Destination: destination, SocketDir: socketDir, Executable: gripi, Lease: lease,
+		Destination: destination, SocketDir: socketDir, Executable: gripi, Lease: lease, Home: home,
 		InstallDir: cmp.Or(os.Getenv("GRIPI_TEST_SSH_DIR"), "gripi-helper-test"), Unit: "gripi-test-" + hex.EncodeToString(unit),
 	}}
 	t.Cleanup(func() { worker.direct("rm -rf " + ShellQuote(worker.options.InstallDir)) })
@@ -159,6 +165,67 @@ func TestRealSSHAnswersPingsWhileOtherChannelsAreSaturated(t *testing.T) {
 	}
 }
 
+// Sessions and copies see main's home folder as the worker user's, as that user.
+func TestRealSSHSessionsSeeMainsHomeFolderAsTheWorkersOwn(t *testing.T) {
+	worker := connectRealWorker(t, 0)
+	ctx := context.Background()
+	// The install folder is in the worker user's home folder, where the sessions see it in main's.
+	installed := worker.conn.installDir
+	if !strings.HasPrefix(installed, worker.conn.home+"/") {
+		t.Skip("GRIPI_TEST_SSH_DIR is outside the worker user's home folder")
+	}
+	seen := worker.options.Home + strings.TrimPrefix(installed, worker.conn.home)
+	main := t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, "notes"), []byte("from main\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.conn.copyFolder(ctx, main, seen+"/copy", nil); err != nil {
+		t.Fatal(err)
+	}
+	if copied := worker.direct("cat " + ShellQuote(installed+"/copy/notes")); copied != "from main\n" {
+		t.Fatalf("the copy on the worker has %q", copied)
+	}
+
+	script := `printf '%s\n' "$HOME" "$PWD" "$(pwd -P)" "$(id -u)" > seen.txt; echo $$ >> seen.txt; exec sleep 1000`
+	if err := worker.conn.CreateSession(ctx, Session{ID: "s1", Cwd: seen, Args: []string{"sh", "-c", script}}); err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for deadline := time.Now().Add(10 * time.Second); len(lines) < 5; time.Sleep(100 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the session wrote %q", lines)
+		}
+		lines = strings.Fields(worker.direct("cat " + ShellQuote(installed+"/seen.txt") + " 2>/dev/null || true"))
+	}
+	if expected := []string{worker.options.Home, seen, seen, strings.TrimSpace(worker.direct("id -u"))}; !slices.Equal(lines[:4], expected) {
+		t.Fatalf("the session saw HOME, PWD, pwd -P and id -u %q, want %q", lines[:4], expected)
+	}
+	if err := worker.conn.ReleaseSession(ctx, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if left := worker.running(lines[4:]); len(left) > 0 {
+		t.Fatalf("the released session still runs %v", left)
+	}
+}
+
+// systemd's watchdog kills a helper that hangs, with every session, also in the private view, where the helper is not
+// the unit's main process.
+func TestRealSSHAHelperThatHangsStopsWithEverySession(t *testing.T) {
+	worker := connectRealWorker(t, 0)
+	pids := worker.startPi("s1")
+
+	worker.direct(`pid=$(systemctl --user show -p MainPID --value ` + ShellQuote(worker.options.Unit) + `)
+while child=$(pgrep -P "$pid" -f 'worker serve'); do pid=$child; done
+kill -STOP "$pid"`)
+	hung := time.Now()
+	for deadline := hung.Add(20 * time.Second); len(worker.running(pids)) > 0; time.Sleep(200 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("processes still running %s after the helper hung: %v", time.Since(hung), worker.running(pids))
+		}
+	}
+	t.Logf("the sessions stopped %s after the helper hung", time.Since(hung).Round(time.Millisecond))
+}
+
 type zeros struct{}
 
 func (zeros) Read(buffer []byte) (int, error) { clear(buffer); return len(buffer), nil }
@@ -224,7 +291,7 @@ func TestRealSSHForwardsMainsSocketOverAStaleOne(t *testing.T) {
 	pool := NewPool(destination, socketDir)
 	t.Cleanup(pool.Close)
 	ctx := context.Background()
-	dir, err := installHelper(ctx, pool, gripi, version, cmp.Or(os.Getenv("GRIPI_TEST_SSH_DIR"), "gripi-helper-test"))
+	dir, _, err := installHelper(ctx, pool, gripi, version, cmp.Or(os.Getenv("GRIPI_TEST_SSH_DIR"), "gripi-helper-test"))
 	if err != nil {
 		t.Fatal(err)
 	}
