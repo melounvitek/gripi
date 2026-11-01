@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
 )
@@ -135,6 +136,28 @@ func writeWorkersError(response http.ResponseWriter, action string, err error) {
 	writeJSONStatus(response, http.StatusBadGateway, map[string]string{"error": err.Error()})
 }
 
+// holdMoving holds a repository for its move or return, unless a move or return holds it, a folder in it, or a folder
+// that it is in, which holdMoving then returns.
+func (app *application) holdMoving(repository string) (release func(), held string) {
+	app.movingMu.Lock()
+	defer app.movingMu.Unlock()
+	for _, other := range app.movingFolders {
+		if folderWithin(repository, other) || folderWithin(other, repository) {
+			return nil, other
+		}
+	}
+	app.movingFolders = append(app.movingFolders, repository)
+	return func() {
+		app.movingMu.Lock()
+		defer app.movingMu.Unlock()
+		app.movingFolders = slices.DeleteFunc(app.movingFolders, func(folder string) bool { return folder == repository })
+	}, ""
+}
+
+func folderWithin(path, folder string) bool {
+	return path == folder || strings.HasPrefix(path, folder+string(filepath.Separator))
+}
+
 func (app *application) moveRepository(response http.ResponseWriter, request *http.Request, move func(folder string, stop func(func(string) bool) error) error) {
 	folder, ok := app.workerFolder(response, request)
 	if !ok {
@@ -149,12 +172,12 @@ func (app *application) moveRepository(response http.ResponseWriter, request *ht
 	} else if main, _, err := app.workers.Repository(folder); err == nil {
 		repository = main
 	}
-	unlock, locked := app.movingRepositories.TryLock(repository)
-	if !locked {
-		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the repository of " + repository + " is moving already"})
+	release, held := app.holdMoving(repository)
+	if held != "" {
+		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the repository of " + held + " is moving already"})
 		return
 	}
-	defer unlock()
+	defer release()
 	var stopped []string
 	unsaved := map[string]func(context.Context) error{}
 	var owns func(key string) bool

@@ -81,9 +81,10 @@ type application struct {
 	sudoRequests            sudoRequests
 	// workers move repositories to workers and back, which gripi commands can't ask for when it is nil.
 	workers Workers
-	// movingRepositories holds a repository from the start of its move or return until its new sessions that the move
-	// stopped have started again.
-	movingRepositories keyedlock.Mutexes
+	// movingFolders are the repositories of moves and returns, from their start until the new sessions that they stopped
+	// have started again.
+	movingMu      sync.Mutex
+	movingFolders []string
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
 	voice  *hermesdashboard.Client
 	hermes hermesConversation

@@ -427,8 +427,24 @@ func TestARepositoryMovesNoFurtherUntilItsNewSessionsStartedAgain(t *testing.T) 
 		t.Fatalf("return while the move started its new session again = %d %s", overlapping.Code, overlapping.Body.String())
 	}
 	workers.copying = nil
+	// The Git repository in the returned folder is not on the worker any more, but moving it while the return starts
+	// its new session again would end that session too.
+	var moving *httptest.ResponseRecorder
+	overlap = func() {
+		answered := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			answered <- command(localHandler(t, handler), http.MethodPost, "/workers/move", url.Values{"folder": {app}, "worker": {"beelink"}})
+		}()
+		select {
+		case moving = <-answered:
+		case <-time.After(5 * time.Second):
+		}
+	}
 	if response := postWorkspaceForm(handler, "/workers/return", url.Values{"session": {session}}, ""); response.Code != http.StatusOK {
 		t.Fatalf("return = %d %s", response.Code, response.Body.String())
+	}
+	if moving == nil || moving.Code != http.StatusConflict || !strings.Contains(moving.Body.String(), "moving already") {
+		t.Fatalf("move of a Git repository in the folder while its return started its new session again = %v", moving)
 	}
 	if !slices.Equal(onWorker, []bool{false, true, false}) {
 		t.Fatalf("Pi of the new session started on the worker %v", onWorker)
