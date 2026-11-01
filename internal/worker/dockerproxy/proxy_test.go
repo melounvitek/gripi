@@ -35,6 +35,11 @@ type received struct {
 // startProxy serves a proxy in front of a fake Docker daemon on a Unix socket, and returns a client of the proxy.
 func startProxy(t *testing.T, daemon http.Handler) (*http.Client, string) {
 	t.Helper()
+	return startProxyFor(t, daemon, from, to)
+}
+
+func startProxyFor(t *testing.T, daemon http.Handler, from, to string) (*http.Client, string) {
+	t.Helper()
 	dir := t.TempDir()
 	listener, err := net.Listen("unix", filepath.Join(dir, "daemon.sock"))
 	if err != nil {
@@ -93,13 +98,42 @@ func recorder() (http.Handler, chan received) {
 
 func post(t *testing.T, client *http.Client, path, body string) {
 	t.Helper()
+	if status, message := send(t, client, path, body); status != http.StatusCreated {
+		t.Fatalf("POST %s: status %d, %q", path, status, message)
+	}
+}
+
+// send posts body, and returns the answer's status and message.
+func send(t *testing.T, client *http.Client, path, body string) (int, string) {
+	t.Helper()
 	res, err := client.Post("http://docker"+path, "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusCreated {
-		t.Fatalf("POST %s: status %d", path, res.StatusCode)
+	defer res.Body.Close()
+	var answer struct{ Message string }
+	json.NewDecoder(res.Body).Decode(&answer)
+	return res.StatusCode, answer.Message
+}
+
+// refuse checks that the proxy refuses the request with a message that contains want, and doesn't pass it on.
+func refuse(t *testing.T, client *http.Client, requests chan received, path, body, want string) {
+	t.Helper()
+	if status, message := send(t, client, path, body); status != http.StatusBadRequest || !strings.Contains(message, want) {
+		t.Errorf("POST %s %s: status %d, %q, want 400 with %q", path, body, status, message, want)
+	}
+	select {
+	case got := <-requests:
+		t.Errorf("POST %s %s: the daemon got %s", path, body, got.body)
+	default:
+	}
+}
+
+// expectReceived checks that the daemon got body as want.
+func expectReceived(t *testing.T, requests chan received, body, want string) {
+	t.Helper()
+	if got := <-requests; !reflect.DeepEqual(decode(t, got.body), decode(t, []byte(want))) {
+		t.Errorf("for %s, the daemon got\n%s\nwant\n%s", body, got.body, want)
 	}
 }
 
@@ -171,6 +205,7 @@ func TestPassesOtherRequestsUnchanged(t *testing.T) {
 		{"/v1.52/containers/create", `{"Image":"alpine",  "HostConfig": {"Binds": ["/home/vitek:/x", "data:/home/vit"], "Mounts": [{"Type": "bind", "Source": "/srv/x"}]}}`},
 		{"/v1.52/containers/abc/update", `{"HostConfig": {"Binds": ["/home/vit:/x"]}}`},
 		{"/v1.52/volumes/create", `{"Name": "x", "DriverOpts": {"device": "/home/vitek"}}`},
+		{"/v1.52/volumes/create", `{"Name": "x", "DriverOpts": {"type": "cifs", "o": "addr=server", "device": "//server/share"}}`},
 		{"/v1.52/containers/create", `not JSON /home/vit:/x`},
 	} {
 		daemon, requests := recorder()
@@ -179,6 +214,139 @@ func TestPassesOtherRequestsUnchanged(t *testing.T) {
 		if got := <-requests; string(got.body) != test.body {
 			t.Errorf("POST %s: the daemon got\n%s\nwant\n%s", test.path, got.body, test.body)
 		}
+	}
+}
+
+// hostFolderRequests name a host folder, %s, in each place where the proxy looks for one.
+var hostFolderRequests = []struct{ path, body string }{
+	{"/v1.52/containers/create", `{"HostConfig": {"Binds": ["%s:/x:ro"]}}`},
+	{"/v1.52/containers/create", `{"HostConfig": {"Mounts": [{"Type": "bind", "Source": "%s", "Target": "/x"}]}}`},
+	{"/v1.52/containers/create", `{"HostConfig": {"Mounts": [{"Type": "volume", "Target": "/x", "VolumeOptions": {"DriverConfig": {"Name": "local", "Options": {"type": "none", "o": "bind", "device": "%s"}}}}]}}`},
+	{"/v1.52/volumes/create", `{"Name": "x", "DriverOpts": {"type": "none", "o": "rbind", "device": "%s"}}`},
+}
+
+// The proxy runs in the view, so it follows symbolic links as the view shows them, where the daemon would follow them
+// outside it, and main's home here holds what the view shows there.
+func TestResolvesHostFoldersAsTheViewShowsThem(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home", "vit")
+	outside := filepath.Join(root, "srv")
+	for _, dir := range []string{home + "/project", home + "/shared", outside} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		home + "/project/absolute": home + "/shared",
+		home + "/project/relative": "../shared",
+		home + "/project/outside":  outside,
+		outside + "/inside":        home + "/project",
+		home + "/project/missing":  home + "/nowhere",
+		home + "/project/loop":     "loop",
+		root + "/alias":            home,
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	daemon, requests := recorder()
+	client, _ := startProxyFor(t, daemon, home, to)
+	// Main's home itself may have a symbolic link in its path.
+	aliasClient, _ := startProxyFor(t, daemon, root+"/alias", to)
+	for _, test := range []struct {
+		client     *http.Client
+		path, want string
+	}{
+		{client, home + "/project", to + "/project"},
+		{client, home, to},
+		{client, home + "/project/absolute", to + "/shared"},
+		{client, home + "/project/relative/file", to + "/shared/file"},
+		{client, home + "/project/absolute/new/folder", to + "/shared/new/folder"},
+		{client, home + "/new/folder", to + "/new/folder"},
+		{client, home + "/project/../shared", to + "/shared"},
+		{client, root + "/home/./vit/project/", to + "/project"},
+		{client, home + "/../vit//project", to + "/project"},
+		// Docker cleans a bind's path before it follows links.
+		{client, home + "/project/absolute/..", to + "/project"},
+		{client, home + "/project/outside", outside},
+		{client, outside + "/inside", to + "/project"},
+		{client, home + "/..", root + "/home"},
+		{client, "/gripi-missing/folder", "/gripi-missing/folder"},
+		{aliasClient, root + "/alias/project/absolute", to + "/shared"},
+		{aliasClient, home + "/project", to + "/project"},
+	} {
+		for _, request := range hostFolderRequests {
+			body := fmt.Sprintf(request.body, test.path)
+			post(t, test.client, request.path, body)
+			expectReceived(t, requests, body, fmt.Sprintf(request.body, test.want))
+		}
+	}
+	// These can't be followed in the view, while the daemon might follow them to another user's files outside it.
+	for _, path := range []string{home + "/project/missing", home + "/project/missing/file", home + "/project/loop"} {
+		for _, request := range hostFolderRequests {
+			refuse(t, client, requests, request.path, fmt.Sprintf(request.body, path), "can't resolve "+path)
+		}
+	}
+}
+
+// Docker's decoder matches struct fields to keys in any case.
+func TestFindsFieldsInAnyCase(t *testing.T) {
+	for _, test := range []struct{ path, body, want string }{
+		{
+			"/v1.52/containers/create",
+			`{"Image": "alpine", "hostconfig": {"binds": ["/home/vit/project:/data"]}}`,
+			`{"Image": "alpine", "hostconfig": {"binds": ["/home/worker/project:/data"]}}`,
+		},
+		{
+			"/v1.52/containers/create",
+			`{"HOSTCONFIG": {"BINDS": ["/home/vit/b:/b"], "mounts": [{"type": "bind", "source": "/home/vit/m"}, {"SOURCE": "/home/vit/n"},
+				{"volumeoptions": {"driverconfig": {"options": {"o": "bind", "device": "/home/vit/d"}}}},
+				{"VolumeOptions": {"DRIVERCONFIG": {"Options": {"o": "bind", "Device": "/home/vit/d"}}}}]}}`,
+			`{"HOSTCONFIG": {"BINDS": ["/home/worker/b:/b"], "mounts": [{"type": "bind", "source": "/home/worker/m"}, {"SOURCE": "/home/worker/n"},
+				{"volumeoptions": {"driverconfig": {"options": {"o": "bind", "device": "/home/worker/d"}}}},
+				{"VolumeOptions": {"DRIVERCONFIG": {"Options": {"o": "bind", "Device": "/home/vit/d"}}}}]}}`,
+		},
+		// Go folds ſ to s, as Unicode does.
+		{
+			"/v1.52/containers/create",
+			`{"hostConfig": {"Mounts": [{"Type": "bind", "ſource": "/home/vit/m"}]}}`,
+			`{"hostConfig": {"Mounts": [{"Type": "bind", "ſource": "/home/worker/m"}]}}`,
+		},
+		{
+			"/v1.52/volumes/create",
+			`{"name": "x", "driveropts": {"o": "bind", "device": "/home/vit/d"}}`,
+			`{"name": "x", "driveropts": {"o": "bind", "device": "/home/worker/d"}}`,
+		},
+		// Docker reads the names of options as they are.
+		{
+			"/v1.52/volumes/create",
+			`{"DriverOpts": {"o": "bind", "Device": "/home/vit/d"}}`,
+			`{"DriverOpts": {"o": "bind", "Device": "/home/vit/d"}}`,
+		},
+	} {
+		daemon, requests := recorder()
+		client, _ := startProxy(t, daemon)
+		post(t, client, test.path, test.body)
+		expectReceived(t, requests, test.body, test.want)
+	}
+}
+
+func TestRefusesAmbiguousFields(t *testing.T) {
+	daemon, requests := recorder()
+	client, _ := startProxy(t, daemon)
+	for _, test := range []struct{ path, body, want string }{
+		{"/v1.52/containers/create", `{"HostConfig": {"Binds": ["/srv:/x"]}, "hostconfig": {"Binds": ["/home/vit:/x"]}}`, "HostConfig"},
+		{"/v1.52/containers/create", `{"HostConfig": {"Binds": ["/srv:/x"], "BINDS": ["/home/vit:/x"]}}`, "Binds"},
+		{"/v1.52/containers/create", `{"HostConfig": {"Mounts": [{"Type": "bind", "Source": "/srv", "source": "/home/vit"}]}}`, "Source"},
+		{"/v1.52/volumes/create", `{"DriverOpts": {"o": "bind", "device": "/home/vit"}, "driverOpts": {}}`, "DriverOpts"},
+		// Docker merges objects under a repeated key.
+		{"/v1.52/containers/create", `{"HostConfig": {"Binds": ["/home/vit:/x"]}, "HostConfig": {"Privileged": false}}`, "HostConfig"},
+		{"/v1.52/volumes/create", `{"DriverOpts": {"o": "bind", "device": "/home/vit"}, "DriverOpts": {"type": "none"}}`, "DriverOpts"},
+	} {
+		refuse(t, client, requests, test.path, test.body, test.want)
 	}
 }
 
@@ -300,8 +468,8 @@ func TestServesPrivateSocketForTCPEndpoints(t *testing.T) {
 	if info, err := os.Stat(socket); err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("socket: %v, %v", info.Mode(), err)
 	}
-	post(t, client, "/v1.52/volumes/create", `{"DriverOpts": {"device": "/home/vit/x"}}`)
-	if got := <-requests; !reflect.DeepEqual(decode(t, got.body), decode(t, []byte(`{"DriverOpts":{"device":"/home/worker/x"}}`))) {
+	post(t, client, "/v1.52/volumes/create", `{"DriverOpts": {"o": "bind", "device": "/home/vit/x"}}`)
+	if got := <-requests; !reflect.DeepEqual(decode(t, got.body), decode(t, []byte(`{"DriverOpts":{"o":"bind","device":"/home/worker/x"}}`))) {
 		t.Errorf("the daemon got %s", got.body)
 	}
 }

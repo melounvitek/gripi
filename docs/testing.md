@@ -48,7 +48,7 @@ The mirror's test with three parallel commit loops checks 8 barriers; for 100, r
 GRIPI_MIRROR_STRESS=1 go test ./internal/worker/mirror/ -run ParallelCommitLoops -v
 ```
 
-The Docker proxy, which moves a worker session's paths to the worker user's home, has a test that runs the real `docker` CLI and `docker compose` through it against this machine's Docker: bind mounts, a local volume bound to a folder, piped stdin, a terminal, `exec`, `logs -f`, `build` and `compose up --build`, with the session's paths in a folder that doesn't exist here. It pulls `alpine` if needed and removes what it created, including `alpine` if it pulled it:
+The Docker proxy, which moves a worker session's paths to the worker user's home, has a test that runs the real `docker` CLI and `docker compose` through it against this machine's Docker: bind mounts, a local volume bound to a folder, piped stdin, a terminal, `exec`, `logs -f`, `build` and `compose up --build`, with main's home folder at a path that holds another user's files, which containers must not see, also through symbolic links, dot segments and lowercase JSON fields. It pulls `alpine` if needed and removes what it created, including `alpine` if it pulled it:
 
 ```sh
 GRIPI_TEST_DOCKER=1 go test ./internal/worker/dockerproxy/ -run RealDocker -v

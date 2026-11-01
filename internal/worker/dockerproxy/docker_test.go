@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,9 +19,10 @@ import (
 	"github.com/melounvitek/gripi/internal/worker/dockerproxy"
 )
 
-// TestRealDocker runs the docker CLI and docker compose through the proxy against the real Docker daemon, with
-// session paths in a folder that doesn't exist on this machine, so containers find the files only if the proxy maps
-// the paths.
+// TestRealDocker runs the docker CLI and docker compose through the proxy against the real Docker daemon. Main's home
+// path holds another user's files here, so containers find the worker's files only if the proxy maps the paths. The
+// proxy isn't in a view here, so the test names symbolic links in the worker's home by the path that the view also
+// shows them at.
 func TestRealDocker(t *testing.T) {
 	if os.Getenv("GRIPI_TEST_DOCKER") == "" {
 		t.Skip("set GRIPI_TEST_DOCKER=1 to run the docker CLI through the proxy against this machine's Docker")
@@ -32,25 +36,31 @@ func TestRealDocker(t *testing.T) {
 		}
 		t.Cleanup(func() { exec.Command("docker", "image", "rm", "alpine").Run() })
 	}
-	const session = "/nonexistent-gripi-home/vitek"
-	if _, err := os.Stat(session); err == nil {
-		t.Fatalf("%s exists, so the test can't tell whether the proxy maps paths", session)
-	}
 	dir := t.TempDir()
+	session := filepath.Join(dir, "home", "vitek")
 	worker := filepath.Join(dir, "worker")
 	image := filepath.Join(dir, "image")
 	for path, contents := range map[string]string{
-		filepath.Join(worker, "proj", "file"): "hello from the worker\n",
-		filepath.Join(image, "Dockerfile"):    "FROM alpine\nCOPY file /file\n",
-		filepath.Join(image, "file"):          "built\n",
-		filepath.Join(worker, "compose.yaml"): "services:\n  app:\n    build: " + image + "\n    volumes:\n      - ./proj:/x\n    command: cat /x/file /file\n",
+		filepath.Join(session, "proj", "file"):           "another user's file\n",
+		filepath.Join(session, "proj", "shared", "file"): "another user's file\n",
+		filepath.Join(worker, "proj", "file"):            "hello from the worker\n",
+		filepath.Join(worker, "proj", "shared", "file"):  "shared on the worker\n",
+		filepath.Join(image, "Dockerfile"):               "FROM alpine\nCOPY file /file\n",
+		filepath.Join(image, "file"):                     "built\n",
+		filepath.Join(worker, "compose.yaml"):            "services:\n  app:\n    build: " + image + "\n    volumes:\n      - ./proj:/x\n    command: cat /x/file /file\n",
 	} {
 		os.MkdirAll(filepath.Dir(path), 0700)
 		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, socket := serve(t, dockerproxy.Options{
+	// In the view, the link leads to the worker's own shared folder.
+	link := filepath.Join(worker, "proj", "link")
+	if err := os.Symlink(filepath.Join(session, "proj", "shared"), link); err != nil {
+		t.Fatal(err)
+	}
+	otherUser := tree(t, session)
+	client, socket := serve(t, dockerproxy.Options{
 		Listen: filepath.Join(dir, "docker.sock"), Upstream: dockerproxy.Upstream(os.Environ()), From: session, To: worker,
 	})
 	name := "gripi-dockerproxy-test-" + strconv.FormatInt(time.Now().UnixNano(), 36)
@@ -86,7 +96,8 @@ func TestRealDocker(t *testing.T) {
 		}
 	}
 
-	// Binds would make the daemon create a missing folder at the session's path, so this must pass first.
+	// A wrong path makes --mount fail, where binds would make the daemon create a folder owned by root, so this must
+	// pass first.
 	if !t.Run("mount", func(t *testing.T) {
 		expect(t, docker(t, "run", "--rm", "--mount", "type=bind,source="+session+"/proj,target=/x", "alpine", "cat", "/x/file"), "hello from the worker\n")
 	}) {
@@ -154,4 +165,48 @@ func TestRealDocker(t *testing.T) {
 			t.Errorf("got %q", output)
 		}
 	})
+	t.Run("symbolic links and dot segments", func(t *testing.T) {
+		expect(t, docker(t, "run", "--rm", "--mount", "type=bind,source="+link+",target=/x", "alpine", "cat", "/x/file"), "shared on the worker\n")
+		expect(t, docker(t, "run", "--rm", "--mount", "type=bind,source="+dir+"/home/./vitek/proj,target=/x", "alpine", "cat", "/x/file"), "hello from the worker\n")
+		expect(t, docker(t, "run", "--rm", "-v", link+":/x:ro", "alpine", "cat", "/x/file"), "shared on the worker\n")
+		cleanup("volume", "rm", "-f", name+"-link")
+		docker(t, "volume", "create", "-o", "type=none", "-o", "o=bind", "-o", "device="+link, name+"-link")
+		expect(t, docker(t, "run", "--rm", "-v", name+"-link:/x", "alpine", "cat", "/x/file"), "shared on the worker\n")
+	})
+	t.Run("lowercase fields", func(t *testing.T) {
+		cleanup("rm", "-f", name+"-lowercase")
+		body := `{"Image": "alpine", "Cmd": ["cat", "/x/file"], "hostconfig": {"binds": ["` + session + `/proj:/x:ro"]}}`
+		res, err := client.Post("http://docker/containers/create?name="+name+"-lowercase", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		answer, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusCreated {
+			t.Fatalf("creating the container: %s %s", res.Status, answer)
+		}
+		expect(t, docker(t, "start", "-a", name+"-lowercase"), "hello from the worker\n")
+	})
+	if got := tree(t, session); !reflect.DeepEqual(got, otherUser) {
+		t.Errorf("the other user's folder changed from %v to %v", otherUser, got)
+	}
+}
+
+// tree returns the contents of the files and folders under dir, by path.
+func tree(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			files[path] = "folder"
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		files[path] = string(contents)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
