@@ -947,6 +947,53 @@ func TestTheNextMoveToAWorkerDeletesTheSessionsThatMainDeleted(t *testing.T) {
 	}
 }
 
+// A move that fails after it copied a session's folder to the worker leaves the worker's copy to the next move there,
+// also when main deleted the session meanwhile.
+func TestTheMoveAfterAFailedOneDeletesTheSessionsThatMainDeleted(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses folder permissions")
+	}
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	project := t.TempDir()
+	folder := sessionFolder(options.SessionsRoot, filepath.Join(project, "subdir"))
+	key := filepath.Join(folder, "s.jsonl")
+	writeTestFile(t, key, "{}\n", 0600)
+	store := fakeStore{sessions: map[string]string{key: filepath.Join(project, "subdir")}}
+	options.Store = store
+	manager := newTestManager(t, options)
+	ctx := context.Background()
+	stop := func(func(string) bool) error { return nil }
+	// Main cannot clear its side of the repository's mirror, which the move starts once it copied the sessions' folders.
+	stuck := filepath.Join(manager.mirrorFolder(project), "state", "stuck")
+	writeTestFile(t, filepath.Join(stuck, "file"), "", 0600)
+	if err := os.Chmod(stuck, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(stuck, 0700) })
+
+	if err := manager.Move(ctx, project, "beelink", stop); err == nil {
+		t.Fatal("moved without main's side of the repository's mirror")
+	}
+	copies := len(sshCalls(t, "'receive'", "'"+folder+"'"))
+	if copies == 0 {
+		t.Fatal("the failed move left out the session's folder")
+	}
+	if err := os.Chmod(stuck, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(folder); err != nil {
+		t.Fatal(err)
+	}
+	delete(store.sessions, key)
+	if err := manager.Move(ctx, project, "beelink", stop); err != nil {
+		t.Fatal(err)
+	}
+	if len(sshCalls(t, "'receive'", "'"+folder+"'")) == copies {
+		t.Fatal("the move left the worker's copy of the deleted session")
+	}
+}
+
 func refused(err error) bool {
 	var refusal interface{ Refused() bool }
 	return errors.As(err, &refusal) && refusal.Refused()

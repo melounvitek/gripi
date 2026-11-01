@@ -593,7 +593,7 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 				unit.Worktrees = append(unit.Worktrees, root)
 			}
 		}
-		if err := manager.updateWorkerCopy(repository.Main, worker.name, func(kept *workerCopy) { kept.Sessions = unitFolders(unit) }); err != nil {
+		if err := manager.rememberSessions(repository.Main, worker.name, unitFolders(unit)); err != nil {
 			return err
 		}
 	}
@@ -1074,10 +1074,15 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 		}
 		return nil
 	}
+	folders := manager.sessionFolders(unit, worker.name)
+	// The worker keeps what a move that fails later copied, which the next move there must bring up to date.
+	if err := manager.rememberSessions(unit.Main, worker.name, folders); err != nil {
+		return err
+	}
 	if err := copyFolders(unit); err != nil {
 		return err
 	}
-	for _, folder := range manager.sessionFolders(unit, worker.name) {
+	for _, folder := range folders {
 		// The worker's copy of a folder that main no longer has may hold sessions that were deleted here.
 		if err := os.MkdirAll(folder, 0700); err != nil {
 			return err
@@ -1246,6 +1251,18 @@ func (manager *Manager) updateWorkerCopy(main, name string, update func(kept *wo
 		return err
 	}
 	return state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Write(contents)
+}
+
+// rememberSessions records that the worker of a name has, or is getting, folders of the sessions of the repository
+// whose main folder is main.
+func (manager *Manager) rememberSessions(main, name string, folders []string) error {
+	return manager.updateWorkerCopy(main, name, func(kept *workerCopy) {
+		for _, folder := range folders {
+			if !slices.Contains(kept.Sessions, folder) {
+				kept.Sessions = append(kept.Sessions, folder)
+			}
+		}
+	})
 }
 
 // goneAt is when the worker of a name must have stopped the sessions of every connection that main lost, including
