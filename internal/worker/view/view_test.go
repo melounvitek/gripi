@@ -49,10 +49,6 @@ func run(t *testing.T, main, script string, arguments ...string) string {
 func TestTheViewShowsTheUsersHomeFolderAtMainsHome(t *testing.T) {
 	main, own := homes(t)
 	root := filepath.Dir(own)
-	// Another user's home folder next to main's is hidden in the view, as is a real user at main's path.
-	if err := os.Mkdir(filepath.Join(root, "bob"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(own, "notes"), []byte("the worker's\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -69,18 +65,70 @@ func TestTheViewShowsTheUsersHomeFolderAtMainsHome(t *testing.T) {
 		t.Fatalf("the file written to main's home folder in the view: %v, %v", info, err)
 	}
 
-	// A command started in a folder that the view hides starts in main's home folder, and one in the user's own home
-	// folder there.
-	t.Chdir(filepath.Join(root, "bob"))
-	if folder := run(t, main, "pwd -P"); folder != main+"\n" {
-		t.Fatalf("started in %q", folder)
-	}
+	// A command started in the user's own home folder starts there in the view too.
 	t.Chdir(own)
 	if folder := run(t, main, `pwd -P; ls`); folder != own+"\nnew\nnotes\n" {
 		t.Fatalf("started in %q", folder)
 	}
 	if _, err := os.Stat(main); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("main's home folder outside the view: %v", err)
+	}
+}
+
+func TestTheViewShowsTheUsersHomeFolderOverARealFolderAtMainsHome(t *testing.T) {
+	main, own := homes(t)
+	if err := os.MkdirAll(filepath.Join(main, "project"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(main, "marker"), []byte("main's\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(own, "notes"), []byte("the worker's\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A command started in a folder that the view hides starts in main's home folder.
+	t.Chdir(filepath.Join(main, "project"))
+
+	if output := run(t, main, `pwd -P; ls -A; echo written > marker`); output != main+"\nnotes\n" {
+		t.Fatalf("in the view: %q", output)
+	}
+	if marker, err := os.ReadFile(filepath.Join(main, "marker")); err != nil || string(marker) != "main's\n" {
+		t.Fatalf("the marker in the real folder at main's home folder: %q, %v", marker, err)
+	}
+	if written, err := os.ReadFile(filepath.Join(own, "marker")); err != nil || string(written) != "written\n" {
+		t.Fatalf("the file written to main's home folder in the view: %q, %v", written, err)
+	}
+}
+
+func TestTheViewKeepsWhatIsNextToMainsHome(t *testing.T) {
+	main, own := homes(t)
+	root := filepath.Dir(own)
+	if err := os.MkdirAll(filepath.Join(root, "projects", "app"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "shared"), []byte("shared\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("projects", filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(own, "notes"), []byte("the worker's\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// What is written next to main's home folder stays after the view, and what the view cannot keep there is refused.
+	output := run(t, main, `cd "$1"; ls; readlink link; cat shared worker/notes; echo app > link/app/new; echo more >> shared; mkdir new 2>/dev/null || echo refused`, root)
+	expected := strings.Join([]string{"alice", "link", "projects", "shared", "worker", "projects", "shared", "the worker's", "refused"}, "\n") + "\n"
+	if output != expected {
+		t.Fatalf("in the view:\n%s\nwant:\n%s", output, expected)
+	}
+	for path, contents := range map[string]string{filepath.Join("projects", "app", "new"): "app\n", "shared": "shared\nmore\n"} {
+		if written, err := os.ReadFile(filepath.Join(root, path)); err != nil || string(written) != contents {
+			t.Fatalf("%s after the view: %q, %v", path, written, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(root, "new")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the folder made next to main's home folder in the view: %v", err)
 	}
 }
 

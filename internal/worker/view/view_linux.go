@@ -3,6 +3,7 @@ package view
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +19,8 @@ const variable = "GRIPI_VIEW"
 // entry is what the process that enters the view needs to know.
 type entry struct {
 	Home string `json:"home"` // main's home folder
-	// Parent is the folder that holds main's home folder, with links resolved, which the view replaces with an empty one.
+	// Parent is the folder that holds main's home folder, with links resolved, which the view replaces with a copy of
+	// it whose entries show the original ones.
 	Parent string `json:"parent"`
 	Own    string `json:"own"` // this user's home folder, with links resolved
 	Dir    string `json:"dir"` // the folder that the command starts in, if the view has it
@@ -96,33 +98,42 @@ func Init() {
 	os.Exit(code)
 }
 
-// enter replaces the folder that holds main's home folder with an empty one, where main's home folder, and this
-// user's when it was there too, show this user's home folder, then runs command there as this user.
+// enter replaces the folder that holds main's home folder with a new one, where main's home folder shows this user's
+// home folder and every other entry shows the original one, then runs command there as this user.
 func (view entry) enter(command []string) (int, error) {
 	// Nothing that the view mounts may reach the worker's other processes.
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
 		return 0, fmt.Errorf("make the mounts private: %w", err)
 	}
-	// The empty folder hides this user's home folder when it is next to main's, so it is bound from what was there.
-	own, err := unix.Open(view.Own, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	entries, err := os.ReadDir(view.Parent)
 	if err != nil {
-		return 0, fmt.Errorf("open %s: %w", view.Own, err)
+		return 0, fmt.Errorf("list the folder of main's home folder: %w", err)
 	}
-	defer unix.Close(own)
+	// The new folder hides the original entries, which stay reachable through the original folder's descriptor.
+	original, err := unix.Open(view.Parent, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return 0, fmt.Errorf("open %s: %w", view.Parent, err)
+	}
+	defer unix.Close(original)
 	if err := unix.Mount("tmpfs", view.Parent, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=0755"); err != nil {
 		return 0, fmt.Errorf("mount an empty folder on %s: %w", view.Parent, err)
 	}
-	folders := []string{filepath.Join(view.Parent, filepath.Base(view.Home))}
-	if within(view.Own, view.Parent) {
-		folders = append(folders, view.Own)
-	}
-	for _, folder := range folders {
-		if err := os.MkdirAll(folder, 0755); err != nil {
+	shown := filepath.Join(view.Parent, filepath.Base(view.Home))
+	for _, sibling := range entries {
+		path := filepath.Join(view.Parent, sibling.Name())
+		if path == shown {
+			continue
+		}
+		if err := bind(fmt.Sprintf("/proc/self/fd/%d/%s", original, sibling.Name()), path, sibling.Type()); err != nil {
 			return 0, err
 		}
-		if err := unix.Mount(fmt.Sprintf("/proc/self/fd/%d", own), folder, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
-			return 0, fmt.Errorf("show %s at %s: %w", view.Own, folder, err)
-		}
+	}
+	if err := bind(view.Own, shown, fs.ModeDir); err != nil {
+		return 0, err
+	}
+	// What would be made in the new folder itself would vanish with the view, so the folder is read-only.
+	if err := unix.Mount("", view.Parent, "", unix.MS_REMOUNT|unix.MS_BIND|unix.MS_RDONLY|unix.MS_NOSUID|unix.MS_NODEV, ""); err != nil {
+		return 0, fmt.Errorf("make %s read-only: %w", view.Parent, err)
 	}
 
 	dir := view.Dir
@@ -139,4 +150,29 @@ func (view entry) enter(command []string) (int, error) {
 		GidMappings: []syscall.SysProcIDMap{{ContainerID: view.GID, HostID: 0, Size: 1}},
 	}
 	return run(process)
+}
+
+// bind makes path, in the view's new folder, show source, an entry of the given type: a link as a copy of it, and
+// anything else as a bind mount, with its permissions as they are.
+func bind(source, path string, kind fs.FileMode) error {
+	if kind&fs.ModeSymlink != 0 {
+		target, err := os.Readlink(source)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(target, path)
+	}
+	var err error
+	if kind.IsDir() {
+		err = os.Mkdir(path, 0755)
+	} else {
+		err = os.WriteFile(path, nil, 0644)
+	}
+	if err != nil {
+		return err
+	}
+	if err := unix.Mount(source, path, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+		return fmt.Errorf("show %s in the view: %w", path, err)
+	}
+	return nil
 }

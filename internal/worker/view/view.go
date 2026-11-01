@@ -1,7 +1,7 @@
 // Package view lets processes on a worker see main's home folder as their user's own. When the worker user's home
 // folder has another path than main's, what Gripi runs there with main's paths, such as the helper with Pi and the
 // copies of main's folders, runs in a private view of the file system: main's home folder shows the worker user's
-// home folder, and everything outside main's home folder's parent stays as it is.
+// home folder, and everything else stays as it is.
 package view
 
 import (
