@@ -70,7 +70,7 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		// requests from main's home folder to the worker user's own, and passes them on to the helper's Docker.
 		upstream := dockerproxy.Upstream(os.Environ())
 		options.Docker = func(ctx context.Context, socket string) error {
-			return dockerproxy.Serve(ctx, dockerproxy.Options{Listen: socket, Upstream: upstream, From: *home, To: *ownHome})
+			return dockerproxy.Serve(ctx, dockerproxy.Options{Listen: socket, Upstream: upstream, Mappings: []dockerproxy.Mapping{{From: *home, To: *ownHome}}})
 		}
 	}
 	if err := helper.Serve(ctx, stdin, stdout, options); err != nil {

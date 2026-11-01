@@ -40,6 +40,11 @@ func startProxy(t *testing.T, daemon http.Handler) (*http.Client, string) {
 
 func startProxyFor(t *testing.T, daemon http.Handler, from, to string) (*http.Client, string) {
 	t.Helper()
+	return startProxyWith(t, daemon, dockerproxy.Mapping{From: from, To: to})
+}
+
+func startProxyWith(t *testing.T, daemon http.Handler, mappings ...dockerproxy.Mapping) (*http.Client, string) {
+	t.Helper()
 	dir := t.TempDir()
 	listener, err := net.Listen("unix", filepath.Join(dir, "daemon.sock"))
 	if err != nil {
@@ -49,7 +54,7 @@ func startProxyFor(t *testing.T, daemon http.Handler, from, to string) (*http.Cl
 	upstream.Listener = listener
 	upstream.Start()
 	t.Cleanup(upstream.Close)
-	return serve(t, dockerproxy.Options{Listen: filepath.Join(dir, "proxy.sock"), Upstream: "unix://" + listener.Addr().String(), From: from, To: to})
+	return serve(t, dockerproxy.Options{Listen: filepath.Join(dir, "proxy.sock"), Upstream: "unix://" + listener.Addr().String(), Mappings: mappings})
 }
 
 func serve(t *testing.T, options dockerproxy.Options) (*http.Client, string) {
@@ -197,6 +202,39 @@ func TestRewritesFoldersInRequests(t *testing.T) {
 				t.Errorf("the daemon got\n%s\nwant\n%s", got.body, test.want)
 			}
 		})
+	}
+}
+
+// A moved session's view shows its copy at main's folders in main's home folder, so a path reaches Docker by the
+// longest folder that holds it, once: those folders to the copy, the rest of main's home to the worker user's.
+func TestMapsEachPathByTheLongestFolderThatHoldsIt(t *testing.T) {
+	const copy = "/home/worker/.local/share/gripi/worker/copies/m1"
+	mappings := []dockerproxy.Mapping{{From: from, To: to}, {From: from + "/Work", To: copy + "/Work"}}
+	daemon, requests := recorder()
+	client, _ := startProxyWith(t, daemon, mappings...)
+	for path, want := range map[string]string{
+		from + "/Work/gripi": copy + "/Work/gripi", from + "/Work": copy + "/Work", from + "/Workshop": to + "/Workshop",
+		from + "/.cache": to + "/.cache", "/srv/data": "/srv/data",
+	} {
+		for _, request := range hostFolderRequests {
+			body := fmt.Sprintf(request.body, path)
+			post(t, client, request.path, body)
+			expectReceived(t, requests, body, fmt.Sprintf(request.body, want))
+		}
+	}
+
+	answers := strings.NewReplacer("COPY", copy, "TO", to)
+	inspected := answers.Replace(`{"Mounts": [{"Source": "COPY/Work/gripi"}, {"Source": "TO/.cache"}, {"Source": "TO/.local/share/gripi/worker/copies/m2/Work"}]}`)
+	client, _ = startProxyWith(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, inspected) }), mappings...)
+	res, err := client.Get("http://docker/v1.52/containers/abc/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	want := `{"Mounts": [{"Source": "/home/vit/Work/gripi"}, {"Source": "/home/vit/.cache"}, {"Source": "/home/vit/.local/share/gripi/worker/copies/m2/Work"}]}`
+	if !reflect.DeepEqual(decode(t, body), decode(t, []byte(want))) {
+		t.Errorf("the inspection shows\n%s\nwant\n%s", body, want)
 	}
 }
 
@@ -463,7 +501,7 @@ func TestServesPrivateSocketForTCPEndpoints(t *testing.T) {
 	upstream := httptest.NewServer(daemon)
 	defer upstream.Close()
 	client, socket := serve(t, dockerproxy.Options{
-		Listen: filepath.Join(t.TempDir(), "proxy.sock"), Upstream: "tcp://" + upstream.Listener.Addr().String(), From: from, To: to,
+		Listen: filepath.Join(t.TempDir(), "proxy.sock"), Upstream: "tcp://" + upstream.Listener.Addr().String(), Mappings: []dockerproxy.Mapping{{From: from, To: to}},
 	})
 	if info, err := os.Stat(socket); err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("socket: %v, %v", info.Mode(), err)
@@ -477,7 +515,7 @@ func TestServesPrivateSocketForTCPEndpoints(t *testing.T) {
 func TestRefusesUnsupportedEndpoints(t *testing.T) {
 	for _, upstream := range []string{"ssh://user@host", "npipe:////./pipe/docker_engine", ""} {
 		err := dockerproxy.Serve(context.Background(), dockerproxy.Options{
-			Listen: filepath.Join(t.TempDir(), "proxy.sock"), Upstream: upstream, From: from, To: to,
+			Listen: filepath.Join(t.TempDir(), "proxy.sock"), Upstream: upstream, Mappings: []dockerproxy.Mapping{{From: from, To: to}},
 		})
 		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", upstream)) {
 			t.Errorf("Serve with %q: %v", upstream, err)
