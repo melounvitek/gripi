@@ -366,6 +366,30 @@ func TestAReleaseWaitsForEveryProcessOfTheMoveToDie(t *testing.T) {
 	}
 }
 
+// A move's copy stays while a process of the move's host outlives its kill.
+func TestDeletingAMoveWaitsForItsHostToDie(t *testing.T) {
+	rig := startMoveHelper(t, helper.DefaultLease)
+	private := rig.privateRoot()
+	shadow, repository := rig.shadow(private, "first\n")
+	rig.move("m1", private, shadow, repository)
+	pid, _ := strconv.Atoi(strings.TrimSpace(rig.session("s1", "m1", repository)("echo $$")))
+	_, die := startSlowToDie(t, filepath.Join(filepath.Dir(cgroupOf(t, pid)), "move-m1"))
+
+	if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); response.OK || !strings.Contains(response.Error, "still has processes") {
+		t.Fatalf("move.release while the host survives = %+v", response)
+	}
+	if response := rig.request(map[string]any{"type": "move.delete", "move": "m1"}); response.OK || !strings.Contains(response.Error, "still has processes") {
+		t.Fatalf("move.delete while the host survives = %+v", response)
+	}
+	if _, err := os.Stat(rig.copy("m1", repository)); err != nil {
+		t.Fatalf("the copy after the failed move.delete: %v", err)
+	}
+	die()
+	if response := rig.request(map[string]any{"type": "move.delete", "move": "m1"}); !response.OK {
+		t.Fatalf("move.delete once the host died = %+v", response)
+	}
+}
+
 func TestLeaseExpiryKillsEveryProcessOfAMove(t *testing.T) {
 	const lease = 2 * time.Second
 	rig := startMoveHelper(t, lease)
@@ -462,7 +486,8 @@ func TestAMovesCopyReusesTheIgnoredFoldersOfEarlierCopies(t *testing.T) {
 		t.Errorf("on btrfs, the seeded file shares no extents: %v %s", err, output)
 	}
 
-	for _, id := range []string{"m1", "m2"} {
+	finish := func(id string) {
+		t.Helper()
 		if response := rig.request(map[string]any{"type": "move.release", "move": id}); !response.OK {
 			t.Fatalf("move.release = %+v", response)
 		}
@@ -473,6 +498,16 @@ func TestAMovesCopyReusesTheIgnoredFoldersOfEarlierCopies(t *testing.T) {
 			t.Fatalf("the deleted copy: %v", err)
 		}
 	}
+	// The session moves again before its earlier copy is deleted, which leaves the session as it is.
+	if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); !response.OK {
+		t.Fatalf("move.release = %+v", response)
+	}
+	again := rig.session("s1", "m2", repository)
+	finish("m1")
+	if alive := again("echo alive"); alive != "alive\n" {
+		t.Fatalf("the session in the later move says %q", alive)
+	}
+	finish("m2")
 	seed("m3")
 	if read(rig.copy("m3", modules)) != installed {
 		t.Fatal("the third copy lacks what the deleted copies left")

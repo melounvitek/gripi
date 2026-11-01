@@ -78,7 +78,7 @@ func (s *server) create(request Message, inMove *move) error {
 	}
 	current := s.sessions[id]
 	if current == nil {
-		current = &session{cgroup: s.sessionCgroup(id), move: moveID}
+		current = &session{cgroup: s.sessionCgroup(id, moveID), move: moveID}
 		if inMove != nil {
 			inMove.sessions = append(inMove.sessions, id)
 		}
@@ -143,7 +143,12 @@ func (s *server) create(request Message, inMove *move) error {
 	return nil
 }
 
-func (s *server) sessionCgroup(id string) string {
+// sessionCgroup is the cgroup of a session, of one in a move a cgroup of the move's own, because the same session may
+// move again before the earlier move is gone.
+func (s *server) sessionCgroup(id, move string) string {
+	if move != "" {
+		id += "." + move
+	}
 	return filepath.Join(s.options.Cgroup, "session-"+id)
 }
 

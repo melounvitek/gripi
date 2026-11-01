@@ -277,7 +277,7 @@ func (s *server) closeMove(m *move) (running, cgroups []string) {
 		if current := s.sessions[id]; current != nil && current.move == m.id {
 			running = append(running, id)
 		}
-		cgroups = append(cgroups, s.sessionCgroup(id))
+		cgroups = append(cgroups, s.sessionCgroup(id, m.id))
 	}
 	return running, cgroups
 }
@@ -296,7 +296,14 @@ func (s *server) deleteMove(id string) error {
 	if len(running) > 0 {
 		return fmt.Errorf("move %s still runs sessions; release it first", id)
 	}
-	if err := killCgroups(releaseTimeout, cgroups...); err != nil {
+	// What earlier releases or stops of the host failed to kill.
+	m.mu.Lock()
+	err = s.stopHost(m)
+	m.mu.Unlock()
+	if err == nil {
+		err = killCgroups(releaseTimeout, cgroups...)
+	}
+	if err != nil {
 		return err
 	}
 	s.cache.Lock()
@@ -475,17 +482,16 @@ func (s *server) host(m *move) (*hostProcess, error) {
 	return process, nil
 }
 
-// stopHost kills the move's host, with m.mu held.
+// stopHost kills the move's host, also what an earlier stop failed to kill, with m.mu held.
 func (s *server) stopHost(m *move) error {
-	if m.host == nil {
-		return nil
-	}
 	err := killCgroups(releaseTimeout, m.cgroup(s.options.Cgroup))
-	m.host.input.Close()
-	if err == nil {
-		<-m.host.exited
+	if m.host != nil {
+		m.host.input.Close()
+		if err == nil {
+			<-m.host.exited
+		}
+		m.host = nil
 	}
-	m.host = nil
 	return err
 }
 
