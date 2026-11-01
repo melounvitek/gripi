@@ -423,6 +423,92 @@ func TestAFolderTheWorkerCantReadIsntDeletedOnMain(t *testing.T) {
 	r.verify(t)
 }
 
+// A folder of the unit that the source doesn't see, such as one that the worker's private view lacks, isn't empty: the
+// source stops rather than delete main's copy of it.
+func TestASourceStopsOnAFolderOfTheUnitThatIsNotThere(t *testing.T) {
+	unit := newRepo(t)
+	r := newRig(t, unit)
+	r.conn.Close()
+	<-r.served
+	<-r.ran
+	before := destinationManifest(t, unit, r.dst)
+	for _, folder := range []string{unit.Main, unit.Worktrees[0]} {
+		hidden := folder + ".hidden"
+		if err := os.Rename(folder, hidden); err != nil {
+			t.Fatal(err)
+		}
+		if folder != unit.Main {
+			// Not a folder either, which Git still has as a worktree.
+			writeFile(t, "/", folder, "a file\n")
+		}
+		r.launch(t, nil)
+		select {
+		case err := <-r.ran:
+			if err == nil || !strings.Contains(err.Error(), folder) {
+				t.Fatalf("Run without %s = %v", folder, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the source runs without %s", folder)
+		}
+		if err := <-r.served; err == nil || !strings.Contains(err.Error(), folder) {
+			t.Fatalf("Serve without %s on the worker = %v", folder, err)
+		}
+		if _, _, err := r.src.Barrier(context.Background()); err == nil || !strings.Contains(err.Error(), folder) {
+			t.Fatalf("Barrier without %s = %v", folder, err)
+		}
+		if r.src.Healthy() {
+			t.Fatalf("the source is healthy without %s", folder)
+		}
+		os.Remove(folder)
+		if err := os.Rename(hidden, folder); err != nil {
+			t.Fatal(err)
+		}
+		if got := destinationManifest(t, unit, r.dst); !slices.Equal(got, before) {
+			t.Fatalf("main's copy changed without %s on the worker:\n%s", folder, lineDiff(before, got))
+		}
+	}
+	r.start(t, nil)
+	r.verify(t)
+}
+
+// A worktree whose folder goes while the source runs goes on main too, also when the source rescans later, though Git
+// still lists it until it is pruned.
+func TestAWorktreeDeletedWhileMirroringGoesOnMainAlsoAfterARescan(t *testing.T) {
+	unit := newRepo(t)
+	r := newRig(t, unit)
+	featB := unit.Worktrees[1]
+	if err := os.RemoveAll(featB); err != nil {
+		t.Fatal(err)
+	}
+	r.verify(t)
+	appendFile(t, unit.Main, ".gitignore", "ignored-now/\n") // which makes the source rescan
+	r.verify(t)
+	if _, err := os.Lstat(r.dst + featB); err == nil {
+		t.Error("the deleted worktree is still on main")
+	}
+}
+
+// A folder outside Git, such as Pi's session folders, has no worktrees, also when it is in another repository.
+func TestAFolderInAnotherRepositoryKeepsToItselfWhenTheSourceRescans(t *testing.T) {
+	other := newRepo(t)
+	folder := filepath.Join(other.Main, "sessions")
+	writeFile(t, folder, "s.jsonl", "{}\n")
+	r := newRig(t, Unit{Main: folder})
+	writeFile(t, folder, ".gitignore", "*.tmp\n") // which makes the source rescan
+	r.barrier(t)
+	if !r.src.Contains(folder) || r.src.Contains(other.Worktrees[0]) {
+		t.Fatal("the source took the other repository's worktrees for its folders")
+	}
+	for _, p := range []string{filepath.Join(folder, "s.jsonl"), filepath.Join(folder, ".gitignore")} {
+		if _, err := os.Lstat(r.dst + p); err != nil {
+			t.Errorf("main's copy of %s: %v", p, err)
+		}
+	}
+	if _, err := os.Lstat(r.dst + other.Worktrees[0]); err == nil {
+		t.Error("main got a worktree of the other repository")
+	}
+}
+
 func TestSyncFailsOnAFileItCantRead(t *testing.T) {
 	src, dst := t.TempDir(), t.TempDir()
 	writeFile(t, src, "readable.txt", "x\n")

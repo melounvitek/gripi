@@ -50,6 +50,22 @@ func Discover(dir string) (Unit, error) {
 // listWorktrees lists the existing worktrees of the repository at dir, the
 // main one first.
 func listWorktrees(dir string) ([]string, error) {
+	all, err := gitWorktrees(dir)
+	if err != nil {
+		return nil, err
+	}
+	worktrees := []string{all[0]}
+	for _, path := range all[1:] {
+		if _, err := os.Stat(path); err == nil { // or it is prunable
+			worktrees = append(worktrees, path)
+		}
+	}
+	return worktrees, nil
+}
+
+// gitWorktrees lists every worktree that the repository at dir has, also
+// those whose folders are gone, the main one first.
+func gitWorktrees(dir string) ([]string, error) {
 	out, err := exec.Command("git", "--no-optional-locks", "-C", dir, "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list in %s: %w", dir, err)
@@ -61,11 +77,6 @@ func listWorktrees(dir string) ([]string, error) {
 			continue
 		}
 		path, _, _ = strings.Cut(path, "\n")
-		if len(worktrees) > 0 {
-			if _, err := os.Stat(path); err != nil {
-				continue // prunable
-			}
-		}
 		worktrees = append(worktrees, filepath.Clean(path))
 	}
 	if len(worktrees) == 0 {

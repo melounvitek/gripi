@@ -27,7 +27,7 @@ const (
 	kindSigs                       // destination → source
 	kindBarrier                    // source → destination: apply everything received so far
 	kindAck                        // destination → source: the barrier is applied durably, or Error
-	kindFail                       // destination → source: the destination stopped because of Error
+	kindFail                       // either way: the side that sends it stopped because of Error
 	kindSumRequest                 // source → destination: the size and SHA-256 of what it has at Path
 	kindSum                        // destination → source: Size and Hash, or no Hash if it has no file there
 )

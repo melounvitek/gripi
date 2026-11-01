@@ -390,8 +390,12 @@ func (s *sender) lstat(p string) (fs.FileInfo, error) {
 }
 
 // scan walks the whole unit, marking what differs from the destination, and
-// returns the mirrored paths.
+// returns the mirrored paths. It fails, and tells the destination, when one of
+// the unit's folders isn't a folder here (see checkRoots).
 func (s *sender) scan() (map[string]bool, error) {
+	if err := s.checkRoots(); err != nil {
+		return nil, s.fail(err)
+	}
 	seen := map[string]bool{}
 	s.skipped = map[string]bool{}
 	for _, r := range s.roots {
@@ -400,6 +404,43 @@ func (s *sender) scan() (map[string]bool, error) {
 		}
 	}
 	return seen, nil
+}
+
+// checkRoots fails unless each of the unit's folders is a folder here, so that
+// a scan never takes a folder that this process doesn't see for an empty one
+// and deletes the destination's copy of it: a process in a private view that
+// started before the folder was made doesn't see it, for one. A worktree that
+// Git no longer has, such as after git worktree remove, is no longer the
+// unit's, and goes on the destination too.
+func (s *sender) checkRoots() error {
+	var listed []string
+	for _, r := range slices.Clone(s.roots) {
+		if info, err := os.Lstat(r); err == nil && info.IsDir() {
+			continue
+		}
+		if s.gitDir != "" && r != s.main && r != s.gitDir {
+			if listed == nil {
+				var err error
+				if listed, err = gitWorktrees(s.main); err != nil {
+					return err
+				}
+			}
+			if !slices.Contains(listed, r) {
+				s.removeRoot(r)
+				continue
+			}
+		}
+		return fmt.Errorf("mirror: %s is not a folder here, so the mirror stops rather than delete the other side's copy of it", r)
+	}
+	return nil
+}
+
+// fail tells the destination why the source stops, and returns err.
+func (s *sender) fail(err error) error {
+	if s.c != nil && s.c.send(&frame{Kind: kindFail, Error: err.Error()}) == nil {
+		s.c.flush()
+	}
+	return err
 }
 
 // markMissing marks what the destination has and a scan didn't see.

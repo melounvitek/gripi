@@ -34,6 +34,7 @@ type Source struct {
 	opts     Options
 	requests chan barrierRequest
 	done     chan struct{} // closed when Run returns
+	err      error         // what Run returned, once done is closed
 	healthy  atomic.Bool
 	failing  atomic.Bool          // the last barrier failed because something couldn't be read
 	current  atomic.Pointer[Unit] // the unit's folders as Run last found them
@@ -119,7 +120,7 @@ func (s *Source) Barrier(ctx context.Context) (uint64, []string, error) {
 	select {
 	case s.requests <- req:
 	case <-s.done:
-		return 0, nil, errStopped
+		return 0, nil, s.stopped()
 	case <-ctx.Done():
 		return 0, nil, ctx.Err()
 	}
@@ -131,18 +132,29 @@ func (s *Source) Barrier(ctx context.Context) (uint64, []string, error) {
 		case r := <-req.done:
 			return r.seq, r.writing, r.err
 		default:
-			return 0, nil, errStopped
+			return 0, nil, s.stopped()
 		}
 	case <-ctx.Done():
 		return 0, nil, ctx.Err()
 	}
 }
 
+// stopped says why Run returned.
+func (s *Source) stopped() error {
+	if s.err == nil {
+		return errStopped
+	}
+	return fmt.Errorf("%w: %w", errStopped, s.err)
+}
+
 // Run brings the destination at the other end of stream up to date, then
 // mirrors changes until ctx ends or the stream fails. It closes stream, if it
 // can, before returning. A Source runs only once.
-func (s *Source) Run(ctx context.Context, stream io.ReadWriter) error {
-	defer close(s.done)
+func (s *Source) Run(ctx context.Context, stream io.ReadWriter) (err error) {
+	defer func() {
+		s.err = err
+		close(s.done)
+	}()
 	defer closeOnDone(ctx, stream)()
 	s.sender = newSender(s.unit, s.opts, stream)
 	defer s.sender.close()
@@ -468,17 +480,19 @@ func (s *Source) handleBatch(events []rawEvent) error {
 		}
 		break
 	}
-	if s.wtChanged {
-		if err := s.refreshWorktrees(); err != nil {
-			return err
-		}
-	}
 	if s.ignChanged {
 		s.ignChanged = false
 		for _, c := range s.cls {
 			c.start()
 		}
 		s.needRescan = true
+	}
+	// Worktrees whose folders went while the source ran are no longer the unit's, which a rescan must know, because it
+	// fails on a folder of the unit that isn't there. A folder outside Git has none, also inside another repository.
+	if s.gitDir != "" && (s.wtChanged || s.needRescan) {
+		if err := s.refreshWorktrees(); err != nil {
+			return err
+		}
 	}
 	if s.needRescan {
 		return s.rescan()

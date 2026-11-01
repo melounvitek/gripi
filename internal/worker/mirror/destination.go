@@ -996,6 +996,9 @@ func (r *receiver) run() error {
 	if err != nil {
 		return err
 	}
+	if f.Kind == kindFail {
+		return fmt.Errorf("mirror source: %s", f.Error)
+	}
 	if f.Kind != kindHello || f.Version != version {
 		return r.fail(fmt.Errorf("mirror: the source speaks version %d, not %d", f.Version, version))
 	}
@@ -1020,14 +1023,17 @@ func (r *receiver) run() error {
 		if err != nil {
 			return err
 		}
-		if f.Kind == kindBarrier {
+		switch f.Kind {
+		case kindBarrier:
 			if err := r.barrier(f.N); err != nil {
 				return err
 			}
-			continue
-		}
-		if err := r.handle(f); err != nil {
-			return r.fail(err)
+		case kindFail:
+			return fmt.Errorf("mirror source: %s", f.Error)
+		default:
+			if err := r.handle(f); err != nil {
+				return r.fail(err)
+			}
 		}
 	}
 }
