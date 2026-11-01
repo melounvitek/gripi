@@ -1,6 +1,7 @@
 package view_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -158,6 +159,138 @@ func TestACommandRunsAsItIsWhenItsHomeFolderIsMains(t *testing.T) {
 		}
 		if view.Needed(home) {
 			t.Fatalf("Needed(%q)", home)
+		}
+	}
+}
+
+// runMove runs a sh script in a move's view and returns its output, skipping the test where the system blocks the
+// view.
+func runMove(t *testing.T, move view.Move, dir, script string) string {
+	t.Helper()
+	process, err := move.Command(dir, []string{"sh", "-c", script}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	process.Stdout, process.Stderr = &output, os.Stderr
+	if err := process.Start(); errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.ENOSPC) || errors.Is(err, errors.ErrUnsupported) {
+		t.Skipf("this system has no private views: %v", err)
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("the move's view: %v; output %q", err, output.String())
+	}
+	return output.String()
+}
+
+// write makes files with contents.
+func write(t *testing.T, files map[string]string) {
+	t.Helper()
+	for path, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func read(path string) string {
+	contents, _ := os.ReadFile(path)
+	return string(contents)
+}
+
+// A moved session's view shows its copy at its private roots, also where the user's home folder is main's.
+func TestAMovesViewShowsItsCopyAtItsPrivateRoots(t *testing.T) {
+	_, own := homes(t)
+	copy := filepath.Join(own, ".local", "copies", "m1")
+	write(t, map[string]string{
+		filepath.Join(own, "Work", "repo", "README"): "the worker's own\n", filepath.Join(own, "notes"): "shared\n",
+		filepath.Join(copy, "Work", "repo", "README"): "the copy's\n",
+	})
+	move := view.Move{Home: own, Copy: copy, Private: []string{filepath.Join(own, "Work")}}
+	repository := filepath.Join(own, "Work", "repo")
+
+	output := runMove(t, move, repository, `echo "$HOME"; pwd -P; id -u; grep CapEff /proc/self/status; cat README "$HOME/notes"; echo written > new; mkdir ../worktree; echo made > ../worktree/file; echo too >> "$HOME/notes"`)
+	expected := strings.Join([]string{own, repository, strconv.Itoa(os.Getuid()), "CapEff:\t0000000000000000", "the copy's", "shared"}, "\n") + "\n"
+	if output != expected {
+		t.Fatalf("in the move's view:\n%s\nwant:\n%s", output, expected)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(copy, "Work", "repo", "new"): "written\n", filepath.Join(copy, "Work", "worktree", "file"): "made\n",
+		filepath.Join(own, "Work", "repo", "README"): "the worker's own\n", filepath.Join(own, "Work", "repo", "new"): "",
+		filepath.Join(own, "Work", "worktree", "file"): "", filepath.Join(own, "notes"): "shared\ntoo\n",
+	} {
+		if got := read(path); got != want {
+			t.Errorf("%s after the view = %q, want %q", path, got, want)
+		}
+	}
+
+	// A folder that the view lacks is no place to start.
+	process, err := move.Command(filepath.Join(own, "Work", "missing"), []string{"true"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output, err := process.CombinedOutput(); err == nil || !strings.Contains(string(output), "missing is not a folder in the move's view") {
+		t.Fatalf("in a missing folder: %v, %s", err, output)
+	}
+}
+
+// The helper runs in the view of main's home folder when the worker user's home folder differs, so a move's view is
+// in that view.
+func TestAMovesViewInTheViewOfMainsHomeFolder(t *testing.T) {
+	main, own := homes(t)
+	copy := filepath.Join(own, ".local", "copies", "m1")
+	write(t, map[string]string{filepath.Join(own, "notes"): "the worker's\n", filepath.Join(copy, "Work", "repo", "README"): "the copy's\n"})
+	if err := os.Mkdir(filepath.Join(own, "Work"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	nested, err := json.Marshal(nestedMove{
+		Move: view.Move{Home: main, Copy: copy, Private: []string{filepath.Join(main, "Work")}}, Dir: filepath.Join(main, "Work", "repo"),
+		Script: `{ echo "$HOME"; pwd -P; cat README "$HOME/notes"; } > "$HOME/seen"; echo written > new`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GRIPI_TEST_NESTED_MOVE", string(nested))
+
+	run(t, main, `exec "$1" -test.run='^TestNestedMove$'`, os.Args[0])
+	if seen, want := read(filepath.Join(own, "seen")), strings.Join([]string{main, filepath.Join(main, "Work", "repo"), "the copy's", "the worker's"}, "\n")+"\n"; seen != want {
+		t.Fatalf("in the move's view:\n%s\nwant:\n%s", seen, want)
+	}
+	if written := read(filepath.Join(copy, "Work", "repo", "new")); written != "written\n" {
+		t.Fatalf("the copy has %q", written)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(own, "Work")); len(entries) != 0 {
+		t.Fatalf("the worker user's own folder has %v", entries)
+	}
+}
+
+type nestedMove struct {
+	view.Move
+	Dir, Script string
+}
+
+// TestNestedMove runs GRIPI_TEST_NESTED_MOVE for TestAMovesViewInTheViewOfMainsHomeFolder, in the view of main's home.
+func TestNestedMove(t *testing.T) {
+	encoded := os.Getenv("GRIPI_TEST_NESTED_MOVE")
+	if encoded == "" {
+		t.Skip("runs in another test's view")
+	}
+	var nested nestedMove
+	if err := json.Unmarshal([]byte(encoded), &nested); err != nil {
+		t.Fatal(err)
+	}
+	runMove(t, nested.Move, nested.Dir, nested.Script)
+}
+
+func TestAMovesViewRefusesPrivateRootsOutsideMainsHomeFolder(t *testing.T) {
+	for _, private := range [][]string{nil, {"/home/alice"}, {"/home/alice/Work/repo"}, {"/home/bob/Work"}, {"Work"}, {"/home/alice/Work/"}} {
+		move := view.Move{Home: "/home/alice", Copy: "/home/gripi/.local/copies/m1", Private: private}
+		if _, err := move.Command("/home/alice/Work", []string{"true"}, nil); err == nil {
+			t.Errorf("a move's view with the private roots %q", private)
 		}
 	}
 }

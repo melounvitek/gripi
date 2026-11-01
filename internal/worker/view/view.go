@@ -48,6 +48,33 @@ func Run(home string, command []string, stdin io.Reader, stdout, stderr io.Write
 	return code, err
 }
 
+// Move is the view of a moved session's private copy of its repository: each of its private roots, folders directly
+// in main's home folder, shows the move's copy of it, and everything else stays as the process that starts the view
+// sees it, such as Pi's agent folder in the view of main's home folder.
+type Move struct {
+	Home    string   // main's home folder
+	Copy    string   // the move's copy, which holds the private roots under their names
+	Private []string // the private roots
+}
+
+// Command returns a command that runs command in the move's view, as this user with HOME set to main's home folder,
+// in the folder dir, which must exist there, and with env, or this process's environment when env is nil. It always
+// starts this executable again, which makes the view, also where this process sees main's home folder as its own.
+func (move Move) Command(dir string, command, env []string) (*exec.Cmd, error) {
+	if len(command) == 0 {
+		return nil, errors.New("no command to run")
+	}
+	if len(move.Private) == 0 {
+		return nil, errors.New("a move's view needs private roots")
+	}
+	for _, root := range move.Private {
+		if !filepath.IsAbs(root) || filepath.Clean(root) != root || filepath.Dir(root) != filepath.Clean(move.Home) {
+			return nil, fmt.Errorf("the private root %q is not a folder directly in main's home folder %q", root, move.Home)
+		}
+	}
+	return moveCommand(move, dir, command, env)
+}
+
 // run starts process, passes on the signals that would stop this process, and returns the process's exit status, or
 // 128 plus the signal that killed it.
 func run(process *exec.Cmd) (int, error) {
