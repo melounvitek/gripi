@@ -930,27 +930,39 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 	if err != nil {
 		return err
 	}
-	// The worker's copy of a repository that continued on main without the worker may have changes that main never got.
+	// The worker's copies of a repository that continued on main without the worker, and of its sessions, may have
+	// changes that main never got.
 	stale := filepath.Join(manager.mirrorFolder(unit.Main), "stale")
-	var aside string
-	if name, _ := os.ReadFile(stale); string(name) == worker.name {
-		aside = filepath.Join(filepath.Dir(unit.Main), "."+filepath.Base(unit.Main)+".gripi-aside", time.Now().UTC().Format("20060102T150405Z"))
-	}
-	if err := conn.CopyUnit(ctx, unit, aside); err != nil {
-		return fmt.Errorf("copy %s to worker %s: %w", unit.Main, worker.name, err)
-	}
-	if aside != "" {
-		log.Printf("the copy of %s on worker %s may have had changes that this machine never got; what the move replaced there is in %s", unit.Main, worker.name, aside)
-		if err := os.Remove(stale); err != nil {
-			return err
+	name, _ := os.ReadFile(stale)
+	isStale := string(name) == worker.name
+	now := time.Now().UTC().Format("20060102T150405Z")
+	copyFolders := func(folders mirror.Unit) error {
+		aside := ""
+		if isStale {
+			aside = filepath.Join(filepath.Dir(folders.Main), "."+filepath.Base(folders.Main)+".gripi-aside", now)
 		}
+		if err := conn.CopyUnit(ctx, folders, aside); err != nil {
+			return fmt.Errorf("copy %s to worker %s: %w", folders.Main, worker.name, err)
+		}
+		if aside != "" {
+			log.Printf("the copy of %s on worker %s may have had changes that this machine never got; what the move replaced there is in %s", folders.Main, worker.name, aside)
+		}
+		return nil
+	}
+	if err := copyFolders(unit); err != nil {
+		return err
 	}
 	for _, folder := range manager.sessionFolders(unit) {
 		if _, err := os.Stat(folder); err != nil {
 			continue
 		}
-		if err := conn.copyFolder(ctx, folder, folder, nil); err != nil {
-			return fmt.Errorf("copy %s to worker %s: %w", folder, worker.name, err)
+		if err := copyFolders(mirror.Unit{Main: folder}); err != nil {
+			return err
+		}
+	}
+	if isStale {
+		if err := os.Remove(stale); err != nil {
+			return err
 		}
 	}
 	started := time.Now()

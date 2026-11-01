@@ -646,12 +646,30 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	if err := manager.Return(ctx, project, stop); err != nil {
 		t.Fatal(err)
 	}
+	// The session's folder can't be read, so the worker's copy of its conversation stays as it was.
+	folder := sessionFolder(sessions, project)
+	if os.Geteuid() != 0 {
+		if err := os.Chmod(folder, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.Move(ctx, project, "beelink", stop); err == nil {
+			t.Fatal("moved without the session's folder")
+		}
+		if err := os.Chmod(folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := manager.Move(ctx, project, "beelink", stop); err != nil {
 		t.Fatal(err)
 	}
-	aside := filepath.Join(filepath.Dir(project), "."+filepath.Base(project)+".gripi-aside") + "/"
-	if calls := sshCalls(t, "'receive' '--aside' '"+aside); len(calls) != 1 {
-		t.Fatalf("copies that save aside what they replace: %q", calls)
+	for _, copied := range []string{project, folder} {
+		aside := filepath.Join(filepath.Dir(copied), "."+filepath.Base(copied)+".gripi-aside") + "/"
+		if calls := sshCalls(t, "'receive' '--aside' '"+aside); len(calls) == 0 || os.Geteuid() != 0 && len(calls) != 2 {
+			t.Fatalf("copies of %s that save aside what they replace: %q", copied, calls)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(manager.mirrorFolder(project), "stale")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the worker's copy is still stale: %v", err)
 	}
 }
 

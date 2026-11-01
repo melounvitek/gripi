@@ -353,7 +353,7 @@ The helper pings main every second. When main has not answered for 30 seconds, o
 What happens next is up to you:
 
 - If the worker answers again, the session’s next message connects again and continues on the worker, from its copy there.
-- Otherwise, continue on main. In the editor’s place, Gripi counts down to when the worker must have stopped everything, 32 seconds after main’s last answer, and then offers **continue on main**; `gripi worker return` refuses until then and says when that is. The repository then continues on main as main last got it. The worker’s copy may have changes that main never got: the next move to that worker saves what it replaces there in `.<repository>.gripi-aside/`, next to the repository on the worker.
+- Otherwise, continue on main. In the editor’s place, Gripi counts down to when the worker must have stopped everything, 32 seconds after main’s last answer, and then offers **continue on main**; `gripi worker return` refuses until then and says when that is. The repository then continues on main as main last got it. The worker’s copies of the repository and of its sessions may have changes that main never got: the next move to that worker saves what it replaces there in `.<repository>.gripi-aside/`, next to the repository on the worker, and in `.<folder>.gripi-aside/` next to each of Pi’s session folders.
 
 Losing a worker loses the running step and the background processes that the sessions started there, such as dev servers, which, unlike on main, stop with the connection. Continuing on main also leaves the files outside the repository behind on the worker. Stopping the gateway, such as for an update, also stops everything that sessions run on workers.
 
