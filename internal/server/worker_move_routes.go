@@ -140,6 +140,18 @@ func (app *application) moveRepository(response http.ResponseWriter, request *ht
 	if !ok {
 		return
 	}
+	// Workers refuse to start a session while its repository moves, so another move or return that started before the
+	// new sessions that this one stops have started again would end them.
+	repository := folder
+	if main, _, err := app.workers.Repository(folder); err == nil {
+		repository = main
+	}
+	unlock, locked := app.movingRepositories.TryLock(repository)
+	if !locked {
+		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the repository of " + repository + " is moving already"})
+		return
+	}
+	defer unlock()
 	var stopped []string
 	unsaved := map[string]func(context.Context) error{}
 	var owns func(key string) bool

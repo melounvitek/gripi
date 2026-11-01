@@ -318,6 +318,80 @@ func TestANewSessionThatPiHasNotSavedStartsAgainWhereItsRepositoryMoved(t *testi
 	}
 }
 
+// A return of a repository whose move is still starting its new sessions again would refuse to start them while it
+// copies, and they would be gone, so the repository is moving until they have started.
+func TestARepositoryMovesNoFurtherUntilItsNewSessionsStartedAgain(t *testing.T) {
+	cfg, _, _, project := fakePiConfig(t)
+	workers := &fakeWorkers{repository: project}
+	var onWorker []bool
+	// returning is while a return copies the repository, and overlap runs as the next Pi in the repository starts.
+	var returning bool
+	var overlap func()
+	handler, err := gateway.NewPiHandlerWithLauncher(cfg, gripi.WebFiles, func(process agent.Process) (*exec.Cmd, func(), error) {
+		if process.Dir != project {
+			return nil, nil, nil
+		}
+		if run := overlap; run != nil {
+			overlap = nil
+			run()
+		}
+		if returning {
+			return nil, nil, errors.New("the repository of " + project + " is moving between this machine and a worker; try again once it has moved")
+		}
+		onWorker = append(onWorker, workers.placed)
+		return nil, nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	created := serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": project}, true))
+	var payload struct{ Session string }
+	if err := json.Unmarshal(created.Body.Bytes(), &payload); err != nil || created.Code != http.StatusOK {
+		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
+	}
+	session := payload.Session
+	// The return starts as the new session starts again after the move, and copies until the move has answered.
+	returned := make(chan *httptest.ResponseRecorder, 1)
+	copying, copied := make(chan struct{}), make(chan struct{})
+	var overlapping *httptest.ResponseRecorder
+	overlap = func() {
+		workers.copying = func() {
+			returning = true
+			close(copying)
+			<-copied
+			returning = false
+		}
+		go func() {
+			returned <- postWorkspaceForm(handler, "/workers/return", url.Values{"session": {session}}, "")
+		}()
+		select {
+		case <-copying:
+		case overlapping = <-returned:
+		}
+	}
+
+	moved := postWorkspaceForm(handler, "/workers/move", url.Values{"session": {session}, "worker": {"beelink"}}, "")
+	close(copied)
+	if overlapping == nil {
+		overlapping = <-returned
+	}
+	if moved.Code != http.StatusOK {
+		t.Fatalf("move = %d %s", moved.Code, moved.Body.String())
+	}
+	if overlapping.Code != http.StatusConflict || !strings.Contains(overlapping.Body.String(), "moving already") {
+		t.Fatalf("return while the move started its new session again = %d %s", overlapping.Code, overlapping.Body.String())
+	}
+	workers.copying = nil
+	if response := postWorkspaceForm(handler, "/workers/return", url.Values{"session": {session}}, ""); response.Code != http.StatusOK {
+		t.Fatalf("return = %d %s", response.Code, response.Body.String())
+	}
+	if !slices.Equal(onWorker, []bool{false, true, false}) {
+		t.Fatalf("Pi of the new session started on the worker %v", onWorker)
+	}
+}
+
 // Main's copy of a session on a worker comes back from there, so deleting it would only lose its name, tags and
 // attachments.
 func TestASessionOnAWorkerIsDeletedOnlyOnceItContinuesOnMain(t *testing.T) {
