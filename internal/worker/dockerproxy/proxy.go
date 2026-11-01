@@ -24,7 +24,8 @@ type Options struct {
 	Listen   string // the Unix socket to serve, made private to the user; its folder must exist
 	Upstream string // the real Docker endpoint: unix:// or tcp:// without TLS
 	// From and To are absolute folders: paths at or under From reach Docker under To, and Docker's answers show
-	// paths under To under From again.
+	// paths under To under From again. The symbolic links in the paths of requests are followed first, as the
+	// process sees them, because Docker would follow them where it runs.
 	From, To string
 }
 
@@ -37,8 +38,25 @@ func Serve(ctx context.Context, options Options) error {
 	if !filepath.IsAbs(options.From) || !filepath.IsAbs(options.To) {
 		return fmt.Errorf("the folders to map must be absolute: %q, %q", options.From, options.To)
 	}
-	toDocker := mapping{filepath.Clean(options.From), filepath.Clean(options.To)}
-	fromDocker := mapping{toDocker.to, toDocker.from}
+	// Resolved paths have no symbolic links, so they match From only once it is resolved too.
+	from, err := resolve(options.From)
+	if err != nil {
+		return fmt.Errorf("can't resolve %s: %w", options.From, err)
+	}
+	toDocker := mapping{from, filepath.Clean(options.To)}
+	fromDocker := mapping{toDocker.to, filepath.Clean(options.From)}
+	hostPath := func(path string) (string, error) {
+		// Others name volumes, or devices such as tmpfs.
+		if !filepath.IsAbs(path) {
+			return path, nil
+		}
+		resolved, err := resolve(path)
+		if err != nil {
+			return "", fmt.Errorf("can't resolve %s: %w", path, err)
+		}
+		return toDocker.path(resolved), nil
+	}
+	dockerPath := func(path string) (string, error) { return fromDocker.path(path), nil }
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.Out.URL.Scheme, request.Out.URL.Host = "http", "docker"
@@ -54,27 +72,28 @@ func Serve(ctx context.Context, options Options) error {
 			if err != nil {
 				return err
 			}
-			body = rewriteJSON(body, rewrite, fromDocker)
+			if body, err = rewriteJSON(body, rewrite, dockerPath); err != nil {
+				return err
+			}
 			response.Body = io.NopCloser(bytes.NewReader(body))
 			response.ContentLength = int64(len(body))
 			response.Header.Set("Content-Length", strconv.Itoa(len(body)))
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			// The docker CLI shows the message as an error response from the daemon.
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Gripi's Docker proxy: " + err.Error()})
+			fail(w, http.StatusBadGateway, err)
 		},
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if rewrite := requestRewrite(r); rewrite != nil {
 			body, err := io.ReadAll(r.Body)
+			if err == nil {
+				body, err = rewriteJSON(body, rewrite, hostPath)
+			}
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				fail(w, http.StatusBadRequest, err)
 				return
 			}
-			body = rewriteJSON(body, rewrite, toDocker)
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			r.ContentLength = int64(len(body))
 			r.TransferEncoding = nil
@@ -99,6 +118,13 @@ func Serve(ctx context.Context, options Options) error {
 		return ctx.Err()
 	}
 	return err
+}
+
+// fail answers as the daemon does, so that the docker CLI shows the message as an error response from the daemon.
+func fail(w http.ResponseWriter, status int, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Gripi's Docker proxy: " + err.Error()})
 }
 
 func dialer(upstream string) (func(ctx context.Context, network, address string) (net.Conn, error), error) {
