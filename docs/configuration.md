@@ -368,6 +368,7 @@ The helper cannot stop what others run for Pi: Docker and Podman containers, whi
 - Pi’s `mcp-auth.json` isn’t copied, so MCP servers that need an OAuth login are not logged in on workers.
 - Main cannot refresh logins of providers that Pi extensions add, so on a worker such a login stops working when its token expires, unless main’s own Pi has refreshed it meanwhile.
 - A session on a worker can be deleted only once its repository continues on main, because the worker would send main its copy again.
+- Two repositories on workers never share a folder. A move, a worktree made on a worker or a session in a new folder is refused when one of its folders is, holds or is in a folder of another repository on a worker or moving to one, or when Pi would keep their sessions in the same session folder, as it does for `/work/a-b` and `/work/a/b`. A repository keeps every session folder that it had on a worker, also that of a removed worktree, until it continues on main.
 - Continue a session on a worker only in Gripi. If Pi CLI on main writes it, Gripi asks to take the session over, as for any session in use in Pi CLI, and then shows a conflict, because the worker’s copy replaces what Pi CLI wrote.
 - The `mirrors/` folder in Gripi’s state folder must be on the same file system as the repositories and Pi’s sessions.
 - The notice about main’s files saved aside is lost when the gateway restarts; the files stay.
