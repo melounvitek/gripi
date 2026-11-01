@@ -125,7 +125,8 @@ func WalkMirrored(unit Unit, visit func(folder string, ignored func(path string)
 	defer s.close()
 	var held []string
 	if unit.GitDir != "" {
-		listed, err := gitWorktrees(unit.Main)
+		// Main may be a worktree that the session removed.
+		listed, err := gitWorktrees(unit.GitDir)
 		if err != nil {
 			return err
 		}

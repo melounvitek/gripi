@@ -130,8 +130,7 @@ func TestControlPreparesAndDeletesMoves(t *testing.T) {
 	}
 	ctx := context.Background()
 	control := link.control
-	// A folder outside Git, whose copy has nothing that Git ignores, needs no view for SeedMove and DeleteMove.
-	move := worker.Move{ID: "m1", Roots: []string{home + "/Work/notes"}, Private: []string{home + "/Work"}}
+	move := worker.Move{ID: "m1", Repository: home + "/Work/gripi/.git", Roots: []string{home + "/Work/gripi"}, Private: []string{home + "/Work"}}
 
 	copy, err := control.PrepareMove(ctx, move)
 	if err != nil || copy != filepath.Join(data, "copies", "m1") {
@@ -147,12 +146,13 @@ func TestControlPreparesAndDeletesMoves(t *testing.T) {
 	if err := control.StartMoveMirror(ctx, "m1", ""); err == nil || !strings.Contains(err.Error(), "cgroup") {
 		t.Fatalf("StartMoveMirror without cgroups = %v", err)
 	}
-	if err := control.CreateSession(ctx, worker.Session{ID: "s1", Move: "m1", Cwd: home + "/Work/notes", Args: []string{"pi"}}); err == nil || !strings.Contains(err.Error(), "cgroup") {
+	if err := control.CreateSession(ctx, worker.Session{ID: "s1", Move: "m1", Cwd: home + "/Work/gripi", Args: []string{"pi"}}); err == nil || !strings.Contains(err.Error(), "cgroup") {
 		t.Fatalf("CreateSession in a move without cgroups = %v", err)
 	}
 	if barriers, err := control.ReleaseMove(ctx, "m1"); err != nil || barriers != (helper.Barriers{}) {
 		t.Fatalf("ReleaseMove of a move without mirrors = %+v, %v", barriers, err)
 	}
+	// Like a move that failed before its upload, the copy has no repository whose ignored folders could stay.
 	if err := control.DeleteMove(ctx, "m1"); err != nil {
 		t.Fatal(err)
 	}

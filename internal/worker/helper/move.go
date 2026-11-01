@@ -276,7 +276,9 @@ func (s *server) deleteMove(id string) error {
 	}
 	s.cache.Lock()
 	defer s.cache.Unlock()
-	if m.Repository != "" {
+	copy := s.copyFolder(id)
+	// A copy that never got its repository, as after a failed move, has nothing that Git ignores.
+	if _, err := os.Stat(filepath.Join(copy, strings.TrimPrefix(m.Repository, s.options.Home))); m.Repository != "" && err == nil {
 		host, err := s.host(m)
 		if err == nil {
 			_, err = host.call(context.Background(), Message{Type: "stash", Path: s.cacheOf(m)})
@@ -291,7 +293,6 @@ func (s *server) deleteMove(id string) error {
 	if err != nil {
 		return err
 	}
-	copy := s.copyFolder(id)
 	// Without its description, the copy is no longer one to seed from.
 	if err := os.Remove(copy + ".json"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
