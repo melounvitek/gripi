@@ -253,7 +253,7 @@ func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The worker's mirror sends the folders of the unit, which Git there may have changed.
-	manager.applied(unit, false)(mirror.Checkpoint{Roots: []string{"/work/project", "/work/project-new"}}, "/state/aside/main/3", []string{"/work/project/README"})
+	manager.applied(unit, false)(mirror.Checkpoint{Roots: []string{"/work/project", "/work/project-new"}}, "/state/aside/main/3", []string{"/work/project/README"}, nil)
 	beelink := manager.Placement("beelink")
 	if !beelink.Folder("/work/project-new/src") || beelink.Folder("/work/project-old") {
 		t.Fatalf("placement after a worktree was added and one removed: %+v", manager.options.Placements.All())
@@ -263,7 +263,7 @@ func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
 		t.Fatalf("saved placements: %+v, %v", reloaded.All(), err)
 	}
 	// The mirror of the sessions' folders has folders of its own.
-	manager.applied(unit, true)(mirror.Checkpoint{Roots: []string{"/sessions/--work-project--"}}, "/state/aside/main/4", []string{"/sessions/--work-project--/s.jsonl"})
+	manager.applied(unit, true)(mirror.Checkpoint{Roots: []string{"/sessions/--work-project--"}}, "/state/aside/main/4", []string{"/sessions/--work-project--/s.jsonl"}, nil)
 	if beelink.Folder("/work/project-new") != true {
 		t.Fatal("the sessions' folders changed the placement")
 	}

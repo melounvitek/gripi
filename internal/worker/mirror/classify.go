@@ -28,6 +28,10 @@ type Options struct {
 	// AutoBarrier makes a Source take a barrier by itself shortly after changes, so that the destination follows
 	// without being asked, as main follows Pi's session files.
 	AutoBarrier bool
+	// CompleteLines sends `*.jsonl` files only up to their last newline, so that the destination never gets a line
+	// that is still being written, as with Pi's session files. As with any file, the destination appends what a file
+	// gained to it, and replaces a file that was rewritten.
+	CompleteLines bool
 }
 
 // includesBelow reports whether a pattern can match something inside the folder rel.

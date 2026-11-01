@@ -41,6 +41,72 @@ func TestAFileThatGrowsGrowsInPlace(t *testing.T) {
 	checkFiles(t, unit, r.dst)
 }
 
+// Main must never get half of a line that Pi is still writing to a session file, and Gripi's guard of the file on
+// main must learn of a rewrite, which it would otherwise take for another program's.
+func TestSessionFilesReachMainALineAtATime(t *testing.T) {
+	folder := t.TempDir()
+	unit := Unit{Main: folder}
+	writeFile(t, folder, "session.jsonl", "{\"id\":\"1\"}\n")
+	dst := t.TempDir()
+	r := &rig{unit: unit, dst: dst, state: filepath.Join(dst, "state")}
+	var err error
+	if r.d, err = NewMovedDestination(r.state, "/", dst); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var replaced []string
+	r.d.Applied = func(_ Checkpoint, _ string, _, paths []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		replaced = append(replaced, paths...)
+	}
+	takeReplaced := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		paths := replaced
+		replaced = nil
+		return paths
+	}
+	r.start(t, func(s *Source) { s.opts.CompleteLines = true })
+	session := filepath.Join(folder, "session.jsonl")
+	takeReplaced()
+	before := inodeOf(t, r.dst+session)
+	onMain := func() string {
+		data, _ := os.ReadFile(r.dst + session)
+		return string(data)
+	}
+
+	appendFile(t, folder, "session.jsonl", "{\"id\":\"2\"}\n{\"id\":")
+	r.barrier(t)
+	if got := onMain(); got != "{\"id\":\"1\"}\n{\"id\":\"2\"}\n" {
+		t.Fatalf("main has %q", got)
+	}
+	appendFile(t, folder, "session.jsonl", "\"3\"}\n")
+	r.barrier(t)
+	checkFiles(t, unit, r.dst)
+	if inodeOf(t, r.dst+session) != before {
+		t.Fatal("main got another file instead of the grown one")
+	}
+	if paths := takeReplaced(); len(paths) > 0 {
+		t.Fatalf("reported %v as replaced after appends", paths)
+	}
+
+	writeFile(t, folder, "session.jsonl", "{\"id\":\"rewritten\"}\n{\"id\":")
+	r.barrier(t)
+	if got := onMain(); got != "{\"id\":\"rewritten\"}\n" {
+		t.Fatalf("main has %q after a rewrite", got)
+	}
+	if paths := takeReplaced(); !slices.Equal(paths, []string{session}) {
+		t.Fatalf("reported %v as replaced after a rewrite", paths)
+	}
+
+	writeFile(t, folder, "notes.txt", "no newline")
+	r.barrier(t)
+	if data, _ := os.ReadFile(r.dst + filepath.Join(folder, "notes.txt")); string(data) != "no newline" {
+		t.Fatalf("main has %q in another file", data)
+	}
+}
+
 func TestMainsChangesAreSavedAsideBeforeTheWorkersReplaceThem(t *testing.T) {
 	unit := newRepo(t)
 	dst := t.TempDir()
@@ -52,7 +118,7 @@ func TestMainsChangesAreSavedAsideBeforeTheWorkersReplaceThem(t *testing.T) {
 	var mu sync.Mutex
 	var saved []string
 	var asides []string
-	r.d.Applied = func(_ Checkpoint, aside string, paths []string) {
+	r.d.Applied = func(_ Checkpoint, aside string, paths, _ []string) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, p := range paths {
@@ -140,7 +206,7 @@ func TestTheDestinationRemembersWhatItWroteAcrossRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var saved []string
-	d.Applied = func(_ Checkpoint, _ string, paths []string) { saved = append(saved, paths...) }
+	d.Applied = func(_ Checkpoint, _ string, paths, _ []string) { saved = append(saved, paths...) }
 	r.d = d
 	writeFile(t, r.dst+folder, "f1.txt", "edited on main\n")
 	writeFile(t, folder, "f1.txt", "changed on the worker\n")
@@ -212,7 +278,7 @@ func TestFinishingAnInterruptedBarrierSavesMainsChangesAside(t *testing.T) {
 		t.Fatalf("main's version aside: %q, %v", data, err)
 	}
 	var saved []string
-	d.Applied = func(_ Checkpoint, folder string, paths []string) {
+	d.Applied = func(_ Checkpoint, folder string, paths, _ []string) {
 		if folder == aside {
 			saved = append(saved, paths...)
 		}

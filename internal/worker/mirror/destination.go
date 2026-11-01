@@ -32,14 +32,15 @@ import (
 // alone don't count, because a plain git status rewrites it.
 type Destination struct {
 	// Applied, if set before Serve, is called after each barrier that Serve
-	// applies, before the source learns of it, with the new checkpoint and the
-	// files that changed here, which are in the folder aside at their paths.
-	// A barrier that was finished after a crash, as the destination opened,
-	// is reported when Serve starts.
-	Applied func(checkpoint Checkpoint, aside string, saved []string)
+	// applies, before the source learns of it, with the new checkpoint, the
+	// files that changed here, which are in the folder aside at their paths,
+	// and the files that it wrote whole rather than appending to the file
+	// there, new ones included. A barrier that was finished after a crash,
+	// as the destination opened, is reported when Serve starts.
+	Applied func(checkpoint Checkpoint, aside string, saved, replaced []string)
 
 	state     string
-	recovered replayed // what finishing an interrupted barrier saved aside, which Serve reports
+	recovered replayed // what finishing an interrupted barrier did, which Serve reports
 	// The source's paths under from are kept under to: both are "/" unless the unit lives elsewhere here, as in
 	// tests that run both sides on one machine.
 	from, to string
@@ -220,8 +221,8 @@ func (d *Destination) Serve(ctx context.Context, stream io.ReadWriter, aside str
 	if err := d.recover(); err != nil {
 		return err
 	}
-	if len(d.recovered.saved) > 0 && d.Applied != nil {
-		d.Applied(d.Checkpoint(), d.recovered.aside, d.recovered.saved)
+	if done := d.recovered; len(done.saved)+len(done.replaced) > 0 && d.Applied != nil {
+		d.Applied(d.Checkpoint(), done.aside, done.saved, done.replaced)
 	}
 	d.recovered = replayed{}
 	if err := os.RemoveAll(d.path("staging")); err != nil {
@@ -265,6 +266,7 @@ func (d *Destination) recover() error {
 	done, err := d.replay(j)
 	d.recovered.aside = done.aside
 	d.recovered.saved = append(d.recovered.saved, done.saved...)
+	d.recovered.replaced = append(d.recovered.replaced, done.replaced...)
 	return err
 }
 
@@ -289,8 +291,9 @@ func (d *Destination) commit(j journal) (replayed, error) {
 
 // replayed is what a replay did besides applying the changes.
 type replayed struct {
-	aside string   // where files that changed here go; empty when that isn't checked
-	saved []string // the files moved or copied there
+	aside    string   // where files that changed here go; empty when that isn't checked
+	saved    []string // the files moved or copied there
+	replaced []string // the files written whole, rather than appended to
 }
 
 // replay applies a journal. With an aside folder, it first moves there what changed here.
@@ -809,7 +812,11 @@ func (a *applier) put(o op) error {
 	defer dir.Close()
 	// os.Root can't rename from outside the unit; renameat with the parent
 	// opened through it keeps the same guarantees.
-	return unix.Renameat(int(a.staging.Fd()), o.File, int(dir.Fd()), filepath.Base(rel))
+	if err := unix.Renameat(int(a.staging.Fd()), o.File, int(dir.Fd()), filepath.Base(rel)); err != nil {
+		return err
+	}
+	a.replaced = append(a.replaced, o.Path)
+	return nil
 }
 
 // appendTo appends the staged file to the file at rel, if that file is where
@@ -1205,7 +1212,7 @@ func (r *receiver) barrier(n uint64) error {
 	}
 	// Before the source hears of it, so that what follows the barrier there finds what Applied changed.
 	if err == nil && r.d.Applied != nil {
-		r.d.Applied(r.d.Checkpoint(), aside, done.saved)
+		r.d.Applied(r.d.Checkpoint(), aside, done.saved, done.replaced)
 	}
 	ack := &frame{Kind: kindAck, N: n}
 	if err != nil {

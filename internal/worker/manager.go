@@ -576,8 +576,8 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 // applied takes what main's copy of a placed unit, or with sessions of the unit's sessions' folders, applied: files
 // that changed on main make a notice, and the unit's folders, which Git on the worker may have changed, are its
 // placement's from then on.
-func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirror.Checkpoint, string, []string) {
-	return func(checkpoint mirror.Checkpoint, aside string, saved []string) {
+func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirror.Checkpoint, string, []string, []string) {
+	return func(checkpoint mirror.Checkpoint, aside string, saved, _ []string) {
 		placement, placed := manager.options.Placements.Find(repository.Main)
 		placed = placed && placement.Unit.Main == repository.Main
 		if placed && !sessions {

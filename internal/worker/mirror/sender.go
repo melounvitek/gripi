@@ -1,6 +1,7 @@
 package mirror
 
 import (
+	"bytes"
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
@@ -810,20 +811,27 @@ func (s *sender) sendFile(p string, plan deltaPlan) error {
 	return nil
 }
 
+// stream sends p as f holds it, or with CompleteLines, its complete lines. The entry it returns is the whole file's,
+// so that the rest goes once the file changes again.
 func (s *sender) stream(f *os.File, info fs.FileInfo, p string, plan deltaPlan) (bool, entry, error) {
 	e := entryOf(p, info)
 	e.ino = inode(info)
-	w := &putWriter{c: s.c, f: &frame{Kind: kindPut, Path: p, Mode: e.Mode, Mtime: e.Mtime, Size: e.Size, Bases: plan.bases, First: true}}
-	counted := &countingReader{r: f}
+	size := e.Size
+	if s.opts.CompleteLines && strings.HasSuffix(p, ".jsonl") {
+		var err error
+		if size, err = completeLines(f, size); err != nil {
+			s.cantRead(p, err)
+			return false, e, nil
+		}
+	}
+	w := &putWriter{c: s.c, f: &frame{Kind: kindPut, Path: p, Mode: e.Mode, Mtime: e.Mtime, Size: size, Bases: plan.bases, First: true}}
+	counted := &countingReader{r: io.NewSectionReader(f, 0, size)}
 	var r io.Reader = counted
 	var sum hash.Hash
 	var err error
 	switch {
 	case plan.appendAt > 0:
-		if _, err := f.Seek(plan.appendAt, io.SeekStart); err != nil {
-			return false, e, nil
-		}
-		counted.n = plan.appendAt
+		counted.r, counted.n = io.NewSectionReader(f, plan.appendAt, size-plan.appendAt), plan.appendAt
 		err = w.add(deltaOp{Base: 0, Off: 0, Len: plan.appendAt})
 		if err == nil {
 			err = s.copyData(w, r)
@@ -845,7 +853,7 @@ func (s *sender) stream(f *os.File, info fs.FileInfo, p string, plan deltaPlan) 
 		return false, e, err
 	}
 	after, statErr := f.Stat()
-	ok := statErr == nil && counted.n == e.Size && after.Size() == e.Size && after.ModTime().Equal(info.ModTime())
+	ok := statErr == nil && counted.n == size && after.Size() == e.Size && after.ModTime().Equal(info.ModTime())
 	var hashed []byte
 	if sum != nil && ok {
 		hashed = sum.Sum(nil)
@@ -871,6 +879,24 @@ func (s *sender) copyData(w *putWriter, r io.Reader) error {
 			return err
 		}
 	}
+}
+
+// completeLines returns the length of the first size bytes of f up to their last newline.
+func completeLines(f *os.File, size int64) (int64, error) {
+	buf := make([]byte, 64<<10)
+	for end := size; end > 0; {
+		start := max(end-int64(len(buf)), 0)
+		// At its end, the file shrank since its size was taken, which the put notices afterwards.
+		n, err := f.ReadAt(buf[:end-start], start)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return 0, err
+		}
+		if i := bytes.LastIndexByte(buf[:n], '\n'); i >= 0 {
+			return start + int64(i) + 1, nil
+		}
+		end = start
+	}
+	return 0, nil
 }
 
 // readError marks failures to read the source file, which abort the put
