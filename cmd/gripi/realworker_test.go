@@ -35,6 +35,8 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	if destination == "" {
 		t.Skip("set GRIPI_TEST_WORKER to a worker that ssh reaches without a prompt")
 	}
+	// Settings inherited from the environment, such as GRIPI_WORKERS_PATH, would reach the user's own state.
+	isolateSettings(t)
 	onWorker := func(script string) (string, error) {
 		output, err := exec.Command("ssh", "-o", "BatchMode=yes", "--", destination, script).CombinedOutput()
 		return strings.TrimSpace(string(output)), err
@@ -58,7 +60,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	home := filepath.Join(realWorkerRoot, "home")
 	agentDir := filepath.Join(home, ".pi", "agent")
 	for name, value := range map[string]string{
-		"HOME": home, "PI_CODING_AGENT_DIR": agentDir, "GRIPI_SOCKET_PATH": filepath.Join(realWorkerRoot, "gripi.sock"),
+		"HOME": home, "PI_CODING_AGENT_DIR": agentDir, "GRIPI_SOCKET_PATH": filepath.Join(realWorkerRoot, "gripi.sock"), "GRIPI_ENV_PATH": filepath.Join(home, ".config", "gripi", "env"),
 		"GRIPI_BROWSER_AUTH_DISABLED": "true", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
 		"GIT_AUTHOR_NAME": "Gripi test", "GIT_AUTHOR_EMAIL": "test@example.com", "GIT_COMMITTER_NAME": "Gripi test", "GIT_COMMITTER_EMAIL": "test@example.com",
 	} {
