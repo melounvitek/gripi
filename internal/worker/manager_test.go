@@ -472,17 +472,23 @@ func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
 		Store: fakeStore{}, Pi: Pi{AgentDir: "/home/me/.pi/agent"}, StateDir: "/home/me/.pi/gripi", GatewayPaths: []string{"/home/me/.config/gripi"},
 		SessionsRoot: "/home/me/.pi/agent/sessions",
 	})
-	unit := mirror.Unit{Main: "/work/project", Worktrees: []string{"/work/project-feature"}, GitDir: "/work/project/.git"}
+	// This machine has a worktree of the unit, and folders of its own where the worker may make worktrees.
+	feature, unrelated, empty := t.TempDir(), t.TempDir(), t.TempDir()
+	for _, folder := range []string{feature, unrelated} {
+		writeTestFile(t, filepath.Join(folder, "README"), "main's\n", 0600)
+	}
+	unit := mirror.Unit{Main: "/work/project", Worktrees: []string{feature}, GitDir: "/work/project/.git"}
 	for _, placement := range []Placement{{Worker: "beelink", Unit: unit}, {Worker: "nuc", Unit: mirror.Unit{Main: "/work/other"}}} {
 		if err := manager.options.Placements.Add(placement); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// /work/.worktrees/project/new is a worktree made on the worker.
+	// /work/.worktrees/project/new is a worktree made on the worker, and so are those over the folders of this machine,
+	// whose files the worker's would replace unless the folder is empty.
 	allow := manager.allowRoot(unit, false)
 	for root, allowed := range map[string]bool{
-		"/work/project": true, "/work/project-feature": true, "/work/project/.git": true, "/work/.worktrees/project/new": true,
+		"/work/project": true, feature: true, "/work/project/.git": true, "/work/.worktrees/project/new": true, empty: true, unrelated: false,
 		"/home/me": false, "/home/me/.pi/agent/extensions": false, "/home/me/.pi/gripi": false, "/home/me/.config": false,
 		"/home/me/.pi/agent/sessions/--work-project--": false, "/work/other": false, "/work/other/src": false, "/work": false,
 	} {

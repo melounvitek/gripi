@@ -679,8 +679,9 @@ func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirr
 }
 
 // allowRoot is the AllowRoot of main's copy of a unit: a placed unit's copy writes in the unit's folders and in
-// worktrees that the worker made, but never in Pi's or Gripi's own folders or in another unit on a worker; the copy of
-// the folders of a unit's sessions, which are its unit, writes only in those.
+// worktrees that the worker made, but never in Pi's or Gripi's own folders, in another unit on a worker, or in a
+// folder of this machine's own files, which the worker's would replace without saving them aside; the copy of the
+// folders of a unit's sessions, which are its unit, writes only in those.
 func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root string) error {
 	return func(root string) error {
 		if sessions {
@@ -705,7 +706,19 @@ func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root str
 				return fmt.Errorf("it holds or is in %s, which is on worker %s", other.Unit.Main, other.Worker)
 			}
 		}
-		return nil
+		info, err := os.Lstat(root)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if entries, err := os.ReadDir(root); err != nil || len(entries) == 0 {
+				return err
+			}
+		}
+		return errors.New("this machine has files there that are not the repository's")
 	}
 }
 
