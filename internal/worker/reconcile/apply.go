@@ -41,14 +41,23 @@ func (r *reconciler) apply() error {
 	if err != nil {
 		return err
 	}
+	mTrees, err := r.main.worktrees(ctx, mRefs)
+	if err != nil {
+		return err
+	}
 	var updates []refUpdate
 	for _, u := range p.Refs {
-		switch mRefs[u.Name].OID {
-		case u.New:
-		case u.Old:
+		// Only worktrees whose checkouts the return takes or makes may have the ref checked out, as when it was planned.
+		checkedOut := slices.ContainsFunc(mTrees, func(w worktree) bool {
+			return w.Head.Branch == u.Name && !slices.ContainsFunc(p.Checkouts, func(c checkout) bool { return c.Root == w.Root }) &&
+				!slices.ContainsFunc(p.Worktrees, func(n worktree) bool { return n.Root == w.Root })
+		})
+		switch current := mRefs[u.Name].OID; {
+		case current == u.New:
+		case current == u.Old && !checkedOut:
 			updates = append(updates, u)
 		default:
-			if err := r.recover(u.Name, u.New, "changed on main meanwhile"); err != nil {
+			if err := r.recover(u.Name, u.New, "changed or checked out on main meanwhile"); err != nil {
 				return err
 			}
 		}
@@ -233,7 +242,7 @@ func (r *reconciler) applyWorktree(w worktree) error {
 		}
 		i = slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root })
 	}
-	mw := mTrees[i]
+	mw, made := mTrees[i], r.madeOnMain(mTrees)
 	if e, err := lstat(w.Root); err != nil || e.Type != "d" {
 		return r.keepWorktree(w, "made on the worker, but main has something else at its path")
 	}
@@ -258,6 +267,8 @@ func (r *reconciler) applyWorktree(w worktree) error {
 		case m.same(worker[p]):
 		case m.Type != "":
 			err = r.asideNow(fileUpdate{Path: p}, m, "changed on main meanwhile")
+		case slices.ContainsFunc(made, func(root string) bool { return within(p, root) }):
+			err = r.asideNow(fileUpdate{Path: p}, m, "in a worktree that main made there meanwhile")
 		case blocked(w.Root, p):
 			err = r.asideNow(fileUpdate{Path: p}, m, "something on main is in its way")
 		default:

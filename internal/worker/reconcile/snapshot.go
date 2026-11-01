@@ -68,13 +68,15 @@ func Snapshot(ctx context.Context, move string, sel Selection, base, shadow stri
 	if err != nil {
 		return nil, err
 	}
-	// Unselected worktrees in selected ones stay out.
+	// What unselected worktrees in selected ones have stays out.
 	paths = slices.DeleteFunc(paths, func(p string) bool {
-		return slices.ContainsFunc(registered, func(w worktree) bool {
-			return within(p, w.Root) && !slices.Contains(sel.Roots, w.Root) && slices.ContainsFunc(sel.Roots, func(root string) bool {
-				return strings.HasPrefix(w.Root, root+"/")
-			})
-		})
+		owner := ""
+		for _, w := range registered {
+			if within(p, w.Root) && len(w.Root) > len(owner) {
+				owner = w.Root
+			}
+		}
+		return !within(p, sel.GitDir) && !slices.Contains(sel.Roots, owner)
 	})
 
 	m := manifest{Move: move, GitDir: sel.GitDir, Cwd: sel.Cwd, Files: map[string]entry{}, GitFiles: map[string]entry{}}

@@ -861,6 +861,54 @@ func TestAWorktreeThatMainMakesAfterAStopKeepsTheWorkersFilesOut(t *testing.T) {
 	}
 }
 
+func TestABranchThatMainChecksOutAfterAStopKeepsItsCommit(t *testing.T) {
+	r := newRig(t)
+	r.git(r.main, "branch", "fast")
+	r.git(r.main, "branch", "diverged")
+	r.snapshot(r.main)
+	worker := func(args ...string) string { return r.worker(r.main, args...) }
+	fast := r.commit(worker, "fast", "worker")
+	r.commit(worker, "diverged", "worker")
+	r.commit(r.onMain, "diverged", "main") // for a recovery ref, the first change
+	stopWhen(t, func() bool { return true })
+	if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
+		t.Fatal("the reconcile didn't stop")
+	}
+	interrupt = nil
+	before := r.rev(r.main, "fast")
+	r.git(r.other, "switch", "-q", "fast")
+
+	r.reconcile()
+
+	if got := r.rev(r.main, "fast"); got != before {
+		t.Errorf("fast = %s, want main's %s", got, before)
+	}
+	if got := r.rev(r.main, "refs/gripi/returns/"+move+"/refs/heads/fast"); got != fast {
+		t.Errorf("the worker's fast = %s, want %s", got, fast)
+	}
+}
+
+func TestAWorktreeThatMainMakesInANewOneAfterAStopKeepsTheWorkersFilesOut(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	made := filepath.Join(filepath.Dir(r.feat), "made")
+	r.workerWorktree(made, "made")
+	r.write(r.shadow+made, "inner/x.txt", "worker\n")
+	stopWhen(t, func() bool { return exists(made) })
+	if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
+		t.Fatal("the reconcile didn't stop")
+	}
+	interrupt = nil
+	r.git(r.main, "worktree", "add", "-q", "-b", "inner", made+"/inner")
+
+	result := r.reconcile()
+
+	r.expectMissing(made + "/inner/x.txt")
+	if _, ok := asideOf(result, made+"/inner/x.txt"); !ok {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
 func TestAWorktreeThatMainRemovesAfterAStopKeepsTheWorkersCheckout(t *testing.T) {
 	r := newRig(t)
 	r.snapshot(r.feat)
@@ -1001,9 +1049,12 @@ func TestAnUnselectedWorktreeLeavesOutOnlyItsOwnFiles(t *testing.T) {
 
 func TestNestedSelectedWorktreesComeBackEach(t *testing.T) {
 	r := newRig(t)
-	nested := filepath.Join(r.main, "nested")
+	unselected := filepath.Join(r.main, "unselected")
+	nested := filepath.Join(unselected, "nested")
+	r.git(r.main, "worktree", "add", "-q", "-b", "unselected", unselected)
 	r.git(r.main, "worktree", "add", "-q", "-b", "nested", nested)
 	r.snapshot(r.main, nested)
+	r.expectMissing(r.shadow + unselected + "/a.txt")
 	r.write(r.shadow+nested, "a.txt", replace("two", "nested"))
 	r.write(r.shadow+r.main, "a.txt", replace("two", "main checkout"))
 
@@ -1011,6 +1062,7 @@ func TestNestedSelectedWorktreesComeBackEach(t *testing.T) {
 
 	r.expectFile(nested+"/a.txt", replace("two", "nested"))
 	r.expectFile(r.main+"/a.txt", replace("two", "main checkout"))
+	r.expectFile(unselected+"/a.txt", lines)
 }
 
 func TestTheFirstCommitOfANewRepositoryComesBack(t *testing.T) {
