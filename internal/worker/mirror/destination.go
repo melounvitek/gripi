@@ -268,10 +268,8 @@ func (d *Destination) recover() error {
 		return fmt.Errorf("mirror journal: %w", err)
 	}
 	// The changes that the interrupted replay applied count as the destination's again before the rest is applied.
-	done, err := d.replay(j)
-	d.recovered.aside = done.aside
-	d.recovered.saved = append(d.recovered.saved, done.saved...)
-	d.recovered.replaced = append(d.recovered.replaced, done.replaced...)
+	// What they saved aside and wrote whole is reported with the rest.
+	d.recovered, err = d.replay(j)
 	return err
 }
 
@@ -301,6 +299,45 @@ type replayed struct {
 	replaced []string // the files written whole, rather than appended to
 }
 
+// outcome is what applying one change saved aside and wrote whole. A barrier's done folder keeps them, so that the
+// replay that finishes the barrier after a failure reports them too.
+type outcome struct {
+	Saved    []string `json:"saved,omitempty"`
+	Replaced []string `json:"replaced,omitempty"`
+}
+
+// recall opens the outcomes file at path, and takes the outcomes that earlier replays of the barrier noted there.
+func (a *applier) recall(path string) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	a.outcomes = file
+	lines := bufio.NewReader(file)
+	for {
+		line, err := lines.ReadBytes('\n')
+		var o outcome
+		if json.Unmarshal(line, &o) == nil { // a line cut short by a crash is lost
+			a.saved = append(a.saved, o.Saved...)
+			a.replaced = append(a.replaced, o.Replaced...)
+		}
+		if err != nil {
+			return ignoreEOF(err)
+		}
+	}
+}
+
+func (a *applier) note(o outcome) error {
+	if len(o.Saved)+len(o.Replaced) == 0 {
+		return nil
+	}
+	line, err := json.Marshal(o)
+	if err == nil {
+		_, err = a.outcomes.Write(append(line, '\n'))
+	}
+	return err
+}
+
 // replay applies a journal. With an aside folder, it first moves there what changed here.
 func (d *Destination) replay(j journal) (replayed, error) {
 	a := &applier{d: d, roots: j.Roots, opened: map[string]*os.Root{}, dirs: map[string]bool{}, replayed: replayed{aside: j.Aside}, touched: map[string]bool{}}
@@ -309,6 +346,9 @@ func (d *Destination) replay(j journal) (replayed, error) {
 	done := d.path("done", barrier)
 	if len(j.Ops) > 0 {
 		if err := os.MkdirAll(done, 0o700); err != nil {
+			return a.replayed, err
+		}
+		if err := a.recall(filepath.Join(done, "outcomes")); err != nil {
 			return a.replayed, err
 		}
 	}
@@ -322,8 +362,14 @@ func (d *Destination) replay(j journal) (replayed, error) {
 			}
 		}
 		info, err := os.Lstat(d.local(o.Path))
-		if err := a.apply(o); err != nil {
-			return a.replayed, fmt.Errorf("mirror: %s %s: %w", o.Kind, o.Path, err)
+		saved, replaced := len(a.saved), len(a.replaced)
+		applyErr := a.apply(o)
+		// Also when it failed partway, because what it moved aside isn't there to find again.
+		if err := a.note(outcome{Saved: a.saved[saved:], Replaced: a.replaced[replaced:]}); err != nil {
+			return a.replayed, err
+		}
+		if applyErr != nil {
+			return a.replayed, fmt.Errorf("mirror: %s %s: %w", o.Kind, o.Path, applyErr)
 		}
 		a.record(o, err == nil && info.IsDir())
 		if o.Kind != "put" {
@@ -421,7 +467,8 @@ type applier struct {
 	staging *os.File
 	dirs    map[string]bool // parent folders known to be real folders
 	replayed
-	touched map[string]bool // paths whose stamps changed
+	outcomes *os.File        // the barrier's outcomes file
+	touched  map[string]bool // paths whose stamps changed
 }
 
 func (a *applier) close() {
@@ -430,6 +477,9 @@ func (a *applier) close() {
 	}
 	if a.staging != nil {
 		a.staging.Close()
+	}
+	if a.outcomes != nil {
+		a.outcomes.Close()
 	}
 }
 

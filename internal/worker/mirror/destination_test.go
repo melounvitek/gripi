@@ -347,6 +347,41 @@ func TestFinishingAnInterruptedBarrierSavesMainsChangesAside(t *testing.T) {
 	}
 }
 
+// A barrier that main couldn't finish may have rewritten session files already, and finishing it must report those
+// too, or Gripi's guard takes them for another program's.
+func TestFinishingAnInterruptedBarrierReportsWhatItRewroteBefore(t *testing.T) {
+	folder := t.TempDir()
+	writeFile(t, folder, "a/session.jsonl", "{\"id\":\"a\"}\n")
+	writeFile(t, folder, "b/session.jsonl", "{\"id\":\"b\"}\n")
+	sessions := func(s *Source) { s.opts.CompleteLines = true }
+	r := newRigWith(t, Unit{Main: folder}, sessions)
+	stuck := r.dst + filepath.Join(folder, "b")
+	os.Chmod(stuck, 0o500) // the second rewrite fails after the first
+	t.Cleanup(func() { os.Chmod(stuck, 0o755) })
+	writeFile(t, folder, "a/session.jsonl", "{\"id\":\"A\"}\n")
+	writeFile(t, folder, "b/session.jsonl", "{\"id\":\"B\"}\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if n, _, err := r.src.Barrier(ctx); err == nil {
+		t.Fatalf("barrier %d applied despite the read-only folder", n)
+	}
+	<-r.served
+	<-r.ran
+
+	os.Chmod(stuck, 0o755)
+	d, err := NewMovedDestination(r.state, "/", r.dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replaced []string
+	d.Applied = func(_ Checkpoint, _ string, _, paths []string) { replaced = append(replaced, paths...) }
+	r.d = d
+	r.start(t, sessions)
+	if want := []string{filepath.Join(folder, "a/session.jsonl"), filepath.Join(folder, "b/session.jsonl")}; !slices.Equal(replaced, want) {
+		t.Fatalf("reported %v as replaced, want %v", replaced, want)
+	}
+}
+
 // Main writes only into the folders it allows, also when the worker adds a worktree.
 func TestTheDestinationRefusesFoldersItDoesntAllow(t *testing.T) {
 	unit := newRepo(t)
