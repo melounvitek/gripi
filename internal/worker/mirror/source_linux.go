@@ -32,6 +32,7 @@ type Source struct {
 	requests chan barrierRequest
 	done     chan struct{} // closed when Run returns
 	healthy  atomic.Bool
+	failing  atomic.Bool          // the last barrier failed because something couldn't be read
 	current  atomic.Pointer[Unit] // the unit's folders as Run last found them
 
 	overflows  atomic.Int64
@@ -58,6 +59,7 @@ type Source struct {
 	indexChanged map[string]bool   // worktrees
 	barriered    uint64            // the changes seen before the last barrier
 	unbarriered  time.Time         // when AutoBarrier first saw changes after it
+	retryAt      time.Time         // when to retry a barrier that failed because something couldn't be read
 }
 
 type rawEvent struct {
@@ -85,14 +87,15 @@ func NewSource(unit Unit, opts Options) *Source {
 	return &Source{unit: unit, opts: opts, requests: make(chan barrierRequest), done: make(chan struct{})}
 }
 
-// Healthy reports whether the source runs and the destination has applied
-// its first barrier.
+// Healthy reports whether the source runs, the destination has applied
+// its first barrier, and the last barrier didn't fail because something
+// couldn't be read. A barrier that failed so is retried every second.
 func (s *Source) Healthy() bool {
 	select {
 	case <-s.done:
 		return false
 	default:
-		return s.healthy.Load()
+		return s.healthy.Load() && !s.failing.Load()
 	}
 }
 
@@ -206,6 +209,12 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) error {
 				return err
 			}
 		case <-tick.C:
+			if !s.retryAt.IsZero() && time.Now().After(s.retryAt) {
+				if err := s.runBarrier(nil); err != nil {
+					return err
+				}
+				continue
+			}
 			quiet := time.Since(lastEvent) > 50*time.Millisecond
 			if s.opts.AutoBarrier && s.marked != s.barriered {
 				if s.unbarriered.IsZero() {
@@ -232,12 +241,16 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) error {
 // before the refs that name them. So it drains events up to a sentinel, reads
 // .git's metadata, drains up to a second sentinel and then sends every object
 // created so far, which covers every ref just sent. Deleted objects go one
-// barrier later.
+// barrier later. If something can't be read, the destination gets no
+// barrier, and keeps what it received staged for the next one.
 func (s *Source) runBarrier(reqs []barrierRequest) error {
 	if err := s.syncSentinel(); err != nil {
 		return err
 	}
 	if err := s.checkSkipped(); err != nil {
+		return err
+	}
+	if err := s.retryUnread(); err != nil {
 		return err
 	}
 	s.writing = nil
@@ -254,6 +267,16 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 		return err
 	}
 	s.barriered, s.unbarriered = s.marked, time.Time{}
+	if err := s.unreadError(); err != nil {
+		s.failing.Store(true)
+		s.retryAt = time.Now().Add(time.Second)
+		for _, req := range reqs {
+			req.done <- barrierResult{err: err}
+		}
+		return nil
+	}
+	s.failing.Store(false)
+	s.retryAt = time.Time{}
 	n := s.next
 	s.next++
 	slices.Sort(s.writing)
@@ -330,7 +353,8 @@ func (s *Source) addWatch(dir string) (bool, error) {
 		return false, fmt.Errorf("mirror: too many folders to watch at %s; raise the fs.inotify.max_user_watches sysctl", dir)
 	}
 	if err != nil {
-		return false, nil // gone meanwhile
+		s.cantRead(dir, err)
+		return false, nil
 	}
 	old, had := s.pathWd[dir]
 	if p, ok := s.wdPath[int32(wd)]; ok && p != dir {

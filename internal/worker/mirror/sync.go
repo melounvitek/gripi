@@ -36,6 +36,9 @@ func Sync(ctx context.Context, stream io.ReadWriter, unit Unit, opts Options) er
 	if err := s.flush(true, nil); err != nil {
 		return err
 	}
+	if err := s.unreadError(); err != nil {
+		return err
+	}
 	for p := range s.objDels {
 		s.objDels[p] = 0 // nobody changes the unit, so no ref read later can name them
 	}

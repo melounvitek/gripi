@@ -9,6 +9,7 @@ import (
 	"hash"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -45,6 +46,7 @@ type sender struct {
 	objDels    map[string]uint64 // object files gone before the barrier with this number
 	next       uint64            // the next barrier's number
 	writing    []string          // files left out of the current barrier
+	unread     map[string]error  // what couldn't be read since the barrier started, which fails it
 	buf        []byte
 
 	// watch watches a folder and reports whether it wasn't watched yet; nil
@@ -60,7 +62,7 @@ type sender struct {
 func newSender(u Unit, opts Options, rw io.ReadWriter) *sender {
 	s := &sender{
 		opts: opts, main: u.Main, gitDir: u.GitDir, cls: map[string]*classifier{}, skipped: map[string]bool{}, followed: map[string]bool{},
-		sent: map[string]entry{}, dirty: map[string]bool{}, objDels: map[string]uint64{},
+		sent: map[string]entry{}, dirty: map[string]bool{}, objDels: map[string]uint64{}, unread: map[string]error{},
 		sigs: make(chan *frame, sigBatch), stopped: make(chan struct{}), waiters: map[uint64][]chan error{},
 	}
 	if rw != nil {
@@ -205,6 +207,53 @@ func (s *sender) mark(p string, writing bool) {
 	s.marked++
 }
 
+// cantRead notes that p couldn't be read. Unless it disappeared or changed type meanwhile, which later events or the
+// next look at it tell, the barrier fails, rather than the destination losing p or keeping an old version of it.
+func (s *sender) cantRead(p string, err error) {
+	if !vanished(err) {
+		s.unread[p] = err
+	}
+}
+
+// vanished reports whether err says that a path disappeared or changed type while it was read. ELOOP and ENXIO are
+// what opening a symlink with O_NOFOLLOW and a socket return.
+func vanished(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENXIO)
+}
+
+// retryUnread looks again at what couldn't be read, so that a barrier fails only on what it still can't read.
+func (s *sender) retryUnread() error {
+	unread := s.unread
+	s.unread = map[string]error{}
+	for p := range unread {
+		s.mark(p, false)
+		if info, err := s.lstat(p); err == nil && info.IsDir() && !s.excluded(p, true, 0) && !s.excludedAbove(p) {
+			if err := s.walk(p, nil); err != nil { // a folder that couldn't be read or watched
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// unreadError describes what couldn't be read, if anything.
+func (s *sender) unreadError() error {
+	if len(s.unread) == 0 {
+		return nil
+	}
+	p := slices.Min(slices.Collect(maps.Keys(s.unread)))
+	err := s.unread[p]
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		err = pathErr.Err
+	}
+	more := ""
+	if len(s.unread) > 1 {
+		more = fmt.Sprintf(" and %d more", len(s.unread)-1)
+	}
+	return fmt.Errorf("mirror: can't read %s%s: %w", p, more, err)
+}
+
 func entryOf(p string, info fs.FileInfo) entry {
 	e := entry{Path: p}
 	switch {
@@ -230,7 +279,8 @@ func inode(info fs.FileInfo) uint64 {
 func (s *sender) walk(dir string, seen map[string]bool) error {
 	visit := func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // gone meanwhile
+			s.cantRead(p, err)
+			return nil
 		}
 		if d.IsDir() && p != dir {
 			if s.isRoot(p) {
@@ -248,6 +298,7 @@ func (s *sender) walk(dir string, seen map[string]bool) error {
 		}
 		info, err := d.Info()
 		if err != nil {
+			s.cantRead(p, err)
 			return nil
 		}
 		if !info.IsDir() && !info.Mode().IsRegular() && info.Mode()&fs.ModeSymlink == 0 {
@@ -477,6 +528,10 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 		}
 		info, err := s.lstat(p)
 		if err != nil {
+			if !vanished(err) {
+				s.cantRead(p, err) // and it stays dirty
+				continue
+			}
 			delete(s.dirty, p)
 			old, had := s.sent[p]
 			if (!had && !s.sentUnder(p)) || s.kept(p, old) {
@@ -560,6 +615,7 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 	for _, p := range dirs {
 		info, err := s.lstat(p)
 		if err != nil {
+			s.cantRead(p, err)
 			continue
 		}
 		if s.watch != nil {
@@ -729,7 +785,10 @@ func (s *sender) sendFile(p string, plan deltaPlan) error {
 			if f != nil {
 				f.Close()
 			}
-			s.mark(p, false) // gone, or no longer a file: the next flush sees what it is
+			if err != nil {
+				s.cantRead(p, err)
+			}
+			s.mark(p, false) // the next flush sees what it is
 			return nil
 		}
 		ok, e, err := s.stream(f, info, p, plan)
@@ -737,6 +796,7 @@ func (s *sender) sendFile(p string, plan deltaPlan) error {
 		if err != nil || ok {
 			if ok {
 				s.sent[p] = e
+				delete(s.unread, p)
 			}
 			return err
 		}
@@ -777,6 +837,7 @@ func (s *sender) stream(f *os.File, info fs.FileInfo, p string, plan deltaPlan) 
 	}
 	var readErr *readError
 	if errors.As(err, &readErr) {
+		s.cantRead(p, readErr.error)
 		err = nil
 		counted.n = -1 // abort
 	}

@@ -366,6 +366,82 @@ func TestBarrierFailsWhenMainCantDelete(t *testing.T) {
 	}
 }
 
+// A file the worker can't read hasn't disappeared: main must keep its copy, and barriers must fail until the file
+// can be read again.
+func TestBarriersFailWhileTheWorkerCantReadAFile(t *testing.T) {
+	unit := newRepo(t)
+	r := newRig(t, unit)
+	file := filepath.Join(unit.Main, "src/d7/f1.txt")
+	before, err := os.ReadFile(r.dst + file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, "/", file, "changed, then unreadable\n")
+	os.Chmod(file, 0)
+	t.Cleanup(func() { os.Chmod(file, 0o644) })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if n, _, err := r.src.Barrier(ctx); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("barrier %d with an unreadable file: %v", n, err)
+	}
+	if r.src.Healthy() {
+		t.Error("the source is healthy while it can't read a file")
+	}
+	if data, _ := os.ReadFile(r.dst + file); !slices.Equal(data, before) {
+		t.Fatalf("main has %q", data)
+	}
+
+	os.Chmod(file, 0o644)
+	waitFor(t, "the source to recover", r.src.Healthy)
+	r.verify(t)
+}
+
+func TestAFolderTheWorkerCantReadIsntDeletedOnMain(t *testing.T) {
+	unit := newRepo(t)
+	r := newRig(t, unit)
+	r.conn.Close()
+	<-r.served
+	<-r.ran
+	folder := filepath.Join(unit.Main, "src/d7")
+	os.Chmod(folder, 0)
+	t.Cleanup(func() { os.Chmod(folder, 0o755) })
+	r.launch(t, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if n, _, err := r.src.Barrier(ctx); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("barrier %d with an unreadable folder: %v", n, err)
+	}
+	if r.src.Healthy() {
+		t.Error("the source is healthy while it can't read a folder")
+	}
+	if _, err := os.Stat(r.dst + filepath.Join(folder, "f1.txt")); err != nil {
+		t.Fatalf("a file in the unreadable folder on main: %v", err)
+	}
+
+	os.Chmod(folder, 0o755)
+	waitFor(t, "the source to recover", r.src.Healthy)
+	r.verify(t)
+}
+
+func TestSyncFailsOnAFileItCantRead(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, src, "readable.txt", "x\n")
+	writeFile(t, src, "unreadable.txt", "x\n")
+	os.Chmod(filepath.Join(src, "unreadable.txt"), 0)
+	d, err := NewMovedDestination(filepath.Join(dst, "state"), "/", dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := net.Pipe()
+	served := make(chan error, 1)
+	go func() { served <- d.Serve(context.Background(), b, filepath.Join(dst, "aside")) }()
+	err = Sync(context.Background(), a, Unit{Main: src}, Options{})
+	<-served
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("Sync with an unreadable file = %v", err)
+	}
+}
+
 func TestDeltaTransferForRepackedPack(t *testing.T) {
 	unit := newRepo(t)
 	for i := range 40 {
@@ -609,6 +685,20 @@ func newRigWith(t *testing.T, unit Unit, configure func(*Source)) *rig {
 
 func (r *rig) start(t *testing.T, configure func(*Source)) {
 	t.Helper()
+	r.launch(t, configure)
+	waitFor(t, "the first barrier", func() bool {
+		select {
+		case err := <-r.ran:
+			t.Fatalf("Run: %v", err)
+		default:
+		}
+		return r.src.Healthy()
+	})
+}
+
+// launch starts a source without waiting for its first barrier.
+func (r *rig) launch(t *testing.T, configure func(*Source)) {
+	t.Helper()
 	r.starts++
 	a, b := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -632,14 +722,6 @@ func (r *rig) start(t *testing.T, configure func(*Source)) {
 		cancel()
 		<-ran
 		<-served
-	})
-	waitFor(t, "the first barrier", func() bool {
-		select {
-		case err := <-r.ran:
-			t.Fatalf("Run: %v", err)
-		default:
-		}
-		return r.src.Healthy()
 	})
 }
 
