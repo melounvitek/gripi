@@ -22,7 +22,9 @@ import (
 
 // fakePi stands in for Pi. It starts processes the way Pi's tools do, in the background, in a session of their own
 // and orphaned, and lists their PIDs after its own in FAKE_PI_PIDS. Then it says where it runs and echoes its input.
+// With FAKE_PI_IGNORE_TERM set, it ignores SIGTERM.
 const fakePi = `#!/bin/sh
+[ -z "$FAKE_PI_IGNORE_TERM" ] || trap '' TERM
 echo $$ > "$FAKE_PI_PIDS"
 sleep 1000 &
 echo $! >> "$FAKE_PI_PIDS"
@@ -117,13 +119,14 @@ func startUnitHelper(t *testing.T, lease time.Duration) *unitHelper {
 	return &unitHelper{fakeMain: main, runtimeDir: runtimeDir, instance: hello.Instance, pi: pi}
 }
 
-// createSession starts the fake Pi and returns the PIDs of it and of the processes it started.
-func (unit *unitHelper) createSession(id string) []int {
+// createSession starts the fake Pi with env on top of its own variables, and returns the PIDs of it and of the
+// processes it started.
+func (unit *unitHelper) createSession(id string, env ...string) []int {
 	unit.t.Helper()
 	pids := filepath.Join(unit.t.TempDir(), "pids")
 	response := unit.request(map[string]any{
 		"type": "session.create", "session": id, "cwd": filepath.Dir(unit.pi),
-		"args": []string{unit.pi, "--mode", "rpc"}, "env": []string{"FAKE_PI_PIDS=" + pids},
+		"args": []string{unit.pi, "--mode", "rpc"}, "env": append([]string{"FAKE_PI_PIDS=" + pids}, env...),
 	})
 	if !response.OK {
 		unit.t.Fatalf("session.create = %+v", response)
@@ -157,14 +160,19 @@ func (unit *unitHelper) attach(id string) (command *exec.Cmd, input io.WriteClos
 	return command, input, bufio.NewReader(stdout)
 }
 
-// running reports whether a process exists and is not a zombie.
-func running(pid int) bool {
+// stat returns the fields of /proc/<pid>/stat from the process's state on, or nil if the process doesn't exist.
+func stat(pid int) []string {
 	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return false
+		return nil
 	}
-	fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
-	return fields[0] != "Z"
+	return strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
+}
+
+// running reports whether a process exists and is not a zombie.
+func running(pid int) bool {
+	fields := stat(pid)
+	return fields != nil && fields[0] != "Z"
 }
 
 func assertRunning(t *testing.T, pids ...int) {

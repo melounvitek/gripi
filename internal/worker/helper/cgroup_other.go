@@ -14,7 +14,7 @@ func DelegatedCgroup() (string, error) { return "", errLinuxOnly }
 
 func startInCgroup(*exec.Cmd, string) error { return errLinuxOnly }
 
-func killCgroup(string) error { return nil }
+func killCgroups(time.Duration, ...string) error { return nil }
 
 var started = time.Now()
 

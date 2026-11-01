@@ -42,6 +42,9 @@ func checkSession(id string) error {
 // closeTimeout is how long session.close waits for Pi to stop on SIGTERM before it kills Pi.
 const closeTimeout = 5 * time.Second
 
+// releaseTimeout is how long session.release waits for a session's processes to die once it has killed them.
+const releaseTimeout = 5 * time.Second
+
 // create starts Pi for a session, in the session's cgroup, with the helper's environment, request.Env and
 // GRIPI_WORKER_SOCKET.
 func (s *server) create(request Message) error {
@@ -148,17 +151,19 @@ func (s *server) close(id string) error {
 	return nil
 }
 
-// release kills every process of a session and forgets it.
-func (s *server) release(id string) error {
+// release kills every process of the sessions and forgets them. It waits at most timeout for the processes to die.
+func (s *server) release(timeout time.Duration, ids ...string) error {
+	var cgroups []string
 	s.mu.Lock()
-	current := s.sessions[id]
-	delete(s.sessions, id)
-	s.mu.Unlock()
-	if current == nil {
-		return nil
+	for _, id := range ids {
+		if current := s.sessions[id]; current != nil {
+			delete(s.sessions, id)
+			closeAll(current.listeners)
+			cgroups = append(cgroups, current.cgroup)
+		}
 	}
-	closeAll(current.listeners)
-	return killCgroup(current.cgroup)
+	s.mu.Unlock()
+	return killCgroups(timeout, cgroups...)
 }
 
 func (s *server) signalPis(signal syscall.Signal) {
