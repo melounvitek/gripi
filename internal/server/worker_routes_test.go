@@ -137,12 +137,6 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 	if session.Name != "Renamed by the worker" || !session.Pinned || !slices.Contains(session.Tags, "on-worker") {
 		t.Fatalf("session on the worker = %+v", session)
 	}
-	if response := command(worker, http.MethodPost, "/sessions/delete", url.Values{"session": {alpha}}); response.Code != http.StatusOK {
-		t.Fatalf("delete on the worker = %d %s", response.Code, response.Body.String())
-	}
-	if _, err := os.Stat(alpha); !os.IsNotExist(err) {
-		t.Fatalf("deleted session file: %v", err)
-	}
 }
 
 func TestWorkerCommandsInMultiUserModeStillNeedTheUsersToken(t *testing.T) {

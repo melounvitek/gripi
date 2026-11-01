@@ -183,6 +183,42 @@ func TestMovingARepositoryStopsItsSessionsUnlessOneIsWorking(t *testing.T) {
 	}
 }
 
+// Main's copy of a session on a worker comes back from there, so deleting it would only lose its name, tags and
+// attachments.
+func TestASessionOnAWorkerIsDeletedOnlyOnceItContinuesOnMain(t *testing.T) {
+	handler, alpha, _, project := fakePiGateway(t)
+	workers := &fakeWorkers{repository: project, placed: true}
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	local := localHandler(t, handler)
+	for name, post := range map[string]func() *httptest.ResponseRecorder{
+		"browser": func() *httptest.ResponseRecorder {
+			return postWorkspaceForm(handler, "/sessions/delete", url.Values{"session": {alpha}}, "")
+		},
+		"gripi": func() *httptest.ResponseRecorder {
+			return command(local, http.MethodPost, "/sessions/delete", url.Values{"session": {alpha}})
+		},
+		"gripi on the worker": func() *httptest.ResponseRecorder {
+			worker := workerHandler(handler, workerPlacement{sessions: []string{alpha}, folders: []string{project}})
+			return command(worker, http.MethodPost, "/sessions/delete", url.Values{"session": {alpha}})
+		},
+	} {
+		if response := post(); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "beelink") || !strings.Contains(response.Body.String(), "continue on main") {
+			t.Fatalf("delete from the %s = %d %s", name, response.Code, response.Body.String())
+		}
+	}
+	if _, err := os.Stat(alpha); err != nil {
+		t.Fatalf("the session's file: %v", err)
+	}
+
+	workers.placed = false
+	if response := command(local, http.MethodPost, "/sessions/delete", url.Values{"session": {alpha}}); response.Code != http.StatusOK {
+		t.Fatalf("delete on main = %d %s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(alpha); !os.IsNotExist(err) {
+		t.Fatalf("deleted session file: %v", err)
+	}
+}
+
 func TestWorkerCommandsForwardPortsAndRefuseWithAConflict(t *testing.T) {
 	handler, _, _, project := fakePiGateway(t)
 	local := localHandler(t, handler)

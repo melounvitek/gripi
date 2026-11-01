@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -785,6 +786,12 @@ func (app *application) deleteSessionBlockReason(currentPath, targetPath string)
 	}
 	if app.rpcClients.Busy(targetPath) || app.rpcClients.Compacting(targetPath) {
 		return "Cannot delete a running session"
+	}
+	if app.workers != nil && app.agentOf(targetPath) != "hermes" {
+		// Main's copy would come back from the worker without what the gateway keeps about the session.
+		if location, found := app.workers.Location(app.currentSessionCWD(targetPath)); found {
+			return fmt.Sprintf("Cannot delete a session that runs on worker %s; continue on main first", location.Worker)
+		}
 	}
 	return ""
 }
