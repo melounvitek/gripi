@@ -84,6 +84,9 @@ type ManagerOptions struct {
 	WorkerExtension string
 	// SessionsRoot holds Pi's session folders, one for each folder that sessions started in.
 	SessionsRoot string
+	// ConfigDir is Gripi's configuration folder. Like Pi's agent folder, the sessions' root and Gripi's state folder,
+	// it never moves to a worker.
+	ConfigDir string
 	// SocketPath is the path of the gripi socket, where gripi commands on a worker reach the worker's own socket.
 	SocketPath string
 	// Store finds the folders of saved sessions.
@@ -529,6 +532,7 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 		}
 	}
 	destination.Applied = manager.applied(repository, sessions)
+	destination.AllowRoot = manager.allowRoot(unit, sessions)
 	if err := conn.StartMirror(ctx, unit, sessions); err != nil {
 		return err
 	}
@@ -603,6 +607,75 @@ func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirr
 		defer manager.mu.Unlock()
 		manager.notices = append(manager.notices, Notice{Repository: unit, Aside: aside, Paths: saved, Time: time.Now()})
 	}
+}
+
+// allowRoot is the AllowRoot of main's copy of a unit: a placed unit's copy writes in the unit's folders and in
+// worktrees that the worker made, but never in Pi's or Gripi's own folders or in another unit on a worker; the copy of
+// the folders of a unit's sessions, which are its unit, writes only in those.
+func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root string) error {
+	return func(root string) error {
+		if sessions {
+			if !slices.Contains(unitFolders(unit), root) {
+				return fmt.Errorf("it is not one of the session folders of %s", unit.Main)
+			}
+			return nil
+		}
+		if own := manager.ownFolder(root); own != "" {
+			return fmt.Errorf("it holds or is in %s, which stays on this machine", own)
+		}
+		folders := unitFolders(unit)
+		if placement, placed := manager.options.Placements.Find(unit.Main); placed && placement.Unit.Main == unit.Main {
+			// The placement has the worktrees that the worker made since.
+			folders = unitFolders(placement.Unit)
+		}
+		if slices.Contains(folders, root) {
+			return nil
+		}
+		for _, other := range manager.options.Placements.All() {
+			if other.Unit.Main != unit.Main && slices.ContainsFunc(unitFolders(other.Unit), func(folder string) bool { return holds(folder, root) || holds(root, folder) }) {
+				return fmt.Errorf("it holds or is in %s, which is on worker %s", other.Unit.Main, other.Worker)
+			}
+		}
+		return nil
+	}
+}
+
+// ownFolder returns Pi's or Gripi's own folder that holds folder or is in it, if any: Pi's agent folder, with its
+// logins, the sessions' root, and Gripi's state and configuration folders, which stay on this machine.
+func (manager *Manager) ownFolder(folder string) string {
+	paths := func(path string) []string {
+		if real, err := filepath.EvalSymlinks(path); err == nil && real != path {
+			return []string{path, real}
+		}
+		return []string{path}
+	}
+	for _, own := range []string{manager.options.Pi.AgentDir, manager.options.SessionsRoot, manager.options.StateDir, manager.options.ConfigDir} {
+		if own == "" {
+			continue
+		}
+		for _, ownPath := range paths(own) {
+			for _, path := range paths(folder) {
+				if holds(ownPath, path) || holds(path, ownPath) {
+					return own
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// holds reports whether path is folder or in it.
+func holds(folder, path string) bool {
+	return path == folder || strings.HasPrefix(path, folder+"/")
+}
+
+// unitFolders are a unit's main folder, worktrees and Git folder.
+func unitFolders(unit mirror.Unit) []string {
+	folders := append([]string{unit.Main}, unit.Worktrees...)
+	if unit.GitDir != "" {
+		folders = append(folders, unit.GitDir)
+	}
+	return folders
 }
 
 // waitForMirror returns once main's copy of a unit has taken a barrier that started after since.
@@ -770,6 +843,12 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 	unit, err := mirror.Discover(folder)
 	if err != nil {
 		return err
+	}
+	for _, root := range unitFolders(unit) {
+		// What the worker writes there would replace main's, such as Pi's logins.
+		if own := manager.ownFolder(root); own != "" {
+			return refuse("%s cannot move to a worker, because it holds or is in %s, which stays on this machine", root, own)
+		}
 	}
 	done, err := manager.startMoving(unit)
 	if err != nil {

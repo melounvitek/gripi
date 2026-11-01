@@ -36,7 +36,7 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, 
 			}
 			return "", fmt.Errorf("no worker is named %q; 'gripi worker list' shows the workers", name)
 		},
-		Placements: placements, StateDir: stateDir(cfg),
+		Placements: placements, StateDir: stateDir(cfg), ConfigDir: filepath.Dir(cfg.EnvPath),
 		Pi:              remote.Pi{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, ExtensionDir: filepath.Dir(tree)},
 		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, SocketPath: cfg.SocketPath, Store: piAdapter.Store(),
 		ServeSocket: func(name string, placement remote.WorkerPlacement) (string, func() error, error) {

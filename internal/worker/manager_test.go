@@ -282,6 +282,72 @@ func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
 	}
 }
 
+func TestPisAndGripisOwnFoldersNeverMoveToAWorker(t *testing.T) {
+	home := t.TempDir()
+	agentDir, stateDir, configDir := filepath.Join(home, ".pi", "agent"), filepath.Join(home, ".pi", "gripi"), filepath.Join(home, ".config", "gripi")
+	sessions := filepath.Join(home, "sessions")
+	for _, folder := range []string{agentDir, stateDir, configDir, sessions, filepath.Join(stateDir, "inside")} {
+		if err := os.MkdirAll(folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, Pi: Pi{AgentDir: agentDir}, StateDir: stateDir, ConfigDir: configDir, SessionsRoot: sessions})
+	stop := func(func(string) bool) error {
+		t.Error("a refused move stopped the sessions")
+		return nil
+	}
+
+	// Such as a home folder outside Git, with Pi's logins in it.
+	for _, folder := range []string{home, link, filepath.Join(home, ".pi"), filepath.Join(stateDir, "inside"), configDir, sessions} {
+		if err := manager.Move(context.Background(), folder, "beelink", stop); !refused(err) || !strings.Contains(err.Error(), "on this machine") {
+			t.Errorf("Move(%s) = %v", folder, err)
+		}
+	}
+	if placements := manager.options.Placements.All(); len(placements) != 0 {
+		t.Fatalf("placements = %+v", placements)
+	}
+}
+
+func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
+	manager := newTestManager(t, ManagerOptions{
+		Store: fakeStore{}, Pi: Pi{AgentDir: "/home/me/.pi/agent"}, StateDir: "/home/me/.pi/gripi", ConfigDir: "/home/me/.config/gripi",
+		SessionsRoot: "/home/me/.pi/agent/sessions",
+	})
+	unit := mirror.Unit{Main: "/work/project", Worktrees: []string{"/work/project-feature"}, GitDir: "/work/project/.git"}
+	for _, placement := range []Placement{{Worker: "beelink", Unit: unit}, {Worker: "nuc", Unit: mirror.Unit{Main: "/work/other"}}} {
+		if err := manager.options.Placements.Add(placement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// /work/.worktrees/project/new is a worktree made on the worker.
+	allow := manager.allowRoot(unit, false)
+	for root, allowed := range map[string]bool{
+		"/work/project": true, "/work/project-feature": true, "/work/project/.git": true, "/work/.worktrees/project/new": true,
+		"/home/me": false, "/home/me/.pi/agent/extensions": false, "/home/me/.pi/gripi": false, "/home/me/.config": false,
+		"/home/me/.pi/agent/sessions/--work-project--": false, "/work/other": false, "/work/other/src": false, "/work": false,
+	} {
+		if err := allow(root); (err == nil) != allowed {
+			t.Errorf("the copy of the repository allows %s: %v", root, err)
+		}
+	}
+
+	sessions := mirror.Unit{Main: "/home/me/.pi/agent/sessions/--work-project--", Worktrees: []string{"/home/me/.pi/agent/sessions/--work-project-feature--"}}
+	allow = manager.allowRoot(sessions, true)
+	for root, allowed := range map[string]bool{
+		"/home/me/.pi/agent/sessions/--work-project--": true, "/home/me/.pi/agent/sessions/--work-project-feature--": true,
+		"/home/me/.pi/agent/sessions/--work-other--": false, "/home/me/.pi/agent/sessions": false, "/home/me/.pi/agent": false, "/work/project": false,
+	} {
+		if err := allow(root); (err == nil) != allowed {
+			t.Errorf("the copy of the sessions allows %s: %v", root, err)
+		}
+	}
+}
+
 // loseWorker makes the manager have lost its connection to the worker of a name, which is gone at goneAt.
 func loseWorker(manager *Manager, name string, goneAt time.Time) {
 	manager.mu.Lock()
