@@ -1228,7 +1228,7 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	}
 	for _, copied := range []string{project, folder} {
 		aside := filepath.Join(filepath.Dir(copied), "."+filepath.Base(copied)+".gripi-aside") + "/"
-		if calls := sshCalls(t, "'receive' '--aside' '"+aside); len(calls) == 0 || os.Geteuid() != 0 && len(calls) != 2 {
+		if calls := sshCalls(t, "'receive'", "'--aside' '"+aside); len(calls) == 0 || os.Geteuid() != 0 && len(calls) != 2 {
 			t.Fatalf("copies of %s that save aside what they replace: %q", copied, calls)
 		}
 	}
@@ -1265,11 +1265,11 @@ func TestEveryLostWorkerKeepsAsideWhatMainNeverGotOnTheNextMoveThere(t *testing.
 	// what they replaced.
 	movingSavesAside := func(name string) bool {
 		t.Helper()
-		before := len(sshCalls(t, "'receive' '--aside'"))
+		before := len(sshCalls(t, "'receive'", "'--aside'"))
 		if err := manager.Move(ctx, project, name, stop); err != nil {
 			t.Fatal(err)
 		}
-		return len(sshCalls(t, "'receive' '--aside'")) > before
+		return len(sshCalls(t, "'receive'", "'--aside'")) > before
 	}
 	// returnToMain brings the repository back, then ends the worker, so that the other can run on this machine.
 	returnToMain := func() {

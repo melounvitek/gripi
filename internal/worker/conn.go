@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -146,30 +147,30 @@ func (conn *Conn) AttachMirror(ctx context.Context, main string) (command *exec.
 	return conn.stream(ctx, "mirror", main)
 }
 
-// stream returns ssh that runs `gripi worker <subcommand> <name> <instance>` on the worker.
-func (conn *Conn) stream(ctx context.Context, subcommand, name string) (*exec.Cmd, func(), error) {
+// stream returns ssh that runs `gripi worker <subcommand> <arguments> <instance>` on the worker, which connects the
+// channel to the helper.
+func (conn *Conn) stream(ctx context.Context, subcommand string, arguments ...string) (*exec.Cmd, func(), error) {
 	words := []string{conn.installDir + "/bin/gripi", "worker", subcommand}
 	if conn.options.RuntimeDir != "" {
 		words = append(words, "--runtime-dir", conn.options.RuntimeDir)
 	}
-	return conn.Command(ctx, ShellQuote(append(words, name, conn.Instance())...))
+	return conn.Command(ctx, ShellQuote(slices.Concat(words, arguments, []string{conn.Instance()})...))
 }
 
-// inView returns the words that run a command on the worker in the view of main's home folder.
-func (conn *Conn) inView(words ...string) []string {
-	return viewWords(conn.installDir, conn.options.Home, words...)
-}
-
-func viewWords(installDir, home string, words ...string) []string {
+// viewScript returns the words that run a sh script on the worker in a view of main's home folder home of its own,
+// which `gripi worker enter` in the install folder makes, or as it is without home.
+func viewScript(installDir, home, script string, arguments ...string) []string {
+	words := append([]string{"sh", "-c", script, "sh"}, arguments...)
 	if home == "" {
 		return words
 	}
 	return append([]string{installDir + "/bin/gripi", "worker", "enter", "--home", home, "--"}, words...)
 }
 
-// runInView runs a sh script on the worker in the view of main's home folder, and returns its output.
+// runInView runs a sh script on the worker in a view of main's home folder of its own, and returns its output. That
+// view may show more than the helper's, which is older, so copies go through the helper instead (see send).
 func (conn *Conn) runInView(ctx context.Context, script string, arguments ...string) (string, error) {
-	return runWords(ctx, conn.Pool, nil, conn.inView(append([]string{"sh", "-c", script, "sh"}, arguments...)...)...)
+	return runWords(ctx, conn.Pool, nil, viewScript(conn.installDir, conn.options.Home, script, arguments...)...)
 }
 
 // workerPath returns where a path of main's is on the worker for what runs outside the view, such as sshd: in the

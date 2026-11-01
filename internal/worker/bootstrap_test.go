@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/worker/helper"
 )
 
 // fakeNode stands in for Node: it says where it is, as process.execPath does, and runs scripts with sh.
@@ -24,7 +27,8 @@ const fakeNode = "#!/bin/sh\n[ \"$1\" = -p ] && exec echo \"$0\"\nexec /bin/sh \
 const fakePiScript = "#!/usr/bin/env node\ncat \"$HOME/pi-version\"\n"
 
 // bootstrapRig is a main whose Pi is fakePiScript in a package with dependencies, run by fakeNode through a version
-// manager's shim, and a worker that fakeSSH runs on this machine with the helper installed.
+// manager's shim, and a worker that fakeSSH runs on this machine with the helper installed, which serves in this
+// process.
 type bootstrapRig struct {
 	conn                 *Conn
 	pi                   Pi
@@ -43,7 +47,8 @@ func newBootstrapRig(t *testing.T) *bootstrapRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rig.conn = &Conn{Pool: pool, installDir: dir, options: Options{Destination: "gripi@worker"}}
+	runtimeDir := shortTempDir(t)
+	rig.conn = &Conn{Pool: pool, Control: serveHelper(t, runtimeDir), installDir: dir, options: Options{Destination: "gripi@worker", RuntimeDir: runtimeDir}}
 	rig.workerDir = dir
 
 	main := t.TempDir()
@@ -73,6 +78,31 @@ func newBootstrapRig(t *testing.T) *bootstrapRig {
 	writeTestFile(t, filepath.Join(rig.pi.AgentDir, "settings.json"), "{}\n", 0644)
 	writeTestFile(t, filepath.Join(rig.pi.ExtensionDir, "gripi-tree.ts"), "tree\n", 0600)
 	return rig
+}
+
+// serveHelper serves a helper in this process with its sockets in runtimeDir, and returns main's end of its control
+// channel.
+func serveHelper(t *testing.T, runtimeDir string) *Control {
+	t.Helper()
+	toHelper, input := io.Pipe()
+	output, fromHelper := io.Pipe()
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		if err := helper.Serve(context.Background(), toHelper, fromHelper, helper.Options{RuntimeDir: runtimeDir}); err != nil {
+			t.Error(err)
+		}
+		fromHelper.Close()
+	}()
+	control, err := NewControl(context.Background(), output, input, "", helper.DefaultLease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		control.Close()
+		<-served
+	})
+	return control
 }
 
 func (rig *bootstrapRig) setVersions(t *testing.T, main, worker string) {
@@ -189,6 +219,29 @@ func TestBootstrapCopiesPisAgentFolderWithoutLoginsOrSessions(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Dir(worker)); len(entries) != 1 {
 		t.Fatalf("the copy left %v next to the agent folder", entries)
+	}
+}
+
+// The worker's helper makes the copies, so they see the files as its mirrors and sessions do, also in a private view.
+func TestCopiesToTheWorkerGoThroughItsHelper(t *testing.T) {
+	rig := newBootstrapRig(t)
+	main, worker := t.TempDir(), filepath.Join(t.TempDir(), "copy")
+	writeTestFile(t, filepath.Join(main, "notes"), "main's\n", 0600)
+	if err := rig.conn.copyFolder(context.Background(), main, worker, nil); err != nil {
+		t.Fatal(err)
+	}
+	if contents, _ := os.ReadFile(filepath.Join(worker, "notes")); string(contents) != "main's\n" {
+		t.Fatalf("the copy has %q", contents)
+	}
+
+	rig.conn.Control.Close()
+	<-rig.conn.Closed()
+	writeTestFile(t, filepath.Join(main, "notes"), "changed\n", 0600)
+	if err := rig.conn.copyFolder(context.Background(), main, worker, nil); err == nil || !strings.Contains(err.Error(), "the helper does not listen") {
+		t.Fatalf("a copy after the helper stopped = %v", err)
+	}
+	if contents, _ := os.ReadFile(filepath.Join(worker, "notes")); string(contents) != "main's\n" {
+		t.Fatalf("the copy has %q after the helper stopped", contents)
 	}
 }
 

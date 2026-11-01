@@ -32,6 +32,8 @@ import (
 //     "unit" ({"main":…,"worktrees":[…],"git_dir":…}), and for a unit of Pi's session folders "sessions" and the
 //     main folder of their sessions' repository as "path", and mirror.stop with the unit's main folder as "path";
 //   - answers: {"id":N,"ok":true} or {"id":N,"ok":false,"error":"…"}.
+//
+// The streams that main opens to the helper start with a Message too, which names the helper's instance.
 type Message struct {
 	ID       uint64       `json:"id,omitempty"`
 	Type     string       `json:"type,omitempty"`
@@ -42,6 +44,8 @@ type Message struct {
 	Args     []string     `json:"args,omitempty"`
 	Env      []string     `json:"env,omitempty"`
 	Path     string       `json:"path,omitempty"`
+	To       string       `json:"to,omitempty"`
+	Aside    string       `json:"aside,omitempty"`
 	Contents string       `json:"contents,omitempty"`
 	Unit     *mirror.Unit `json:"unit,omitempty"`
 	Sessions bool         `json:"sessions,omitempty"`
@@ -139,6 +143,12 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	}
 	defer mirrors.Close()
 	go s.serveMirrors(mirrors)
+	receives, err := net.Listen("unix", filepath.Join(options.RuntimeDir, receiveSocket))
+	if err != nil {
+		return err
+	}
+	defer receives.Close()
+	go s.serveReceives(ctx, receives)
 	if options.Docker != nil {
 		// The dot keeps it apart from the sessions' sockets.
 		socket := filepath.Join(options.RuntimeDir, "docker.api.sock")

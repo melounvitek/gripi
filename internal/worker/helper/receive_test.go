@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,8 +13,27 @@ import (
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
-// A worker's copy that may have changes main never got keeps what main's copy replaces or deletes there aside.
-func TestReceiveSavesAsideWhatItReplaces(t *testing.T) {
+// receive copies main's folder to the folder copy through the helper, as `gripi worker receive` does for instance.
+func receive(main, copy, aside, runtimeDir, instance string) error {
+	mainEnd, workerEnd := net.Pipe()
+	received := make(chan error, 1)
+	go func() {
+		received <- helper.AttachReceive(runtimeDir, main, copy, aside, instance, workerEnd, workerEnd)
+		workerEnd.Close()
+	}()
+	err := mirror.Sync(context.Background(), mainEnd, mirror.Unit{Main: main}, mirror.Options{})
+	if attached := <-received; attached != nil {
+		return attached
+	}
+	return err
+}
+
+// The helper makes the copies of main's folders, so that they see the files as its mirrors do, also in a private
+// view. A worker's copy that may have changes main never got keeps what main's copy replaces or deletes there aside.
+func TestTheHelperReceivesCopiesAndSavesAsideWhatTheyReplace(t *testing.T) {
+	runtimeDir := t.TempDir()
+	fake, _ := serveHelper(t, helper.Options{RuntimeDir: runtimeDir})
+	instance := fake.next().Instance
 	main, copy, aside := t.TempDir(), filepath.Join(t.TempDir(), "copy"), filepath.Join(t.TempDir(), "aside")
 	copied := time.Now().Add(-time.Hour)
 	for path, contents := range map[string]string{
@@ -31,13 +51,11 @@ func TestReceiveSavesAsideWhatItReplaces(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mainEnd, workerEnd := net.Pipe()
-	received := make(chan error, 1)
-	go func() { received <- helper.Receive(context.Background(), workerEnd, workerEnd, main, copy, aside) }()
-	if err := mirror.Sync(context.Background(), mainEnd, mirror.Unit{Main: main}, mirror.Options{}); err != nil {
-		t.Fatal(err)
+
+	if err := receive(main, copy, aside, runtimeDir, "0123456789abcdef"); err == nil || !strings.Contains(err.Error(), "not 0123456789abcdef") {
+		t.Fatalf("a copy for another helper = %v", err)
 	}
-	if err := <-received; err != nil {
+	if err := receive(main, copy, aside, runtimeDir, instance); err != nil {
 		t.Fatal(err)
 	}
 	// Aside, files keep main's paths, which are the worker's in Gripi, under the barrier that replaced them.
@@ -51,6 +69,20 @@ func TestReceiveSavesAsideWhatItReplaces(t *testing.T) {
 	} {
 		if contents, _ := os.ReadFile(path); string(contents) != want {
 			t.Errorf("%s = %q, want %q", path, contents, want)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(copy), ".*")); len(left) != 0 {
+		t.Errorf("the copy left %v next to it", left)
+	}
+
+	// Main learns why the helper cannot make a copy.
+	if os.Geteuid() != 0 {
+		locked := t.TempDir()
+		if err := os.Chmod(locked, 0500); err != nil {
+			t.Fatal(err)
+		}
+		if err := receive(main, filepath.Join(locked, "copy"), "", runtimeDir, instance); err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Fatalf("a copy into a folder that the helper cannot write = %v", err)
 		}
 	}
 }

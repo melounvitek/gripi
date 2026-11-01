@@ -100,7 +100,7 @@ func ViewScripts(ctx context.Context, options Options) (func(script string, argu
 		return nil, err
 	}
 	return func(script string, arguments ...string) (string, error) {
-		return runWords(ctx, ssh, nil, viewWords(installed, options.Home, append([]string{"sh", "-c", script, "sh"}, arguments...)...)...)
+		return runWords(ctx, ssh, nil, viewScript(installed, options.Home, script, arguments...)...)
 	}, nil
 }
 

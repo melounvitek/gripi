@@ -36,7 +36,7 @@ const workerHelp = `Usage:
 Internal, run by Gripi on a worker over SSH:
   gripi worker serve [--lease <duration>] [--runtime-dir <folder>] [--home <folder>]
   gripi worker attach [--runtime-dir <folder>] <session> <helper instance>
-  gripi worker receive [--aside <folder>] <folder on main> <folder>
+  gripi worker receive [--runtime-dir <folder>] [--aside <folder>] <folder on main> <folder> <helper instance>
   gripi worker mirror [--runtime-dir <folder>] <unit> <helper instance>
   gripi worker enter [--home <folder>] -- <command>
 
@@ -87,9 +87,10 @@ unforward, or until this machine's connection to the worker ends.
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. With --home, it runs in the private view
 of that folder, as enter does. attach connects to the Pi of a session.
-receive makes a folder a copy of one that this machine sends, or, given the
-same folder twice, a copy of its repository at the same paths, and keeps
-what it replaces or deletes in the folder of --aside first. mirror
+receive connects this machine's copy of a folder to the helper, which makes
+a folder a copy of it, or, given the same folder twice, a copy of its
+repository at the same paths, and keeps what it replaces or deletes in the
+folder of --aside first. mirror
 connects this machine's copy of a repository, or of its sessions, to the
 helper, which sends their changes. enter runs a command in a private view in
 which the folder of --home, this machine's home folder, shows the worker
