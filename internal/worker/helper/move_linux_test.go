@@ -342,14 +342,18 @@ func TestAReleaseThatMissedTheLastChangesKeepsSayingSo(t *testing.T) {
 	}
 }
 
-// A release takes no final barriers while a process of the move outlives its kill, also when main tries again.
+// A release takes no final barriers while a process of the move outlives its kill, also when main tries again or
+// deletes the move meanwhile, and takes them once the process has died.
 func TestAReleaseWaitsForEveryProcessOfTheMoveToDie(t *testing.T) {
 	rig := startMoveHelper(t, helper.DefaultLease)
 	private := rig.privateRoot()
 	shadow, repository := rig.shadow(private, "first\n")
 	rig.move("m1", private, shadow, repository)
 	pi := rig.session("s1", "m1", repository)
-	pid, _ := strconv.Atoi(strings.TrimSpace(pi("echo $$")))
+	file := filepath.Join(t.TempDir(), "sessions", "s1.jsonl")
+	repositoryDestination, sessionDestination := rig.destinations(shadow, t.TempDir(), file)
+	served := []<-chan error{rig.mirror("m1", "", repositoryDestination), rig.mirror("m1", file, sessionDestination)}
+	pid, _ := strconv.Atoi(strings.TrimSpace(pi("echo last > last; echo $$")))
 	_, die := startSlowToDie(t, cgroupOf(t, pid))
 
 	for range 2 {
@@ -361,8 +365,16 @@ func TestAReleaseWaitsForEveryProcessOfTheMoveToDie(t *testing.T) {
 		t.Fatalf("move.delete while a process survives = %+v", response)
 	}
 	die()
-	if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); !response.OK {
+	if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); !response.OK || response.Barriers.Repository == 0 || response.Barriers.Session == 0 {
 		t.Fatalf("move.release once the process died = %+v", response)
+	}
+	for _, done := range served {
+		if err := <-done; err != nil {
+			t.Fatalf("a mirror ended with %v", err)
+		}
+	}
+	if last := read(shadow + filepath.Join(repository, "last")); last != "last\n" {
+		t.Fatalf("main's copy of the last change = %q", last)
 	}
 }
 

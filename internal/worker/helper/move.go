@@ -246,8 +246,8 @@ func (s *server) releaseMove(id string) (Barriers, error) {
 	if err != nil {
 		return Barriers{}, err
 	}
-	running, cgroups := s.closeMove(m)
 	s.mu.Lock()
+	running, cgroups := s.closeMove(m)
 	s.forget(running...)
 	s.mu.Unlock()
 	if err := killCgroups(releaseTimeout, cgroups...); err != nil {
@@ -273,11 +273,9 @@ func (s *server) releaseMove(id string) (Barriers, error) {
 	return m.released, m.releaseFail
 }
 
-// closeMove keeps new sessions from starting in the move, and returns those that run in it and the cgroups of every
-// session that ran in it, whose processes may have outlived a release.
+// closeMove keeps new sessions from starting in the move, with s.mu held, and returns those that run in it and the
+// cgroups of every session that ran in it, whose processes may have outlived a release.
 func (s *server) closeMove(m *move) (running, cgroups []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	m.closed = true
 	for _, id := range m.sessions {
 		if current := s.sessions[id]; current != nil && current.move == m.id {
@@ -298,17 +296,20 @@ func (s *server) deleteMove(id string) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
 	running, cgroups := s.closeMove(m)
+	s.mu.Unlock()
 	if len(running) > 0 {
 		return fmt.Errorf("move %s still runs sessions; release it first", id)
 	}
-	// What earlier releases or stops of the host failed to kill.
+	// What an earlier release failed to kill, while the mirrors still run for the release that main tries again, then
+	// what an earlier stop of the host failed to kill.
+	if err := killCgroups(releaseTimeout, cgroups...); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	err = s.stopHost(m)
 	m.mu.Unlock()
-	if err == nil {
-		err = killCgroups(releaseTimeout, cgroups...)
-	}
 	if err != nil {
 		return err
 	}
