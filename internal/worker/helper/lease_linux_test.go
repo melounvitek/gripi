@@ -38,6 +38,11 @@ func TestLeaseExpiryKillsEverySessionAtOnceBeforeMainTakesThemOver(t *testing.T)
 		t.Fatal("the slow process was not killed before main takes the sessions over")
 	}
 	assertGone(t, time.Until(gone), slices.Concat(slow, s2, s3)...)
+	// While it waits for the slow process, the helper still reads main's requests.
+	create := map[string]any{"type": "session.create", "session": "s4", "cwd": "/", "args": []string{"sleep", "1000"}}
+	if response := unit.request(create); response.OK {
+		t.Fatal("the helper started a session after it killed the others")
+	}
 	assertGone(t, time.Until(gone), helperPID)
 }
 

@@ -100,6 +100,7 @@ type server struct {
 	pings    map[uint64]time.Duration // send times of the pings main has not answered yet
 	renewed  time.Duration            // the lease runs from here
 	answered bool
+	stopping bool // no session starts once Serve has started to kill them
 	sessions map[string]*session
 	mirrors  map[string]*mirroredUnit // by the unit's main folder
 }
@@ -141,6 +142,7 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	err = s.keepLease(ctx, closed)
 	s.stopMirrors()
 	s.mu.Lock()
+	s.stopping = true
 	ids := make([]string, 0, len(s.sessions))
 	for id := range s.sessions {
 		ids = append(ids, id)

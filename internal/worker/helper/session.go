@@ -57,6 +57,9 @@ func (s *server) create(request Message) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopping {
+		return errors.New("the helper is stopping")
+	}
 	if !s.answered {
 		return errors.New("main has not answered a ping yet")
 	}
