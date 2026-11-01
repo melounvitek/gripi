@@ -135,7 +135,7 @@ func (app *application) visibleTagCounts(request *http.Request, tags map[string]
 	}
 	counts := make(map[string]int)
 	for path, folder := range folders {
-		if !reachesFolder(request, folder) {
+		if !reachesListedSession(request, app.agentOf(path), folder) {
 			continue
 		}
 		if app.ownsSession != nil {

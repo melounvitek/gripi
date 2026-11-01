@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	gripi "github.com/melounvitek/gripi"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
@@ -153,6 +155,46 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 	session := waitForLocalSession(t, worker, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
 	if session.Name != "Renamed by the worker" || !session.Pinned || !slices.Contains(session.Tags, "on-worker") {
 		t.Fatalf("session on the worker = %+v", session)
+	}
+}
+
+// Only Pi's sessions move to workers, so a Hermes session that started in a folder of a repository on a worker stays on
+// main, where only main's gripi commands reach it.
+func TestWorkerCommandsReachNoHermesSession(t *testing.T) {
+	project := t.TempDir()
+	cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": project, "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
+	if err := os.MkdirAll(cfg.SessionsRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pi := filepath.Join(cfg.SessionsRoot, "pi.jsonl")
+	writeLocalSession(t, pi, "pi-chat", project, "2026-02-01T10:00:0")
+	handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	local := localHandler(t, handler)
+	worker := workerHandler(handler, workerPlacement{folders: []string{project}})
+	for key, tag := range map[string]string{pi: "pi-tag", "hermes:hermes-chat": "hermes-tag"} {
+		if response := command(local, http.MethodPost, "/sessions/tags", url.Values{"session": {key}, "tag": {tag}, "assigned": {"true"}}); response.Code != http.StatusOK {
+			t.Fatalf("tag %s on main = %d %s", key, response.Code, response.Body.String())
+		}
+	}
+
+	if listed := localSessions(t, local, ""); len(listed) != 2 {
+		t.Fatalf("main's sessions = %+v", listed)
+	}
+	if tags := command(local, http.MethodGet, "/tags", nil); !strings.Contains(tags.Body.String(), "hermes-tag") {
+		t.Fatalf("main's tags = %d %s", tags.Code, tags.Body.String())
+	}
+	if listed := localSessions(t, worker, ""); len(listed) != 1 || listed[0].Path != pi {
+		t.Fatalf("worker's sessions = %+v", listed)
+	}
+	if listed := localSessions(t, worker, "?session=hermes:hermes-chat"); len(listed) != 0 {
+		t.Fatalf("worker's listing of the Hermes session = %+v", listed)
+	}
+	if tags := command(worker, http.MethodGet, "/tags", nil); !strings.Contains(tags.Body.String(), "pi-tag") || strings.Contains(tags.Body.String(), "hermes-tag") {
+		t.Fatalf("worker's tags = %d %s", tags.Code, tags.Body.String())
 	}
 }
 
