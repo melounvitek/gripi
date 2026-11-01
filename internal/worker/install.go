@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"debug/elf"
 	"fmt"
@@ -76,6 +77,38 @@ func installHelper(ctx context.Context, pool commander, executable, version, dir
 		return "", "", fmt.Errorf("upload the helper: %w", err)
 	}
 	return installed, home, nil
+}
+
+// ViewScripts installs the helper on the worker at options.Destination, as Connect does but with an ssh connection of
+// its own for each command, and returns what runs a sh script there in the view of main's home folder options.Home,
+// as CheckSeparate takes it. `gripi worker add` checks a worker with it before a gateway connects.
+func ViewScripts(ctx context.Context, options Options) (func(script string, arguments ...string) (string, error), error) {
+	if options.Executable == "" {
+		executable, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		options.Executable = executable
+	}
+	version, err := HelperVersion(options.Executable)
+	if err != nil {
+		return nil, err
+	}
+	ssh := sshCommands(options.Destination)
+	installed, _, err := installHelper(ctx, ssh, options.Executable, version, cmp.Or(options.InstallDir, DefaultInstallDir))
+	if err != nil {
+		return nil, err
+	}
+	return func(script string, arguments ...string) (string, error) {
+		return runWords(ctx, ssh, nil, viewWords(installed, options.Home, append([]string{"sh", "-c", script, "sh"}, arguments...)...)...)
+	}, nil
+}
+
+// sshCommands runs each command over an ssh connection of its own to a destination.
+type sshCommands string
+
+func (destination sshCommands) Command(_ context.Context, remote string) (*exec.Cmd, func(), error) {
+	return exec.Command("ssh", "-o", "BatchMode=yes", "--", string(destination), remote), func() {}, nil
 }
 
 // commander starts commands for the worker user's shell, each in an ssh channel of its own, as a Pool does.

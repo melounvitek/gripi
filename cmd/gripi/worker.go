@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -49,12 +50,15 @@ trust the worker's host key and log in with a key. It checks that the worker
 has Git, the same operating system and architecture as this machine, and a
 systemd user manager with cgroup v2, which lets Gripi stop everything a
 session started.
-Sessions use the same paths on the worker as here, so add fails when the
-worker's user cannot create Pi's folder (~/.pi/agent) at its path here, and
-warns when the worker's home folder has another path. It also fails when the
-worker shares this machine's files, as this machine itself or a home folder
-mounted on both would. The worker will hold a full copy of Pi's
-configuration, including logins; keeping it secure is up to you.
+Sessions use this machine's paths on the worker. The worker's user can have
+any name and home folder: when the home folder has another path, what Gripi
+runs there sees it at this machine's home folder, in a private view that
+needs unprivileged user namespaces, which add checks with Gripi's helper
+there. add fails when the worker's user cannot create Pi's folder
+(~/.pi/agent) at its path here, or when the worker shares this machine's
+files, as this machine itself as the same user or a home folder mounted on
+both would. The worker will hold a full copy of Pi's configuration,
+including logins; keeping it secure is up to you.
 
 list prints each worker's name and SSH destination.
 
@@ -131,14 +135,18 @@ type worker struct {
 }
 
 // workerProbe prints the worker's system, architecture, user and home, then "git" if it has Git, "systemd" if
-// systemd-run can start a command under the user's systemd with cgroup v2, and "agent" if the user can create and
-// write to Pi's agent folder at its path on main.
+// systemd-run can start a command under the user's systemd with cgroup v2, and, when the user's home is main's home,
+// "agent" if the user can create and write to Pi's agent folder at its path on main.
 // ssh runs it in the worker user's shell, so it uses only what both sh and fish accept.
-func workerProbe(agentDir string) string {
+func workerProbe(home, agentDir string) string {
 	return `uname -s; uname -m; id -un; echo "$HOME"; command -v git >/dev/null && echo git; ` +
 		`systemd-run --user --pipe --quiet test -f /sys/fs/cgroup/cgroup.controllers && echo systemd; ` +
-		"mkdir -p " + remote.ShellQuote(agentDir) + " && test -w " + remote.ShellQuote(agentDir) + " && echo agent"
+		`test "$HOME" = ` + remote.ShellQuote(home) + " && mkdir -p " + remote.ShellQuote(agentDir) + " && test -w " + remote.ShellQuote(agentDir) + " && echo agent"
 }
+
+// workerHelper is where `gripi worker add` installs the helper on a worker whose user's home folder differs from
+// main's, to check the private view there: this executable, in remote.DefaultInstallDir, unless a test changes it.
+var workerHelper remote.Options
 
 func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) == 0 {
@@ -193,7 +201,7 @@ func addWorker(arguments []string, stdout, stderr io.Writer) int {
 		return failure(stderr, "worker", fmt.Errorf("a worker named %q exists already; choose another name with --name", *name))
 	}
 
-	lines, err := probeWorker(destination, workerProbe(cfg.PiAgentDir))
+	lines, err := probeWorker(destination, workerProbe(cfg.Home, cfg.PiAgentDir))
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
@@ -214,30 +222,32 @@ func addWorker(arguments []string, stdout, stderr io.Writer) int {
 		return failure(stderr, "worker", fmt.Errorf("%s cannot start commands with 'systemd-run --user' under cgroup v2; Gripi needs that to stop everything a session started", destination))
 	}
 	user, home := lines[2], lines[3]
-	if !slices.Contains(lines[4:], "agent") {
-		err := fmt.Errorf("%s cannot create Pi's folder %s on %s, or cannot write to it.\nSessions use the same paths on the worker as here.", user, cfg.PiAgentDir, destination)
-		if home != cfg.Home {
-			err = fmt.Errorf(`%w
-The home folder of %s there is %s, but here it is %s. Move it by running
-this on the worker as an administrator, while %s is logged out:
-  sudo usermod -m -d %s %s`, err, user, home, cfg.Home, user, cfg.Home, user)
-		}
-		return failure(stderr, "worker", err)
-	}
-	if err := remote.CheckSeparate(destination, func(script string, arguments ...string) (string, error) {
+	run := func(script string, arguments ...string) (string, error) {
 		remoteCommand := remote.ShellQuote(append([]string{"sh", "-c", script, "sh"}, arguments...)...)
 		output, err := exec.Command("ssh", "-o", "BatchMode=yes", "--", destination, remoteCommand).Output()
 		return string(output), err
-	}, cfg.PiAgentDir, filepath.Dir(cfg.SocketPath)); err != nil {
-		return failure(stderr, "worker", err)
 	}
-	if home != cfg.Home {
-		fmt.Fprintf(stderr, `Warning: the home folder of %s on the worker is %s, but here it is %s.
-Sessions use the same paths on the worker, so move the home folder by running
-this on the worker as an administrator, while %s is logged out:
-  sudo usermod -m -d %s %s
-or create the project folders at the same paths there.
-`, user, home, cfg.Home, user, cfg.Home, user)
+	if home == cfg.Home {
+		if !slices.Contains(lines[4:], "agent") {
+			return failure(stderr, "worker", fmt.Errorf("%s cannot create Pi's folder %s on %s, or cannot write to it", user, cfg.PiAgentDir, destination))
+		}
+	} else {
+		// What runs there with this machine's paths sees the user's own home folder at this machine's, in a private view
+		// that Gripi's helper makes.
+		options := workerHelper
+		options.Destination, options.Home = destination, cfg.Home
+		if run, err = remote.ViewScripts(context.Background(), options); err != nil {
+			return failure(stderr, "worker", fmt.Errorf("install Gripi's helper on %s: %w", destination, err))
+		}
+		if _, err := run("true"); err != nil {
+			return failure(stderr, "worker", fmt.Errorf("the home folder of %s on %s is %s, which Gripi's sessions there need to see at this machine's %s: %w", user, destination, home, cfg.Home, err))
+		}
+		if _, err := run(`mkdir -p "$1" && test -w "$1"`, cfg.PiAgentDir); err != nil {
+			return failure(stderr, "worker", fmt.Errorf("%s cannot create Pi's folder %s on %s, or cannot write to it: %w", user, cfg.PiAgentDir, destination, err))
+		}
+	}
+	if err := remote.CheckSeparate(destination, run, cfg.PiAgentDir, filepath.Dir(cfg.SocketPath)); err != nil {
+		return failure(stderr, "worker", err)
 	}
 
 	if err := saveWorkers(cfg.WorkersPath, append(workers, worker{Name: *name, Destination: destination})); err != nil {

@@ -200,17 +200,12 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 func TestWorkerAddFailsWhenTheWorkerCannotCreatePisAgentFolder(t *testing.T) {
 	fakeSSH(t)
 	system, machine := thisSystem(t)
-	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n")
+	home := os.Getenv("HOME")
+	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n"+home+"\ngit\nsystemd\n")
 
 	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
-	if code != 1 || stdout != "" {
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "cannot create Pi's folder "+filepath.Join(home, ".pi", "agent")) {
 		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
-	}
-	home := os.Getenv("HOME")
-	for _, expected := range []string{filepath.Join(home, ".pi", "agent"), "/home/gripi_worker", "sudo usermod -m -d " + home + " gripi_worker", "same paths"} {
-		if !strings.Contains(stderr, expected) {
-			t.Fatalf("stderr %q does not contain %q", stderr, expected)
-		}
 	}
 	assertNoWorkersFile(t)
 }
@@ -254,19 +249,43 @@ func TestWorkerAddRefusesAWorkerThatSharesThisMachinesFiles(t *testing.T) {
 	}
 }
 
-func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {
+// buildGripi builds Gripi as main uploads it to workers. Call it before HOME changes, which holds Go's caches.
+func buildGripi(t *testing.T, gripi string) {
+	t.Helper()
+	build := exec.Command("go", "build", "-o", gripi, "github.com/melounvitek/gripi/cmd/gripi")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, output)
+	}
+}
+
+// A worker user with another home folder needs no setup: what runs there with main's paths sees the user's home
+// folder at main's, in a private view of unprivileged user namespaces, which add checks with the helper.
+func TestWorkerAddChecksThePrivateViewOfAWorkerUserWithAnotherHomeFolder(t *testing.T) {
+	gripi := filepath.Join(t.TempDir(), "gripi")
+	buildGripi(t, gripi)
 	fakeSSH(t)
-	system, machine := thisSystem(t)
-	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n")
+	workerHome := t.TempDir()
+	t.Setenv("FAKE_SSH_HOME", workerHome)
+	// The worker is this machine as another user, which would see main's files outside the view.
+	t.Setenv("FAKE_SSH_SHARED", "1")
+	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".pi", "agent"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	workerHelper = remote.Options{Executable: gripi}
+	t.Cleanup(func() { workerHelper = remote.Options{} })
 
 	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
-	if code != 0 || !strings.Contains(stdout, "beelink") {
-		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
-	}
-	for _, expected := range []string{"/home/gripi_worker", "sudo usermod -m -d " + os.Getenv("HOME") + " gripi_worker", "same paths"} {
-		if !strings.Contains(stderr, expected) {
-			t.Fatalf("stderr %q does not contain %q", stderr, expected)
+	if code != 0 {
+		// This system blocks unprivileged user namespaces, as Ubuntu does by default.
+		if code != 1 || !strings.Contains(stderr, workerHome) || !strings.Contains(stderr, "sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0") {
+			t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
 		}
+		assertNoWorkersFile(t)
+		return
+	}
+	if info, err := os.Stat(filepath.Join(workerHome, ".pi", "agent")); err != nil || !info.IsDir() {
+		t.Fatalf("Pi's agent folder in the worker user's home folder = %v, %v", info, err)
 	}
 	if workers := listedWorkers(t); len(workers) != 1 || workers[0]["name"] != "beelink" {
 		t.Fatalf("workers = %v", workers)
