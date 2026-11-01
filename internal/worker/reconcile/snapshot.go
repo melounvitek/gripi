@@ -64,19 +64,18 @@ func Snapshot(ctx context.Context, move string, sel Selection, base, shadow stri
 	if !slices.ContainsFunc(sel.Roots, func(root string) bool { return within(sel.GitDir, root) }) {
 		captured = append(captured, sel.GitDir)
 	}
-	// Unselected worktrees in selected ones stay out, as a mirror's patterns.
-	var excluded []string
-	for _, w := range registered {
-		for _, root := range sel.Roots {
-			if strings.HasPrefix(w.Root, root+"/") && !slices.Contains(sel.Roots, w.Root) {
-				excluded = append(excluded, globEscape.Replace(strings.TrimPrefix(w.Root, root+"/")))
-			}
-		}
-	}
-	paths, err := mirror.List(mirror.Unit{Main: sel.Roots[0], Worktrees: sel.Roots[1:], GitDir: sel.GitDir}, mirror.Options{Exclude: excluded})
+	paths, err := mirror.List(mirror.Unit{Main: sel.Roots[0], Worktrees: sel.Roots[1:], GitDir: sel.GitDir}, mirror.Options{})
 	if err != nil {
 		return nil, err
 	}
+	// Unselected worktrees in selected ones stay out.
+	paths = slices.DeleteFunc(paths, func(p string) bool {
+		return slices.ContainsFunc(registered, func(w worktree) bool {
+			return within(p, w.Root) && !slices.Contains(sel.Roots, w.Root) && slices.ContainsFunc(sel.Roots, func(root string) bool {
+				return strings.HasPrefix(w.Root, root+"/")
+			})
+		})
+	})
 
 	m := manifest{Move: move, GitDir: sel.GitDir, Cwd: sel.Cwd, Files: map[string]entry{}, GitFiles: map[string]entry{}}
 	for _, root := range captured {
@@ -172,8 +171,6 @@ func Snapshot(ctx context.Context, move string, sel Selection, base, shadow stri
 	}
 	return captured, writeJSON(filepath.Join(base, "manifest.json"), m)
 }
-
-var globEscape = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`)
 
 // check refuses a selection that isn't the repository's, and what a move can't bring back: alternates, submodules
 // and operations in progress.

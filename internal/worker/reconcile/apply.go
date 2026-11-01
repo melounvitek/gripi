@@ -136,6 +136,11 @@ func (r *reconciler) applyFiles() error {
 	for _, u := range updates {
 		byRoot[u.Root] = append(byRoot[u.Root], u.Path)
 	}
+	mTrees, err := r.main.worktrees(r.ctx, nil)
+	if err != nil {
+		return err
+	}
+	made := r.madeOnMain(mTrees)
 	now := map[string]entry{}
 	for root, paths := range byRoot {
 		found, err := r.main.entries(r.ctx, root, paths)
@@ -151,6 +156,8 @@ func (r *reconciler) applyFiles() error {
 		case applied:
 		case !current.same(u.Old):
 			err = r.asideNow(u, current, "changed on main meanwhile")
+		case slices.ContainsFunc(made, func(root string) bool { return within(u.Path, root) }):
+			err = r.asideNow(u, current, "in a worktree that main made there meanwhile")
 		case blocked(u.Root, u.Path): // as when main kept a file or link where the worker has a folder
 			err = r.asideNow(u, current, "something on main is in its way")
 		case u.New.Type == "":
@@ -218,12 +225,18 @@ func (r *reconciler) applyWorktree(w worktree) error {
 		if _, err := r.main.git(ctx, nil, r.base.GitDir, "", args...); err != nil {
 			return err
 		}
+		if err := r.step(); err != nil {
+			return err
+		}
 		if mTrees, err = r.main.worktrees(ctx, mRefs); err != nil {
 			return err
 		}
 		i = slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root })
 	}
 	mw := mTrees[i]
+	if e, err := lstat(w.Root); err != nil || e.Type != "d" {
+		return r.keepWorktree(w, "made on the worker, but main has something else at its path")
+	}
 	index, err := r.main.index(ctx, mw)
 	if err != nil {
 		return err
@@ -231,7 +244,7 @@ func (r *reconciler) applyWorktree(w worktree) error {
 	if mw.Head != w.Head || index != "" && index != w.Index {
 		return r.keepWorktree(w, "made on the worker, but main has a worktree of its own there")
 	}
-	worker, err := r.shadow.walk(ctx, w.Root, nil, nil)
+	worker, err := r.shadow.walk(ctx, w.Root, r.others(w.Root, r.plan.Worktrees), nil)
 	if err != nil {
 		return err
 	}
@@ -243,14 +256,15 @@ func (r *reconciler) applyWorktree(w worktree) error {
 	for _, p := range paths {
 		switch m := main[p]; {
 		case m.same(worker[p]):
-		case m.Type == "":
-			if err := place(p, worker[p], r.shadow.path(p)); err != nil {
-				return err
-			}
+		case m.Type != "":
+			err = r.asideNow(fileUpdate{Path: p}, m, "changed on main meanwhile")
+		case blocked(w.Root, p):
+			err = r.asideNow(fileUpdate{Path: p}, m, "something on main is in its way")
 		default:
-			if err := r.asideNow(fileUpdate{Path: p}, m, "changed on main meanwhile"); err != nil {
-				return err
-			}
+			err = place(p, worker[p], r.shadow.path(p))
+		}
+		if err != nil {
+			return err
 		}
 	}
 	if index != w.Index {
@@ -269,20 +283,20 @@ func (r *reconciler) setIndex(gitDir, root, index string) error {
 	if _, err := os.Lstat(live + ".lock"); err == nil {
 		return fmt.Errorf("git is changing %s", live)
 	}
-	building := repo{gitDir: r.base.GitDir, env: []string{"GIT_INDEX_FILE=" + live + ".gripi"}}
-	if err := os.Remove(live + ".gripi"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
+	built := live + ".gripi-" + randomName() // not one that a stopped attempt left locked
+	defer os.Remove(built)
+	building := repo{gitDir: r.base.GitDir, env: []string{"GIT_INDEX_FILE=" + built}}
 	if _, err := building.git(r.ctx, strings.NewReader(index), gitDir, root, "update-index", "-z", "--index-info"); err != nil {
 		return err
 	}
 	if _, err := building.git(r.ctx, nil, gitDir, root, "update-index", "-q", "--refresh"); err != nil {
 		return err
 	}
-	return os.Rename(live+".gripi", live)
+	return os.Rename(built, live)
 }
 
-// applyCheckouts gives selected worktrees the worker's HEAD and index, while main has what the plan expects there.
+// applyCheckouts gives selected worktrees the worker's HEAD and index, while main has the HEAD and index that the plan
+// expects there. Files that main changed after a stopped return was planned stay as changes against the worker's.
 func (r *reconciler) applyCheckouts() error {
 	mRefs, err := r.main.refs(r.ctx)
 	if err != nil {
@@ -293,16 +307,20 @@ func (r *reconciler) applyCheckouts() error {
 		return err
 	}
 	for _, c := range r.plan.Checkouts {
-		i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == c.Root })
+		i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == c.Root && mw.GitDir == c.GitDir })
 		elsewhere := slices.ContainsFunc(mTrees, func(mw worktree) bool {
 			return c.New.Branch != "" && mw.Head.Branch == c.New.Branch && mw.Root != c.Root
 		})
 		w := worktree{Root: c.Root, GitDir: c.GitDir}
-		index, err := r.main.index(r.ctx, w)
-		if err != nil {
-			return err
+		e, _ := lstat(c.Root)
+		gone := i < 0 || e.Type != "d"
+		var index string
+		if !gone {
+			if index, err = r.main.index(r.ctx, w); err != nil {
+				return err
+			}
 		}
-		if i < 0 || mTrees[i].Head != c.Old && mTrees[i].Head != c.New || index != c.OldIndex && index != c.NewIndex || elsewhere {
+		if gone || mTrees[i].Head != c.Old && mTrees[i].Head != c.New || index != c.OldIndex && index != c.NewIndex || elsewhere {
 			w.Head, w.Index = c.New, c.NewIndex
 			if err := r.keepCheckout(w, "main's checkout there changed meanwhile, so it keeps its own HEAD and index"); err != nil {
 				return err

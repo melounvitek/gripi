@@ -321,6 +321,35 @@ func TestAWorktreeThatMainReplacedWithALinkIsntWrittenThrough(t *testing.T) {
 	}
 }
 
+func TestVersionsKeptAsideNeverGoThroughOrReplaceEachOther(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	w := r.shadow + r.main
+	// Main links new to another worktree, where the worker makes a folder.
+	if err := os.Symlink(r.other, r.main+"/new"); err != nil {
+		t.Fatal(err)
+	}
+	r.write(w, "new/a.txt", "worker\n")
+	// The worker replaces a folder with a file, and main changes a file in it.
+	os.RemoveAll(w + "/dir")
+	r.write(w, "dir", "worker\n")
+	r.write(r.main, "dir/b.txt", "main\n")
+
+	result := r.reconcile()
+
+	r.expectFile(r.other+"/a.txt", lines)
+	r.expectFile(r.main+"/dir/b.txt", "main\n")
+	r.expectFile(r.recovery+"/worker"+r.main+"/new/a.txt", "worker\n")
+	r.expectFile(r.recovery+"/worker"+r.main+"/dir", "worker\n")
+	r.expectFile(r.recovery+"/main"+r.main+"/dir/b.txt", "main\n")
+	r.expectFile(r.recovery+"/base"+r.main+"/dir/b.txt", "b\n")
+	for _, p := range []string{"/new", "/new/a.txt", "/dir", "/dir/b.txt"} {
+		if _, ok := asideOf(result, r.main+p); !ok {
+			t.Errorf("%s isn't kept aside: %v", p, result.Aside)
+		}
+	}
+}
+
 func TestMainOnlyChangesAreKept(t *testing.T) {
 	r := newRig(t)
 	r.snapshot(r.main)
@@ -411,6 +440,8 @@ func TestRefs(t *testing.T) {
 	for _, branch := range []string{"fast", "diverged", "deleted", "kept", "in-the-way"} {
 		r.git(r.main, "branch", branch)
 	}
+	r.git(r.main, "tag", "-a", "-m", "tagged", "v0")
+	r.git(r.main, "update-ref", "refs/tags/alias", r.rev(r.main, "v0")) // the same tag object twice
 	r.snapshot(r.main)
 	worker := func(args ...string) string { return r.worker(r.main, args...) }
 	fast := r.commit(worker, "fast", "worker")
@@ -551,6 +582,26 @@ func TestAWorktreeMadeOnTheWorkerIsMadeOnMain(t *testing.T) {
 		t.Errorf("main doesn't list the worktree")
 	}
 	r.git(r.main, "fsck", "--no-progress") // with the staged blob, which only the worker had
+	if len(result.Aside) > 0 {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
+func TestWorktreesMadeInEachOtherOnTheWorkerAreMadeOnMain(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	made := filepath.Join(filepath.Dir(r.feat), "made")
+	r.workerWorktree(made, "made")
+	r.workerWorktree(made+"/inner", "inner")
+	r.write(r.shadow+made+"/inner", "a.txt", "inner\n")
+
+	result := r.reconcile()
+
+	if got := strings.TrimSpace(r.git(made+"/inner", "symbolic-ref", "HEAD")); got != "refs/heads/inner" {
+		t.Errorf("the inner worktree is on %s", got)
+	}
+	r.expectFile(made+"/inner/a.txt", "inner\n")
+	r.expectFile(made+"/a.txt", lines)
 	if len(result.Aside) > 0 {
 		t.Errorf("kept aside %v", result.Aside)
 	}
@@ -752,6 +803,83 @@ func TestAFileThatMainChangesBeforeAStoppedReconcileRunsAgainIsKept(t *testing.T
 	}
 }
 
+// stopWhen makes the next Reconcile stop after the first change to main after which stop reports true.
+func stopWhen(t *testing.T, stop func() bool) {
+	interrupt = func() error {
+		if stop() {
+			return errors.New("stopped")
+		}
+		return nil
+	}
+	t.Cleanup(func() { interrupt = nil })
+}
+
+func exists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+func TestAWorktreeMadeBeforeAStopIsntWrittenThroughLinksMadeSince(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	made := filepath.Join(filepath.Dir(r.feat), "made")
+	r.workerWorktree(made, "made")
+	r.write(r.shadow+made, "dir/b.txt", "worker\n")
+	stopWhen(t, func() bool { return exists(made) })
+	if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
+		t.Fatal("the reconcile didn't stop")
+	}
+	interrupt = nil
+	if err := os.Symlink(r.other+"/dir", made+"/dir"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := r.reconcile()
+
+	r.expectFile(r.other+"/dir/b.txt", "b\n")
+	if _, ok := asideOf(result, made+"/dir/b.txt"); !ok {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
+func TestAWorktreeThatMainMakesAfterAStopKeepsTheWorkersFilesOut(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	r.write(r.shadow+r.main, "folder/x.txt", "worker\n")
+	stopWhen(t, func() bool { return exists(r.main + "/folder") })
+	if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
+		t.Fatal("the reconcile didn't stop")
+	}
+	interrupt = nil
+	r.git(r.main, "worktree", "add", "-q", "-b", "folder", r.main+"/folder")
+
+	result := r.reconcile()
+
+	r.expectMissing(r.main + "/folder/x.txt")
+	if _, ok := asideOf(result, r.main+"/folder/x.txt"); !ok {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
+func TestAWorktreeThatMainRemovesAfterAStopKeepsTheWorkersCheckout(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.feat)
+	r.write(r.shadow+r.feat, "a.txt", replace("two", "worker"))
+	r.worker(r.feat, "commit", "-qam", "worker")
+	stopWhen(t, func() bool { return r.read(r.feat+"/a.txt") != lines })
+	if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
+		t.Fatal("the reconcile didn't stop")
+	}
+	interrupt = nil
+	r.git(r.main, "worktree", "remove", "--force", r.feat)
+
+	result := r.reconcile()
+
+	if _, ok := asideOf(result, r.feat); !ok {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
 func TestUnselectedWorktreesAreUntouched(t *testing.T) {
 	r := newRig(t)
 	r.snapshot(r.main)
@@ -857,6 +985,18 @@ func TestUnselectedWorktreesInASelectedOneStayOut(t *testing.T) {
 	if _, ok := asideOf(result, made+"/worker.txt"); !ok || len(result.Aside) != 1 {
 		t.Errorf("kept aside %v", result.Aside)
 	}
+}
+
+func TestAnUnselectedWorktreeLeavesOutOnlyItsOwnFiles(t *testing.T) {
+	r := newRig(t)
+	r.write(r.feat, "nested/x.txt", "feat's\n")
+	r.git(r.feat, "add", "nested")
+	r.git(r.feat, "commit", "-qm", "nested")
+	nested := filepath.Join(r.main, "nested")
+	r.git(r.main, "worktree", "add", "-q", "-b", "nested", nested)
+	r.snapshot(r.main, r.feat)
+	r.expectMissing(r.shadow + nested)
+	r.expectFile(r.shadow+r.feat+"/nested/x.txt", "feat's\n")
 }
 
 func TestNestedSelectedWorktreesComeBackEach(t *testing.T) {

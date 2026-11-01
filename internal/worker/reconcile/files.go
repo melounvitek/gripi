@@ -216,20 +216,36 @@ func place(p string, e entry, from string) error {
 	return err
 }
 
-// keep writes a version of something kept aside to dst: a file with the contents of from, or else of its blob, a
-// link or a folder. Nothing at all marks a missing version.
-func (r repo) keep(ctx context.Context, dst string, e entry, from string) error {
-	if err := os.RemoveAll(dst); err != nil {
+// keep writes a version of p, something kept aside, at <tree>/<p>, where tree holds such versions of many paths.
+// Nothing there marks a missing version. A version never goes through or replaces another that isn't a folder, and a
+// folder keeps the versions in it.
+func (r repo) keep(ctx context.Context, tree, p string, e entry, from string) error {
+	dst := filepath.Join(tree, p)
+	if blocked(tree, dst) {
+		return nil
+	}
+	current, err := lstat(dst)
+	if err != nil || current.Type == "d" {
 		return err
 	}
+	if current.Type != "" {
+		if err := os.Remove(dst); err != nil {
+			return err
+		}
+	}
+	return r.write(ctx, dst, e, from)
+}
+
+// write writes e to dst: a file with the contents of from, or else of its blob, a link or a folder.
+func (r repo) write(ctx context.Context, dst string, e entry, from string) error {
 	if e.Type == "" || e.Type == "x" {
 		return nil
 	}
-	if e.Type == "d" {
-		return os.MkdirAll(dst, 0o700)
-	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
+	}
+	if e.Type == "d" {
+		return os.Mkdir(dst, 0o700)
 	}
 	if e.Type == "l" {
 		return os.Symlink(e.Target, dst)
@@ -244,8 +260,12 @@ func (r repo) keep(ctx context.Context, dst string, e entry, from string) error 
 	return os.WriteFile(dst, []byte(data), fs.FileMode(e.Mode))
 }
 
-// keepTree copies the folder from with everything in it to dst, in place of what dst had.
-func keepTree(from, dst string) error {
+// keepTree copies the folder from with everything in it to <tree>/<p>, in place of what was there, as keep would.
+func keepTree(from, tree, p string) error {
+	dst := filepath.Join(tree, p)
+	if blocked(tree, dst) {
+		return nil
+	}
 	if err := os.RemoveAll(dst); err != nil {
 		return err
 	}

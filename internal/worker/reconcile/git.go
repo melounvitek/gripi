@@ -1,7 +1,6 @@
 package reconcile
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -257,11 +256,12 @@ func fetch(ctx context.Context, main, shadow repo, wants, haves []string) error 
 	if err := pack.Start(); err != nil {
 		return err
 	}
-	_, indexErr := main.git(ctx, bufio.NewReader(out), main.gitDir, "", "index-pack", "--stdin")
-	if err := pack.Wait(); err != nil {
-		return fmt.Errorf("git pack-objects in the shadow: %w: %s", err, bytes.TrimSpace(packErr.Bytes()))
+	_, err = main.git(ctx, out, main.gitDir, "", "index-pack", "--stdin")
+	out.Close() // so that pack-objects stops if index-pack failed
+	if waitErr := pack.Wait(); waitErr != nil && err == nil {
+		return fmt.Errorf("git pack-objects in the shadow: %w: %s", waitErr, bytes.TrimSpace(packErr.Bytes()))
 	}
-	return indexErr
+	return err
 }
 
 // pin keeps objects from git gc with the ref name: a commit whose tree lists the blobs and whose parents are the
@@ -289,7 +289,8 @@ func (r repo) pin(ctx context.Context, name string, blobIDs, commits, others []s
 		return err
 	}
 	updates := "update " + name + " " + strings.TrimSpace(id) + "\n"
-	for _, other := range others {
+	slices.Sort(others)
+	for _, other := range slices.Compact(others) {
 		updates += "update " + path.Join(path.Dir(name), "objects", other) + " " + other + "\n"
 	}
 	_, err = r.git(ctx, strings.NewReader(updates), r.gitDir, "", "update-ref", "--stdin")

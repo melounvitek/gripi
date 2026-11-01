@@ -104,7 +104,8 @@ func Reconcile(ctx context.Context, base, shadow, recovery string) (Result, erro
 		if err := r.makePlan(); err != nil {
 			return result, err
 		}
-		if err := syncFilesystems(recovery); err != nil {
+		// The plan names objects and recovery files that must outlive a crash as it does.
+		if err := syncFilesystems(recovery, r.base.GitDir); err != nil {
 			return result, err
 		}
 		if err := writeJSON(r.in("plan.json"), r.plan); err != nil {
@@ -178,7 +179,6 @@ func (r *reconciler) makePlan() error {
 	}
 	// The worker's worktrees that come back: the selected ones that it still has, and those it made.
 	var back []worktree
-	allRoots := slices.Clone(b.Registered)
 	for _, w := range wTrees {
 		selected := slices.ContainsFunc(b.Worktrees, func(bw worktree) bool { return bw.Root == w.Root })
 		if _, err := os.Lstat(r.shadow.path(w.Root)); err != nil || !selected && slices.Contains(b.Registered, w.Root) {
@@ -188,7 +188,6 @@ func (r *reconciler) makePlan() error {
 			return err
 		}
 		back = append(back, w)
-		allRoots = append(allRoots, w.Root)
 	}
 
 	// The worker's objects go to main first, kept from git gc until Discard.
@@ -221,9 +220,15 @@ func (r *reconciler) makePlan() error {
 		return err
 	}
 	// Main keeps its reflogs; the worker's are only recorded.
-	for _, dir := range append([]string{b.GitDir}, gitDirs(back)...) {
-		if _, err := os.Lstat(r.shadow.path(dir + "/logs")); err == nil {
-			if err := keepTree(r.shadow.path(dir+"/logs"), r.in("worker", dir, "logs")); err != nil {
+	logs := []string{b.GitDir + "/logs"}
+	for _, w := range back {
+		if w.GitDir != b.GitDir {
+			logs = append(logs, w.GitDir+"/logs")
+		}
+	}
+	for _, dir := range logs {
+		if _, err := os.Lstat(r.shadow.path(dir)); err == nil {
+			if err := keepTree(r.shadow.path(dir), r.in("worker"), dir); err != nil {
 				return err
 			}
 		}
@@ -349,17 +354,14 @@ func (r *reconciler) makePlan() error {
 		w.Head = h
 		p.Worktrees = append(p.Worktrees, w)
 	}
+	// Outer ones first, so that a worktree in another is made in it.
+	slices.SortFunc(p.Worktrees, func(a, b worktree) int { return strings.Compare(a.Root, b.Root) })
 
-	var made []string // worktrees made on main meanwhile, which the worker's files stay out of
-	for _, mw := range mTrees {
-		if !slices.Contains(b.Registered, mw.Root) {
-			made = append(made, mw.Root)
-		}
-	}
+	made := r.madeOnMain(mTrees)
 	for _, bw := range b.Worktrees {
 		if slices.ContainsFunc(back, func(w worktree) bool { return w.Root == bw.Root }) {
 			_, ok := onMain(bw.Root)
-			if err := r.planFiles(bw.Root, allRoots, made, ok); err != nil {
+			if err := r.planFiles(bw.Root, r.others(bw.Root, back), made, ok); err != nil {
 				return err
 			}
 		}
@@ -367,12 +369,25 @@ func (r *reconciler) makePlan() error {
 	return r.planGitFiles()
 }
 
-func gitDirs(worktrees []worktree) []string {
-	var dirs []string
-	for _, w := range worktrees {
-		dirs = append(dirs, w.GitDir)
+// madeOnMain lists the worktrees that main made after the base, which the worker's files stay out of, other than
+// those that the return makes.
+func (r *reconciler) madeOnMain(mTrees []worktree) []string {
+	var made []string
+	for _, mw := range mTrees {
+		if !slices.Contains(r.base.Registered, mw.Root) && !slices.ContainsFunc(r.plan.Worktrees, func(w worktree) bool { return w.Root == mw.Root }) {
+			made = append(made, mw.Root)
+		}
 	}
-	return dirs
+	return made
+}
+
+// others lists the worktrees other than the one at root, whose files stay out of it.
+func (r *reconciler) others(root string, more []worktree) []string {
+	others := slices.Clone(r.base.Registered)
+	for _, w := range more {
+		others = append(others, w.Root)
+	}
+	return slices.DeleteFunc(others, func(other string) bool { return other == root })
 }
 
 func mergeKeys[V any](a, b map[string]V) map[string]bool {
@@ -468,15 +483,14 @@ func (r *reconciler) keepCheckout(w worktree, reason string) error {
 
 // keepWorktree keeps a worktree that the worker made, with its files, HEAD and index, which main didn't take.
 func (r *reconciler) keepWorktree(w worktree, reason string) error {
-	if err := keepTree(r.shadow.path(w.Root), r.in("worker", w.Root)); err != nil {
+	if err := keepTree(r.shadow.path(w.Root), r.in("worker"), w.Root); err != nil {
 		return err
 	}
 	return r.keepCheckout(w, reason+"; its files are in "+r.in("worker", w.Root))
 }
 
 // planFiles plans the files of a selected worktree that the worker changed.
-func (r *reconciler) planFiles(root string, allRoots, made []string, onMain bool) error {
-	others := slices.DeleteFunc(slices.Clone(allRoots), func(other string) bool { return other == root })
+func (r *reconciler) planFiles(root string, others, made []string, onMain bool) error {
 	owned := func(p string) bool {
 		return within(p, root) && !slices.ContainsFunc(others, func(other string) bool { return within(p, other) && len(other) > len(root) })
 	}
@@ -562,7 +576,7 @@ func (r *reconciler) merge(p string, b, m, w entry) (entry, string, error) {
 	}
 	n := len(r.plan.Files)
 	baseFile, merged := r.in("merged", fmt.Sprint(n, ".base")), r.in("merged", fmt.Sprint(n))
-	if err := r.main.keep(r.ctx, baseFile, b, ""); err != nil {
+	if err := r.main.write(r.ctx, baseFile, b, ""); err != nil {
 		return entry{}, "", err
 	}
 	defer os.Remove(baseFile)
@@ -582,13 +596,13 @@ func (r *reconciler) merge(p string, b, m, w entry) (entry, string, error) {
 
 // aside keeps the base's, main's and the worker's versions of p in the recovery folder.
 func (r *reconciler) aside(p string, b, m, w entry, reason string) error {
-	if err := r.main.keep(r.ctx, r.in("base", p), b, ""); err != nil {
+	if err := r.main.keep(r.ctx, r.in("base"), p, b, ""); err != nil {
 		return err
 	}
-	if err := r.main.keep(r.ctx, r.in("main", p), m, p); err != nil {
+	if err := r.main.keep(r.ctx, r.in("main"), p, m, p); err != nil {
 		return err
 	}
-	if err := r.main.keep(r.ctx, r.in("worker", p), w, r.shadow.path(p)); err != nil {
+	if err := r.main.keep(r.ctx, r.in("worker"), p, w, r.shadow.path(p)); err != nil {
 		return err
 	}
 	return r.kept(Item{Path: p, Reason: reason}, "")
@@ -612,7 +626,7 @@ func (r *reconciler) planGitFiles() error {
 	worker[config] = found[config]
 	for _, p := range slices.Sorted(maps.Keys(mergeKeys(r.base.GitFiles, worker))) {
 		if w := worker[p]; w.Type != "d" && !w.same(r.base.GitFiles[p]) {
-			if err := r.main.keep(r.ctx, r.in("worker", p), w, r.shadow.path(p)); err != nil {
+			if err := r.main.keep(r.ctx, r.in("worker"), p, w, r.shadow.path(p)); err != nil {
 				return err
 			}
 			if err := r.kept(Item{Path: p, Reason: "changed on the worker; main keeps its own"}, ""); err != nil {
