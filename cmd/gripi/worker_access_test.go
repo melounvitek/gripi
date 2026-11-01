@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/config"
+	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
 // fakePlacement stands in for the gateway's record of what is on a worker.
@@ -18,6 +22,58 @@ func (placement fakePlacement) Session(key string) bool {
 }
 
 func (fakePlacement) Folder(string) bool { return false }
+
+// Settings can put each of the gateway's files and folders anywhere, and none may move to a worker, whose copy would
+// replace it.
+func TestNoneOfTheGatewaysOwnFilesMovesToAWorker(t *testing.T) {
+	isolateSettings(t)
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "agent", "agent"))
+	for _, name := range []string{
+		"GRIPI_ENV_PATH", "GRIPI_SESSIONS_ROOT", "GRIPI_ATTACHMENTS_ROOT", "GRIPI_WEB_PUSH_VAPID_PATH", "GRIPI_PUSH_SUBSCRIPTIONS_PATH",
+		"GRIPI_SESSION_CWDS_PATH", "GRIPI_READ_STATE_PATH", "GRIPI_PINNED_SESSIONS_PATH", "GRIPI_SESSION_TAGS_PATH", "GRIPI_ENVIRONMENT_PATH",
+		"GRIPI_BROWSER_ACCESS_PATH", "GRIPI_WORKSPACE_SECRET_PATH", "GRIPI_WORKSPACE_ACCESS_PATH", "GRIPI_WORKSPACE_OWNERSHIP_PATH",
+		"GRIPI_WORKERS_PATH", "GRIPI_WORKER_PLACEMENTS_PATH", "GRIPI_RESTART_PATH", "GRIPI_SOCKET_PATH",
+	} {
+		t.Setenv(name, filepath.Join(root, name, strings.ToLower(name)))
+	}
+	cfg, err := config.Load(os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, workers, err := newGateway(cfg, remote.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.(interface{ Close(context.Context) error }).Close(context.Background())
+	defer workers.Close()
+	if err := saveWorkers(cfg.WorkersPath, []worker{{Name: "beelink", Destination: "gripi@beelink"}}); err != nil {
+		t.Fatal(err)
+	}
+	stop := func(func(string) bool) error { return errors.New("the move stopped the sessions") }
+
+	// Every file or folder that the settings name, but Hermes's program, lives in a folder of its own.
+	settings := reflect.ValueOf(cfg)
+	for i := range settings.NumField() {
+		name := settings.Type().Field(i).Name
+		if settings.Field(i).Kind() != reflect.String || name == "HermesPath" || !strings.HasSuffix(name, "Path") && !strings.HasSuffix(name, "Root") && !strings.HasSuffix(name, "Dir") {
+			continue
+		}
+		folder := filepath.Dir(settings.Field(i).String())
+		if err := os.MkdirAll(folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := workers.Move(context.Background(), folder, "beelink", stop); !refused(err) || !strings.Contains(err.Error(), "on this machine") {
+			t.Errorf("moving the folder of %s = %v", name, err)
+		}
+	}
+}
+
+func refused(err error) bool {
+	var refusal interface{ Refused() bool }
+	return errors.As(err, &refusal) && refusal.Refused()
+}
 
 func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 	// Socket paths have a short system limit.

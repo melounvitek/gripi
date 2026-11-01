@@ -88,9 +88,10 @@ type ManagerOptions struct {
 	WorkerExtension string
 	// SessionsRoot holds Pi's session folders, one for each folder that sessions started in.
 	SessionsRoot string
-	// ConfigDir is Gripi's configuration folder. Like Pi's agent folder, the sessions' root and Gripi's state folder,
-	// it never moves to a worker.
-	ConfigDir string
+	// GatewayPaths are Gripi's other own files and folders, wherever its settings put them, such as its configuration
+	// folder and state files. Like Pi's agent folder, the sessions' root and Gripi's state folder, they never move to a
+	// worker.
+	GatewayPaths []string
 	// SocketPath is the path of the gripi socket, where gripi commands on a worker reach the worker's own socket.
 	SocketPath string
 	// Store finds the folders of saved sessions.
@@ -708,8 +709,8 @@ func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root str
 	}
 }
 
-// ownFolder returns Pi's or Gripi's own folder that holds folder or is in it, if any: Pi's agent folder, with its
-// logins, the sessions' root, and Gripi's state and configuration folders, which stay on this machine.
+// ownFolder returns Pi's or Gripi's own file or folder that folder holds or is in, if any: Pi's agent folder, with
+// its logins, the sessions' root, Gripi's state folder and its other own paths, which stay on this machine.
 func (manager *Manager) ownFolder(folder string) string {
 	paths := func(path string) []string {
 		if real, err := filepath.EvalSymlinks(path); err == nil && real != path {
@@ -717,7 +718,7 @@ func (manager *Manager) ownFolder(folder string) string {
 		}
 		return []string{path}
 	}
-	for _, own := range []string{manager.options.Pi.AgentDir, manager.options.SessionsRoot, manager.options.StateDir, manager.options.ConfigDir} {
+	for _, own := range append([]string{manager.options.Pi.AgentDir, manager.options.SessionsRoot, manager.options.StateDir}, manager.options.GatewayPaths...) {
 		if own == "" {
 			continue
 		}

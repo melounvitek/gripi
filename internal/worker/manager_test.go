@@ -450,7 +450,7 @@ func TestPisAndGripisOwnFoldersNeverMoveToAWorker(t *testing.T) {
 	if err := os.Symlink(home, link); err != nil {
 		t.Fatal(err)
 	}
-	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, Pi: Pi{AgentDir: agentDir}, StateDir: stateDir, ConfigDir: configDir, SessionsRoot: sessions})
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, Pi: Pi{AgentDir: agentDir}, StateDir: stateDir, GatewayPaths: []string{configDir}, SessionsRoot: sessions})
 	stop := func(func(string) bool) error {
 		t.Error("a refused move stopped the sessions")
 		return nil
@@ -469,7 +469,7 @@ func TestPisAndGripisOwnFoldersNeverMoveToAWorker(t *testing.T) {
 
 func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
 	manager := newTestManager(t, ManagerOptions{
-		Store: fakeStore{}, Pi: Pi{AgentDir: "/home/me/.pi/agent"}, StateDir: "/home/me/.pi/gripi", ConfigDir: "/home/me/.config/gripi",
+		Store: fakeStore{}, Pi: Pi{AgentDir: "/home/me/.pi/agent"}, StateDir: "/home/me/.pi/gripi", GatewayPaths: []string{"/home/me/.config/gripi"},
 		SessionsRoot: "/home/me/.pi/agent/sessions",
 	})
 	unit := mirror.Unit{Main: "/work/project", Worktrees: []string{"/work/project-feature"}, GitDir: "/work/project/.git"}
