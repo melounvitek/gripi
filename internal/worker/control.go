@@ -265,10 +265,11 @@ func (control *Control) ApplyAuth(ctx context.Context, path, contents string) er
 }
 
 // StartMirror prepares the helper's mirror of a unit, which sends the unit's changes once AttachMirror connects main's
-// copy to it, and answers the barriers of the sessions in the unit. A unit of Pi's session folders, with sessions,
-// sends its changes without waiting for barriers, and the helper makes the folders that don't exist yet.
-func (control *Control) StartMirror(ctx context.Context, unit mirror.Unit, sessions bool) error {
-	return control.call(ctx, helper.Message{Type: "mirror.start", Unit: &unit, Sessions: sessions})
+// copy to it, and answers the barriers of the sessions in the unit. A unit of Pi's session folders, those of the
+// sessions in the repository whose main folder is sessionsOf, sends its changes without waiting for barriers, and the
+// helper makes the folders that don't exist yet. The barriers of a session need both mirrors.
+func (control *Control) StartMirror(ctx context.Context, unit mirror.Unit, sessionsOf string) error {
+	return control.call(ctx, helper.Message{Type: "mirror.start", Unit: &unit, Sessions: sessionsOf != "", Path: sessionsOf})
 }
 
 // StopMirror sends main the last changes of the unit whose main folder is main, then stops its mirror.

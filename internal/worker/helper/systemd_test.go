@@ -316,7 +316,7 @@ func TestExtensionSocketFailsClosedWithoutAMirror(t *testing.T) {
 		answers = append(answers, strings.TrimSpace(line))
 	}
 	slices.Sort(answers)
-	if answers[0] != `{"id":1,"ok":false,"error":"nothing mirrors this session to main"}` || answers[1] != `{"id":2,"ok":false}` {
+	if answers[0] != `{"id":1,"ok":false,"error":"nothing mirrors this session's folder to main"}` || answers[1] != `{"id":2,"ok":false}` {
 		t.Fatalf("answers = %q", answers)
 	}
 }

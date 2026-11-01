@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -53,6 +54,34 @@ func extensionRequest(t *testing.T, runtimeDir, session, kind string) helper.Res
 	return answer
 }
 
+// attachMain connects a copy on main, which keeps what the worker has under from under to, to the helper's mirror of
+// the unit whose main folder is main. It returns the channel, and what the copy's Serve and the channel return.
+func attachMain(t *testing.T, unit *unitHelper, main, from, to string) (*exec.Cmd, <-chan error) {
+	t.Helper()
+	state, aside := t.TempDir(), t.TempDir()
+	destination, err := mirror.NewMovedDestination(state, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := exec.Command(buildGripi(t), "worker", "mirror", "--runtime-dir", unit.runtimeDir, main, unit.instance)
+	channel.Stderr = os.Stderr
+	input, _ := channel.StdinPipe()
+	output, _ := channel.StdoutPipe()
+	if err := channel.Start(); err != nil {
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() {
+		err := destination.Serve(context.Background(), struct {
+			io.Reader
+			io.Writer
+		}{output, input}, aside)
+		input.Close()
+		served <- errors.Join(err, channel.Wait())
+	}()
+	return channel, served
+}
+
 func TestMirrorSendsTheUnitToMainAndAnswersTheBarriersOfItsSessions(t *testing.T) {
 	unit := startUnitHelper(t, helper.DefaultLease)
 	root := t.TempDir()
@@ -86,25 +115,19 @@ func TestMirrorSendsTheUnitToMainAndAnswersTheBarriersOfItsSessions(t *testing.T
 		t.Fatalf("mirror for another helper = %v, %s", err, output)
 	}
 	mainCopy := filepath.Join(root, "main")
-	destination, err := mirror.NewMovedDestination(filepath.Join(root, "state"), filepath.Join(root, "worker"), mainCopy)
-	if err != nil {
-		t.Fatal(err)
+	_, served := attachMain(t, unit, project, filepath.Join(root, "worker"), mainCopy)
+	// Main would lack the session's latest entries.
+	if answer := extensionRequest(t, unit.runtimeDir, "s1", "barrier"); answer.OK || !strings.Contains(answer.Error, "session's file") {
+		t.Fatalf("barrier while the session's file is not mirrored = %+v", answer)
 	}
-	channel := exec.Command(buildGripi(t), "worker", "mirror", "--runtime-dir", unit.runtimeDir, project, unit.instance)
-	channel.Stderr = os.Stderr
-	input, _ := channel.StdinPipe()
-	output, _ := channel.StdoutPipe()
-	if err := channel.Start(); err != nil {
-		t.Fatal(err)
+	if answer := extensionRequest(t, unit.runtimeDir, "s1", "health"); answer.OK {
+		t.Fatal("healthy while the session's file is not mirrored")
 	}
-	served := make(chan error, 1)
-	go func() {
-		served <- destination.Serve(context.Background(), struct {
-			io.Reader
-			io.Writer
-		}{output, input}, filepath.Join(root, "aside"))
-		input.Close()
-	}()
+	sessions := mirror.Unit{Main: filepath.Join(root, "worker", "sessions", "--project--")}
+	if response := unit.request(map[string]any{"type": "mirror.start", "unit": sessions, "sessions": true, "path": project}); !response.OK {
+		t.Fatalf("mirror.start of the sessions = %+v", response)
+	}
+	sessionsChannel, sessionsServed := attachMain(t, unit, sessions.Main, filepath.Join(root, "worker"), mainCopy)
 
 	os.WriteFile(filepath.Join(project, "tool.txt"), []byte("written by a tool\n"), 0644)
 	git(t, project, "add", "-A")
@@ -122,6 +145,16 @@ func TestMirrorSendsTheUnitToMainAndAnswersTheBarriersOfItsSessions(t *testing.T
 		t.Fatalf("health = %+v", answer)
 	}
 
+	// Main's copy of the sessions ends, as when it fails.
+	sessionsChannel.Process.Kill()
+	<-sessionsServed
+	if answer := extensionRequest(t, unit.runtimeDir, "s1", "barrier"); answer.OK {
+		t.Fatal("a barrier passed after the mirror of the sessions ended")
+	}
+	if answer := extensionRequest(t, unit.runtimeDir, "s1", "health"); answer.OK {
+		t.Fatal("healthy after the mirror of the sessions ended")
+	}
+
 	os.WriteFile(filepath.Join(project, "last.txt"), []byte("just before the move back\n"), 0644)
 	if response := unit.request(map[string]any{"type": "mirror.stop", "path": project}); !response.OK {
 		t.Fatalf("mirror.stop = %+v", response)
@@ -133,9 +166,6 @@ func TestMirrorSendsTheUnitToMainAndAnswersTheBarriersOfItsSessions(t *testing.T
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the mirror still runs")
-	}
-	if err := channel.Wait(); err != nil {
-		t.Fatalf("gripi worker mirror: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(mainCopy, "project", "last.txt")); err != nil {
 		t.Fatalf("the change before mirror.stop: %v", err)
@@ -153,32 +183,14 @@ func TestASessionsMirrorMakesItsFoldersAndSendsChangesUnasked(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessions := mirror.Unit{Main: project, Worktrees: []string{feature}}
-	if response := unit.request(map[string]any{"type": "mirror.start", "unit": sessions, "sessions": true}); !response.OK {
+	if response := unit.request(map[string]any{"type": "mirror.start", "unit": sessions, "sessions": true, "path": filepath.Join(root, "worker", "project")}); !response.OK {
 		t.Fatalf("mirror.start = %+v", response)
 	}
 	if info, err := os.Stat(feature); err != nil || info.Mode().Perm() != 0700 {
 		t.Fatalf("the folder of the sessions in the feature: %v, %v", info, err)
 	}
 	mainCopy := filepath.Join(root, "main")
-	destination, err := mirror.NewMovedDestination(filepath.Join(root, "state"), filepath.Join(root, "worker"), mainCopy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	channel := exec.Command(buildGripi(t), "worker", "mirror", "--runtime-dir", unit.runtimeDir, project, unit.instance)
-	channel.Stderr = os.Stderr
-	input, _ := channel.StdinPipe()
-	output, _ := channel.StdoutPipe()
-	if err := channel.Start(); err != nil {
-		t.Fatal(err)
-	}
-	served := make(chan error, 1)
-	go func() {
-		served <- destination.Serve(context.Background(), struct {
-			io.Reader
-			io.Writer
-		}{output, input}, filepath.Join(root, "aside"))
-		input.Close()
-	}()
+	_, served := attachMain(t, unit, project, filepath.Join(root, "worker"), mainCopy)
 
 	os.WriteFile(filepath.Join(feature, "session.jsonl"), []byte("{\"type\":\"session\"}\n"), 0600)
 	copied := filepath.Join(mainCopy, "sessions", "--project-feature--", "session.jsonl")
@@ -196,5 +208,4 @@ func TestASessionsMirrorMakesItsFoldersAndSendsChangesUnasked(t *testing.T) {
 	if err := <-served; err != nil {
 		t.Fatalf("the destination stopped with %v", err)
 	}
-	channel.Wait()
 }

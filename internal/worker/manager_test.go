@@ -203,6 +203,47 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	}
 }
 
+// localWorker returns the options of a manager whose worker beelink is this machine, through fakeSSH, with main's Pi
+// from rig, a helper of its own and a scripted Pi there.
+func localWorker(t *testing.T, rig *bootstrapRig) ManagerOptions {
+	t.Helper()
+	writeTestFile(t, filepath.Join(rig.pkg, "dist", "cli.js"), fakeWorkerPi, 0755)
+	writeTestFile(t, filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"), "worker\n", 0600)
+	gripi, _ := buildExecutables(t)
+	unitName := make([]byte, 6)
+	rand.Read(unitName)
+	return ManagerOptions{
+		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
+		SocketPath: filepath.Join(t.TempDir(), "gripi.sock"), Store: fakeStore{}, SessionsRoot: t.TempDir(),
+		ServeSocket: func(string, WorkerPlacement) (string, func() error, error) {
+			return filepath.Join(t.TempDir(), "beelink.sock"), func() error { return nil }, nil
+		},
+		Connection: Options{Executable: gripi, InstallDir: "gripi-worker", Unit: "gripi-test-" + hex.EncodeToString(unitName), RuntimeDir: shortTempDir(t)},
+	}
+}
+
+func TestLaunchFailsUnlessBothMirrorsOfTheRepositoryRun(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses folder permissions")
+	}
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	manager := newTestManager(t, options)
+	project := t.TempDir()
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+	// The worker cannot make the folder of the session's file, so main would never get the file.
+	if err := os.Chmod(options.SessionsRoot, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(options.SessionsRoot, 0700) })
+
+	if command, _, err := manager.Launch(agent.Process{Dir: project, Command: []string{"pi", "--mode", "rpc"}}); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("Launch without the mirror of the sessions = %v, %v", command, err)
+	}
+}
+
 // A worker that is this machine as the same user, or that mounts its home folder, would get main's own files instead
 // of copies: the worker's logins would replace main's, and the worker's gripi socket main's.
 func TestMainRefusesAWorkerThatSharesItsFiles(t *testing.T) {
@@ -218,18 +259,13 @@ func TestMainRefusesAWorkerThatSharesItsFiles(t *testing.T) {
 	}
 	defer listener.Close()
 	project := t.TempDir()
-	gripi, _ := buildExecutables(t)
-	unitName := make([]byte, 6)
-	rand.Read(unitName)
-	manager := newTestManager(t, ManagerOptions{
-		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
-		SocketPath: socket, Store: fakeStore{}, SessionsRoot: t.TempDir(),
-		ServeSocket: func(string, WorkerPlacement) (string, func() error, error) {
-			t.Error("the worker got a gripi socket")
-			return "", nil, errors.New("no socket in this test")
-		},
-		Connection: Options{Executable: gripi, InstallDir: "gripi-worker", Unit: "gripi-test-" + hex.EncodeToString(unitName), RuntimeDir: shortTempDir(t)},
-	})
+	options := localWorker(t, rig)
+	options.SocketPath = socket
+	options.ServeSocket = func(string, WorkerPlacement) (string, func() error, error) {
+		t.Error("the worker got a gripi socket")
+		return "", nil, errors.New("no socket in this test")
+	}
+	manager := newTestManager(t, options)
 	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
 		t.Fatal(err)
 	}

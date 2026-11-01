@@ -29,8 +29,8 @@ import (
 //   - helper to main: {"type":"hello","instance":…,"version":…} once, then {"id":N,"type":"ping"} every second;
 //   - main to helper: {"id":N,"type":"session.create","session":…,"cwd":…,"args":[…],"env":["NAME=value",…]},
 //     session.close and session.release with "session", auth.apply with "path" and "contents", mirror.start with
-//     "unit" ({"main":…,"worktrees":[…],"git_dir":…}) and "sessions" for a unit of Pi's session folders, and
-//     mirror.stop with the unit's main folder as "path";
+//     "unit" ({"main":…,"worktrees":[…],"git_dir":…}), and for a unit of Pi's session folders "sessions" and the
+//     main folder of their sessions' repository as "path", and mirror.stop with the unit's main folder as "path";
 //   - answers: {"id":N,"ok":true} or {"id":N,"ok":false,"error":"…"}.
 type Message struct {
 	ID       uint64       `json:"id,omitempty"`
@@ -81,7 +81,8 @@ type Options struct {
 	// Lease is DefaultLease when zero.
 	Lease time.Duration
 	// Mirror answers the worker extension's barriers and health checks. Without it, the helper answers them from the
-	// mirror of the unit that holds the session's folder (mirror.start), and fails barriers of other sessions.
+	// mirrors (mirror.start) of the unit that holds the session's folder and of that unit's sessions' folders, and
+	// fails barriers of other sessions.
 	Mirror Mirror
 	// ApplyAuth writes a login file for auth.apply. Without it, auth.apply fails.
 	ApplyAuth func(path, contents string) error
@@ -266,7 +267,7 @@ func (s *server) handle(request Message) {
 	case "session.release":
 		err = s.release(releaseTimeout, request.Session)
 	case "mirror.start":
-		err = s.startMirror(request.Unit, request.Sessions)
+		err = s.startMirror(request.Unit, request.Sessions, request.Path)
 	case "mirror.stop":
 		err = s.stopMirror(request.Path)
 	case "auth.apply":

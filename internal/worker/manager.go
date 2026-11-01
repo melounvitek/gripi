@@ -286,8 +286,8 @@ func (manager *Manager) setState(worker *remote, state State) {
 
 // connect returns the worker of a name, connected and with main's Pi, and with the mirrors of every unit placed on it
 // running, but those on their way back to main. It connects when the worker is not connected yet or lost its
-// connection.
-func (manager *Manager) connect(ctx context.Context, name string) (*remote, error) {
+// connection. It fails when the mirrors of the unit whose main folder is required don't run.
+func (manager *Manager) connect(ctx context.Context, name, required string) (*remote, error) {
 	manager.mu.Lock()
 	worker := manager.workers[name]
 	if worker == nil {
@@ -319,7 +319,11 @@ func (manager *Manager) connect(ctx context.Context, name string) (*remote, erro
 		manager.mu.Unlock()
 		if placement.Worker == name && !moving {
 			if err := manager.runMirrors(ctx, worker, placement.Unit); err != nil {
-				log.Printf("mirror %s from worker %s: %v", placement.Unit.Main, name, err)
+				err = fmt.Errorf("mirror %s from worker %s: %w", placement.Unit.Main, name, err)
+				if placement.Unit.Main == required {
+					return nil, err
+				}
+				log.Print(err)
 			}
 		}
 	}
@@ -420,7 +424,7 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 // Reconnect connects to the worker of a name, if main is not connected to it, as the next session there or move to it
 // would. After main has lost the worker, it waits while the worker's earlier helper may still run.
 func (manager *Manager) Reconnect(ctx context.Context, name string) error {
-	_, err := manager.connect(ctx, name)
+	_, err := manager.connect(ctx, name, "")
 	return err
 }
 
@@ -542,7 +546,11 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 	}
 	destination.Applied = manager.applied(repository, sessions)
 	destination.AllowRoot = manager.allowRoot(unit, sessions)
-	if err := conn.StartMirror(ctx, unit, sessions); err != nil {
+	sessionsOf := ""
+	if sessions {
+		sessionsOf = repository.Main
+	}
+	if err := conn.StartMirror(ctx, unit, sessionsOf); err != nil {
 		return err
 	}
 	command, release, err := conn.AttachMirror(ctx, unit.Main)
@@ -754,7 +762,8 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	}
 	ctx, cancel := context.WithTimeout(manager.ctx, connectTimeout)
 	defer cancel()
-	worker, err := manager.connect(ctx, placement.Worker)
+	// The session's barriers need both mirrors of its repository.
+	worker, err := manager.connect(ctx, placement.Worker, placement.Unit.Main)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -875,7 +884,7 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 		defer manager.mu.Unlock()
 		manager.copying = slices.DeleteFunc(manager.copying, func(copying copying) bool { return copying.unit.Main == unit.Main })
 	}()
-	worker, err := manager.connect(ctx, name)
+	worker, err := manager.connect(ctx, name, "")
 	if err != nil {
 		return err
 	}
@@ -973,7 +982,7 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 	if state := manager.Status(placement.Worker).State; state == Unreachable || state == Gone {
 		return manager.continueOnMain(placement, fmt.Errorf("worker %s is unreachable", placement.Worker))
 	}
-	worker, err := manager.connect(ctx, placement.Worker)
+	worker, err := manager.connect(ctx, placement.Worker, "")
 	if err != nil {
 		return manager.continueOnMain(placement, err)
 	}

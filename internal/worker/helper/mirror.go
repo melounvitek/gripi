@@ -30,16 +30,23 @@ type mirroredUnit struct {
 	cancel   context.CancelFunc
 	attached bool
 	done     chan struct{} // closed when the Source has run, or will never run
+
+	// repository is, for a unit of Pi's session folders, the main folder of the repository whose sessions they hold.
+	repository string
 }
 
 // startMirror prepares a unit's Source, which runs once `gripi worker mirror` connects main's Destination to it. A
-// unit of Pi's session folders sends its changes without waiting for barriers, and gets the folders that don't exist
-// yet, because their sessions are mirrored only from folders that exist.
-func (s *server) startMirror(unit *mirror.Unit, sessions bool) error {
+// unit of Pi's session folders, whose sessions are those of the repository whose main folder is repository, sends its
+// changes without waiting for barriers, and gets the folders that don't exist yet, because their sessions are mirrored
+// only from folders that exist.
+func (s *server) startMirror(unit *mirror.Unit, sessions bool, repository string) error {
 	if unit == nil || !filepath.IsAbs(unit.Main) {
 		return errors.New("mirror.start needs a unit with an absolute main folder")
 	}
 	if sessions {
+		if repository == "" {
+			return errors.New("mirror.start of session folders needs their repository's main folder as path")
+		}
 		for _, folder := range append([]string{unit.Main}, unit.Worktrees...) {
 			if err := os.MkdirAll(folder, 0o700); err != nil {
 				return err
@@ -60,7 +67,10 @@ func (s *server) startMirror(unit *mirror.Unit, sessions bool) error {
 		current.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s.mirrors[unit.Main] = &mirroredUnit{unit: *unit, source: mirror.NewSource(*unit, mirror.Options{AutoBarrier: sessions}), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	s.mirrors[unit.Main] = &mirroredUnit{
+		unit: *unit, repository: repository, source: mirror.NewSource(*unit, mirror.Options{AutoBarrier: sessions}),
+		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+	}
 	return nil
 }
 
@@ -142,35 +152,51 @@ func (s *server) runMirror(connection net.Conn) {
 	}
 }
 
-// unitOf returns the Source of the unit that holds a session's folder.
-func (s *server) unitOf(session string) *mirror.Source {
+// sources returns the Sources that a session needs: that of the unit that holds the session's folder, and that of the
+// unit's sessions' folders, which holds the session's file.
+func (s *server) sources(session string) (repository, sessions *mirror.Source) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current := s.sessions[session]
 	if current == nil {
-		return nil
+		return nil, nil
 	}
 	for _, unit := range s.mirrors {
-		if unit.source.Contains(current.cwd) {
-			return unit.source
+		if unit.repository == "" && unit.source.Contains(current.cwd) {
+			repository = unit.source
+			for _, other := range s.mirrors {
+				if other.repository == unit.unit.Main {
+					sessions = other.source
+				}
+			}
 		}
 	}
-	return nil
+	return repository, sessions
 }
 
-// Barrier and Healthy answer the worker extension from the Source of the unit that holds the session's folder.
+// Barrier and Healthy answer the worker extension from both Sources of a session, so main has both the repository
+// and the session's file as they were.
 func (s *server) Barrier(ctx context.Context, session string) error {
-	source := s.unitOf(session)
-	if source == nil {
-		return errors.New("nothing mirrors this session to main")
+	repository, sessions := s.sources(session)
+	switch {
+	case repository == nil:
+		return errors.New("nothing mirrors this session's folder to main")
+	case sessions == nil:
+		return errors.New("nothing mirrors this session's file to main")
 	}
-	_, _, err := source.Barrier(ctx)
-	return err
+	// Each barrier waits for main, so they wait together.
+	sessionsDone := make(chan error, 1)
+	go func() {
+		_, _, err := sessions.Barrier(ctx)
+		sessionsDone <- err
+	}()
+	_, _, err := repository.Barrier(ctx)
+	return errors.Join(err, <-sessionsDone)
 }
 
 func (s *server) Healthy(session string) bool {
-	source := s.unitOf(session)
-	return source != nil && source.Healthy()
+	repository, sessions := s.sources(session)
+	return repository != nil && sessions != nil && repository.Healthy() && sessions.Healthy()
 }
 
 // readHello reads the first line of a stream to the helper, which names the helper's instance.
