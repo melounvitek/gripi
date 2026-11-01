@@ -710,6 +710,20 @@ func TestReturnContinuesOnMainWhenTheWorkerCannotBeReached(t *testing.T) {
 	}
 }
 
+// killHelper ends the helper that runs as the systemd unit of a name, and everything that it runs, as when the worker
+// reboots.
+func killHelper(t *testing.T, unit string) {
+	t.Helper()
+	if output, err := exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", unit+".service").CombinedOutput(); err != nil {
+		t.Fatalf("kill the helper: %v %s", err, output)
+	}
+	for deadline := time.Now().Add(5 * time.Second); exec.Command("systemctl", "--user", "is-active", "--quiet", unit+".service").Run() == nil; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the helper still runs")
+		}
+	}
+}
+
 func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	requireSystemd(t)
 	rig := newBootstrapRig(t)
@@ -737,18 +751,6 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	// The worker's helper and everything that it runs end, as when the worker reboots.
-	killHelper := func() {
-		t.Helper()
-		if output, err := exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", unit+".service").CombinedOutput(); err != nil {
-			t.Fatalf("kill the helper: %v %s", err, output)
-		}
-		for deadline := time.Now().Add(5 * time.Second); exec.Command("systemctl", "--user", "is-active", "--quiet", unit+".service").Run() == nil; time.Sleep(20 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				t.Fatal("the helper still runs")
-			}
-		}
-	}
 
 	lost := make(chan string, 2)
 	command, release, err := manager.Launch(agent.Process{Key: key, Command: []string{"pi", "--mode", "rpc", "--session", key}, Lost: func(message string) { lost <- message }})
@@ -762,7 +764,7 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	if args, _ := bufio.NewReader(stdout).ReadString('\n'); !strings.HasPrefix(args, "args=") {
 		t.Fatalf("Pi on the worker said %q", args)
 	}
-	killHelper()
+	killHelper(t, unit)
 	select {
 	case message := <-lost:
 		if !strings.Contains(message, "worker beelink") || !strings.Contains(message, "outcome of the running step is unknown") {
@@ -802,7 +804,7 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	}
 
 	// Once the worker is gone, the repository continues here, and the next move there keeps what the worker had aside.
-	killHelper()
+	killHelper(t, unit)
 	for deadline := time.Now().Add(5 * time.Second); manager.Status("beelink").State != Unreachable; time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("status of the lost worker = %+v", manager.Status("beelink"))
@@ -835,8 +837,72 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 			t.Fatalf("copies of %s that save aside what they replace: %q", copied, calls)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(manager.mirrorFolder(project), "stale")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the worker's copy is still stale: %v", err)
+}
+
+// Each worker that main lost keeps what main never got until the next move there saves it aside, also after the
+// repository was on another worker that main lost.
+func TestEveryLostWorkerKeepsAsideWhatMainNeverGotOnTheNextMoveThere(t *testing.T) {
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	var ahead atomic.Int64 // how far the manager's clock is ahead
+	options.Clock = func() time.Time { return time.Now().Add(time.Duration(ahead.Load())) }
+	manager := newTestManager(t, options)
+	// Both workers are this machine, one at a time.
+	manager.options.Destination = func(string) (string, error) { return "gripi@worker", nil }
+	project := t.TempDir()
+	ctx := context.Background()
+	stop := func(func(string) bool) error { return nil }
+	// lose ends the worker of a name, and the repository continues on main once the worker is gone.
+	lose := func(name string) {
+		t.Helper()
+		killHelper(t, options.Connection.Unit)
+		for deadline := time.Now().Add(5 * time.Second); manager.Status(name).State == Connected; time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("worker %s is still connected", name)
+			}
+		}
+		ahead.Add(int64(helper.DefaultLease + GoneMargin))
+		if err := manager.Return(ctx, project, stop); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// movingSavesAside moves the repository to the worker of a name, and reports whether the copies there saved aside
+	// what they replaced.
+	movingSavesAside := func(name string) bool {
+		t.Helper()
+		before := len(sshCalls(t, "'receive' '--aside'"))
+		if err := manager.Move(ctx, project, name, stop); err != nil {
+			t.Fatal(err)
+		}
+		return len(sshCalls(t, "'receive' '--aside'")) > before
+	}
+	// returnToMain brings the repository back, then ends the worker, so that the other can run on this machine.
+	returnToMain := func() {
+		t.Helper()
+		if err := manager.Return(ctx, project, stop); err != nil {
+			t.Fatal(err)
+		}
+		killHelper(t, options.Connection.Unit)
+	}
+
+	if movingSavesAside("beelink") {
+		t.Fatal("the first move to beelink saved aside")
+	}
+	lose("beelink")
+	if movingSavesAside("nuc") {
+		t.Fatal("the first move to nuc saved aside")
+	}
+	lose("nuc")
+	if !movingSavesAside("beelink") {
+		t.Fatal("the move back to beelink replaced what main never got from it")
+	}
+	returnToMain()
+	if !movingSavesAside("nuc") {
+		t.Fatal("the move back to nuc replaced what main never got from it")
+	}
+	returnToMain()
+	if movingSavesAside("beelink") {
+		t.Fatal("the move to beelink saved aside again, after main had brought its copies up to date")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/state"
 	"github.com/melounvitek/gripi/internal/worker/auth"
 	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
@@ -1048,11 +1050,11 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 	if err != nil {
 		return err
 	}
-	// The worker's copies of a repository that continued on main without the worker, and of its sessions, may have
-	// changes that main never got.
-	stale := filepath.Join(manager.mirrorFolder(unit.Main), "stale")
-	name, _ := os.ReadFile(stale)
-	isStale := string(name) == worker.name
+	copies, err := manager.workerCopies(unit.Main)
+	if err != nil {
+		return err
+	}
+	isStale := copies[worker.name].Stale
 	now := time.Now().UTC().Format("20060102T150405Z")
 	copyFolders := func(folders mirror.Unit) error {
 		aside := ""
@@ -1079,7 +1081,7 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 		}
 	}
 	if isStale {
-		if err := os.Remove(stale); err != nil {
+		if err := manager.updateWorkerCopy(unit.Main, worker.name, func(kept *workerCopy) { kept.Stale = false }); err != nil {
 			return err
 		}
 	}
@@ -1187,7 +1189,7 @@ func (manager *Manager) continueOnMain(ctx context.Context, placement Placement,
 			return err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(manager.mirrorFolder(unit.Main), "stale"), []byte(placement.Worker), 0600); err != nil {
+	if err := manager.updateWorkerCopy(unit.Main, placement.Worker, func(kept *workerCopy) { kept.Stale = true }); err != nil {
 		return err
 	}
 	if err := manager.options.Placements.Remove(unit.Main); err != nil {
@@ -1200,6 +1202,39 @@ func (manager *Manager) continueOnMain(ctx context.Context, placement Placement,
 	}
 	log.Printf("%s continues on this machine without worker %s, as of the last changes that this machine got", unit.Main, placement.Worker)
 	return nil
+}
+
+// workerCopy is what a worker keeps of a repository that was on it.
+type workerCopy struct {
+	// Stale is set when the repository continued on main without the worker, whose copies of the repository and of its
+	// sessions may have changes that main never got.
+	Stale bool `json:"stale,omitempty"`
+}
+
+// workerCopies returns what workers keep of the repository whose main folder is main, by the workers' names.
+func (manager *Manager) workerCopies(main string) (map[string]workerCopy, error) {
+	copies := map[string]workerCopy{}
+	contents, found, err := state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Read()
+	if err == nil && found {
+		err = json.Unmarshal(contents, &copies)
+	}
+	return copies, err
+}
+
+// updateWorkerCopy changes what the worker of a name keeps of the repository whose main folder is main.
+func (manager *Manager) updateWorkerCopy(main, name string, update func(kept *workerCopy)) error {
+	copies, err := manager.workerCopies(main)
+	if err != nil {
+		return err
+	}
+	kept := copies[name]
+	update(&kept)
+	copies[name] = kept
+	contents, err := json.Marshal(copies)
+	if err != nil {
+		return err
+	}
+	return state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Write(contents)
 }
 
 // goneAt is when the worker of a name must have stopped the sessions of every connection that main lost, including
