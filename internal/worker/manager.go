@@ -91,6 +91,9 @@ type ManagerOptions struct {
 	SocketPath string
 	// Store finds the folders of saved sessions.
 	Store agent.Store
+	// Rewritten tells the guard of the sessions' files that main's copy of a session's file on a worker was written
+	// anew, as the worker's Pi rewrote it (agent.Guard's Rewritten).
+	Rewritten func(key string)
 	// ServeSocket serves the gripi commands of a worker, which reach what placement says is on the worker, on a
 	// socket of its own.
 	ServeSocket func(name string, placement WorkerPlacement) (socket string, stop func() error, err error)
@@ -595,10 +598,22 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 }
 
 // applied takes what main's copy of a placed unit, or with sessions of the unit's sessions' folders, applied: files
-// that changed on main make a notice, and the unit's folders, which Git on the worker may have changed, are its
-// placement's from then on.
+// that changed on main make a notice, the unit's folders, which Git on the worker may have changed, are its
+// placement's from then on, and the guard takes the sessions' files that the copy wrote anew for the gateway's own.
 func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirror.Checkpoint, string, []string, []string) {
-	return func(checkpoint mirror.Checkpoint, aside string, saved, _ []string) {
+	return func(checkpoint mirror.Checkpoint, aside string, saved, replaced []string) {
+		if sessions && manager.options.Rewritten != nil {
+			// A file that changed on main, such as in Pi CLI, is another writer's.
+			rewritten := slices.DeleteFunc(slices.Clone(replaced), func(path string) bool { return slices.Contains(saved, path) })
+			if len(rewritten) > 0 {
+				// The guard waits for the session, which an operation may hold while it waits for this barrier.
+				go func() {
+					for _, path := range rewritten {
+						manager.options.Rewritten(path)
+					}
+				}()
+			}
+		}
 		placement, placed := manager.options.Placements.Find(repository.Main)
 		placed = placed && placement.Unit.Main == repository.Main
 		if placed && !sessions {

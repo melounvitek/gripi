@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
@@ -39,6 +40,7 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, 
 		Placements: placements, StateDir: stateDir(cfg), ConfigDir: filepath.Dir(cfg.EnvPath),
 		Pi:              remote.Pi{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, ExtensionDir: filepath.Dir(tree)},
 		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, SocketPath: cfg.SocketPath, Store: piAdapter.Store(),
+		Rewritten: handler.(interface{ Guard() agent.Guard }).Guard().Rewritten,
 		ServeSocket: func(name string, placement remote.WorkerPlacement) (string, func() error, error) {
 			return startWorkerSocket(cfg, handler, name, placement)
 		},

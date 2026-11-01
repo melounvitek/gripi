@@ -336,13 +336,14 @@ func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, Placements: placements})
+	rewritten := make(chan string, 4)
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, Placements: placements, Rewritten: func(key string) { rewritten <- key }})
 	unit := mirror.Unit{Main: "/work/project", Worktrees: []string{"/work/project-old"}, GitDir: "/work/project/.git"}
 	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: unit}); err != nil {
 		t.Fatal(err)
 	}
 	// The worker's mirror sends the folders of the unit, which Git there may have changed.
-	manager.applied(unit, false)(mirror.Checkpoint{Roots: []string{"/work/project", "/work/project-new"}}, "/state/aside/main/3", []string{"/work/project/README"}, nil)
+	manager.applied(unit, false)(mirror.Checkpoint{Roots: []string{"/work/project", "/work/project-new"}}, "/state/aside/main/3", []string{"/work/project/README"}, []string{"/work/project/new.jsonl"})
 	beelink := manager.Placement("beelink")
 	if !beelink.Folder("/work/project-new/src") || beelink.Folder("/work/project-old") {
 		t.Fatalf("placement after a worktree was added and one removed: %+v", manager.options.Placements.All())
@@ -351,10 +352,20 @@ func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
 	if err != nil || !slices.Equal(reloaded.All()[0].Unit.Worktrees, []string{"/work/project-new"}) {
 		t.Fatalf("saved placements: %+v, %v", reloaded.All(), err)
 	}
-	// The mirror of the sessions' folders has folders of its own.
-	manager.applied(unit, true)(mirror.Checkpoint{Roots: []string{"/sessions/--work-project--"}}, "/state/aside/main/4", []string{"/sessions/--work-project--/s.jsonl"}, nil)
+	// The mirror of the sessions' folders has folders of its own. The guard of the sessions' files takes those that
+	// it wrote anew for the gateway's own, unless they changed on main, such as in Pi CLI.
+	manager.applied(unit, true)(mirror.Checkpoint{Roots: []string{"/sessions/--work-project--"}}, "/state/aside/main/4", []string{"/sessions/--work-project--/s.jsonl"},
+		[]string{"/sessions/--work-project--/s.jsonl", "/sessions/--work-project--/rewritten.jsonl"})
 	if beelink.Folder("/work/project-new") != true {
 		t.Fatal("the sessions' folders changed the placement")
+	}
+	if key := <-rewritten; key != "/sessions/--work-project--/rewritten.jsonl" {
+		t.Fatalf("rewritten %s", key)
+	}
+	select {
+	case key := <-rewritten:
+		t.Fatalf("also rewritten %s", key)
+	case <-time.After(50 * time.Millisecond):
 	}
 
 	notices := manager.Notices("/work/project-new")

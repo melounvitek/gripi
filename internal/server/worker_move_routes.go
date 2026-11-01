@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 // Workers moves repositories, with all their worktrees and sessions, between this machine and workers, and says where
@@ -45,6 +47,12 @@ func refused(err error) bool {
 // SetWorkers lets gripi commands and the browser move repositories to workers and back. Call it before serving.
 func (handler *Handler) SetWorkers(workers Workers) {
 	handler.app.workers = workers
+}
+
+// Guard returns the guard of the sessions, which the gateway's own writes to them from elsewhere, such as of the
+// copies of sessions on workers, must tell.
+func (handler *Handler) Guard() agent.Guard {
+	return handler.app.guard
 }
 
 // errSessionWorking refuses a move while a session of the repository works, which would lose the step it is on.

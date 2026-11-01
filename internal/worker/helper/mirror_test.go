@@ -192,16 +192,30 @@ func TestASessionsMirrorMakesItsFoldersAndSendsChangesUnasked(t *testing.T) {
 	mainCopy := filepath.Join(root, "main")
 	_, served := attachMain(t, unit, project, filepath.Join(root, "worker"), mainCopy)
 
-	os.WriteFile(filepath.Join(feature, "session.jsonl"), []byte("{\"type\":\"session\"}\n"), 0600)
+	// Pi is still writing the second line.
+	session := filepath.Join(feature, "session.jsonl")
+	os.WriteFile(session, []byte("{\"type\":\"session\"}\n{\"type\":\"mess"), 0600)
 	copied := filepath.Join(mainCopy, "sessions", "--project-feature--", "session.jsonl")
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if contents, _ := os.ReadFile(copied); string(contents) == "{\"type\":\"session\"}\n" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("main never got the new session")
+	waitFor := func(want string) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			contents, _ := os.ReadFile(copied)
+			if string(contents) == want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("main's copy of the session = %q, want %q", contents, want)
+			}
 		}
 	}
+	waitFor("{\"type\":\"session\"}\n")
+	file, err := os.OpenFile(session, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.WriteString("age\"}\n")
+	file.Close()
+	waitFor("{\"type\":\"session\"}\n{\"type\":\"message\"}\n")
 	if response := unit.request(map[string]any{"type": "mirror.stop", "path": project}); !response.OK {
 		t.Fatalf("mirror.stop = %+v", response)
 	}

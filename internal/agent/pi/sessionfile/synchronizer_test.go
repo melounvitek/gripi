@@ -246,6 +246,53 @@ func TestSynchronizerRejectsReplacementWithMatchingSizeAndMtime(t *testing.T) {
 	}
 }
 
+// Main's copy of a session on a worker follows the worker's file, which a mirror writes anew when Pi there rewrote it.
+func TestSynchronizerTakesTheGatewaysOwnRewriteForItsOwn(t *testing.T) {
+	path := synchronizerSession(t)
+	synchronizer := NewSynchronizer(agent.NewRegistry(nil, nil))
+	_ = inspectSync(t, synchronizer, path, false)
+	rewrite := func(id string) {
+		t.Helper()
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+".new", contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+		appendSyncEntry(t, path+".new", map[string]any{"type": "message", "id": id, "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
+		if err := os.Rename(path+".new", path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rewrite("rewritten")
+	synchronizer.Rewritten(path)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncAvailable {
+		t.Fatalf("after the gateway's rewrite: %#v", result)
+	}
+	// A look at the file before the guard heard of the rewrite took it for another program's.
+	rewrite("again")
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncConflict {
+		t.Fatalf("before the guard heard of the rewrite: %#v", result)
+	}
+	synchronizer.Rewritten(path)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncAvailable {
+		t.Fatalf("once the guard heard of the rewrite: %#v", result)
+	}
+
+	// Pi CLI is still another program, also when the gateway rewrites the file afterwards.
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "pi-cli", "parentId": "again", "message": map[string]any{"role": "user", "content": []any{}}})
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncExternalFollow {
+		t.Fatalf("after Pi CLI wrote the session: %#v", result)
+	}
+	rewrite("after-pi-cli")
+	synchronizer.Rewritten(path)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncExternalFollow {
+		t.Fatalf("after Pi CLI and a rewrite: %#v", result)
+	}
+}
+
 func TestSynchronizerRejectsSameSizeInPlaceRewrite(t *testing.T) {
 	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})

@@ -20,6 +20,9 @@ type Guard interface {
 	KnownBlocked(key string) *SyncResult
 	// Forget drops what the guard knows about a session.
 	Forget(key string)
+	// Rewritten tells the guard that the gateway itself replaced a saved session, such as main's copy of a session
+	// that runs on a worker, so that the change is not taken for another writer's.
+	Rewritten(key string)
 	// TakeOver lets the gateway write a blocked session again. beforeManaged runs just before it may.
 	TakeOver(ctx context.Context, key string, beforeManaged func() error) (SyncResult, error)
 	// Message explains a blocked result to the user.
@@ -115,6 +118,8 @@ func (guard *openGuard) ReconcileIfAvailable(_ context.Context, key string, _ bo
 func (guard *openGuard) KnownBlocked(string) *SyncResult { return nil }
 
 func (guard *openGuard) Forget(string) {}
+
+func (guard *openGuard) Rewritten(string) {}
 
 func (guard *openGuard) TakeOver(_ context.Context, key string, beforeManaged func() error) (SyncResult, error) {
 	unlock := guard.locks.Lock(key)

@@ -37,8 +37,8 @@ type mirroredUnit struct {
 
 // startMirror prepares a unit's Source, which runs once `gripi worker mirror` connects main's Destination to it. A
 // unit of Pi's session folders, whose sessions are those of the repository whose main folder is repository, sends its
-// changes without waiting for barriers, and gets the folders that don't exist yet, because their sessions are mirrored
-// only from folders that exist.
+// changes without waiting for barriers and only the complete lines of the sessions' files, and gets the folders that
+// don't exist yet, because their sessions are mirrored only from folders that exist.
 func (s *server) startMirror(unit *mirror.Unit, sessions bool, repository string) error {
 	if unit == nil || !filepath.IsAbs(unit.Main) {
 		return errors.New("mirror.start needs a unit with an absolute main folder")
@@ -68,7 +68,7 @@ func (s *server) startMirror(unit *mirror.Unit, sessions bool, repository string
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mirrors[unit.Main] = &mirroredUnit{
-		unit: *unit, repository: repository, source: mirror.NewSource(*unit, mirror.Options{AutoBarrier: sessions}),
+		unit: *unit, repository: repository, source: mirror.NewSource(*unit, mirror.Options{AutoBarrier: sessions, CompleteLines: sessions}),
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
 	}
 	return nil
