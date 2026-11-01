@@ -757,6 +757,54 @@ func TestARepositoryOnAWorkerKeepsItsSessionFoldersUntilItReturns(t *testing.T) 
 	}
 }
 
+// A worktree that the worker makes, and its session folder, are the repository's as soon as main's copy of the
+// repository accepts the worktree, before a barrier applies it, until the repository continues on main.
+func TestAWorktreeThatMainsCopyAcceptsIsTheRepositorysAtOnce(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	base := t.TempDir()
+	project, worktree := filepath.Join(base, "project"), filepath.Join(base, "x-y")
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: t.TempDir(), SessionsRoot: t.TempDir(), Clock: func() time.Time { return now }})
+	manager.options.Destination = func(string) (string, error) { return "gripi@worker", nil }
+	unit := mirror.Unit{Main: project}
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: unit}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.allowRoot(unit, false)(worktree); err != nil {
+		t.Fatal(err)
+	}
+	stopped := errors.New("stopped")
+	// moves moves the worktree's folder, and a folder whose sessions Pi keeps in the worktree's session folder, to
+	// another worker, and returns the errors.
+	moves := func() []error {
+		var errs []error
+		for _, folder := range []string{worktree, filepath.Join(base, "x", "y")} {
+			if err := os.MkdirAll(folder, 0700); err != nil {
+				t.Fatal(err)
+			}
+			errs = append(errs, manager.Move(context.Background(), folder, "nuc", func(func(string) bool) error { return stopped }))
+		}
+		return errs
+	}
+
+	for _, err := range moves() {
+		if !refused(err) || !strings.Contains(err.Error(), project) {
+			t.Errorf("Move before a barrier applied the worktree = %v", err)
+		}
+	}
+
+	// The repository continues on main once its worker is gone.
+	loseWorker(manager, "beelink", now)
+	now = now.Add(helper.DefaultLease + GoneMargin)
+	if err := manager.Return(context.Background(), project, func(func(string) bool) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range moves() {
+		if err != stopped {
+			t.Errorf("Move once the repository is back = %v", err)
+		}
+	}
+}
+
 func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
 	manager := newTestManager(t, ManagerOptions{
 		Store: fakeStore{}, Pi: Pi{AgentDir: "/home/me/.pi/agent"}, StateDir: "/home/me/.pi/gripi", GatewayPaths: []string{"/home/me/.config/gripi"},

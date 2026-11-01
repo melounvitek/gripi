@@ -132,11 +132,15 @@ type Manager struct {
 	launches    []string            // folders of sessions whose Pi is starting
 	launched    *sync.Cond          // signalled when a launch ends
 	notices     []Notice
+	// accepted has the folders that main's copies of placed units accepted from their workers, which a barrier applies
+	// later, by the main folder of the copy's mirror (see covered).
+	accepted map[string][]string
 
 	// closing has the sessions whose Pi the helper is closing, by their ID on the worker, which their next Pi waits for.
 	closing map[string]chan struct{}
 
 	copiesMu sync.Mutex // held while changing a repository's record of what workers keep of it
+	claiming sync.Mutex // held while claiming folders, so that two claims never take the same folder
 }
 
 // Notice says that files of a repository on a worker, or of its sessions, changed on this machine, which keeps a
@@ -206,7 +210,7 @@ func NewManager(options ManagerOptions) *Manager {
 	manager := &Manager{
 		options: options, ctx: ctx, cancel: cancel, started: options.Clock(), workers: map[string]*remote{}, sessions: map[string]launched{},
 		logins:  newLogins(auth.Pi{Command: options.Pi.Command, AgentDir: options.Pi.AgentDir}, options.Clock),
-		closing: map[string]chan struct{}{},
+		closing: map[string]chan struct{}{}, accepted: map[string][]string{},
 	}
 	manager.launched = sync.NewCond(&manager.mu)
 	go manager.logins.run(ctx, loginsPoll)
@@ -377,7 +381,7 @@ func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mir
 		}
 		// A folder of another repository, or with sessions of another folder, is refused before the running mirror stops
 		// for it.
-		if err := manager.claim(unit.Main, nil, folders); err != nil {
+		if err := manager.claim(unit.Main, nil, folders, false); err != nil {
 			return err
 		}
 		if err := manager.foreignSessions(unit, added); err != nil {
@@ -573,6 +577,15 @@ func (manager *Manager) mirrorFolder(main string) string {
 	return filepath.Join(manager.options.StateDir, "mirrors", hex.EncodeToString(hash[:8]))
 }
 
+// forgetMirror removes main's side of the mirror of the unit whose main folder is main, with the folders that main's
+// copy accepted, which are no longer the unit's.
+func (manager *Manager) forgetMirror(main string) error {
+	manager.mu.Lock()
+	delete(manager.accepted, main)
+	manager.mu.Unlock()
+	return os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state"))
+}
+
 // sessionsMain names the mirror of a unit's sessions' folders: by the folder of the sessions in the unit's main folder,
 // which comes first.
 func (manager *Manager) sessionsMain(unit mirror.Unit) string {
@@ -607,7 +620,7 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 				unit.Worktrees = append(unit.Worktrees, root)
 			}
 		}
-		if err := manager.claim(repository.Main, nil, unitFolders(unit)); err != nil {
+		if err := manager.claim(repository.Main, nil, unitFolders(unit), false); err != nil {
 			return err
 		}
 		if err := manager.foreignSessions(repository, added); err != nil {
@@ -735,22 +748,21 @@ func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root str
 		if slices.Contains(folders, root) {
 			return nil
 		}
-		if err := manager.claim(unit.Main, []string{root}, []string{sessionFolder(manager.options.SessionsRoot, root)}); err != nil {
-			return err
-		}
-		info, err := os.Lstat(root)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if entries, err := os.ReadDir(root); err != nil || len(entries) == 0 {
-				return err
+		if info, err := os.Lstat(root); err == nil {
+			var entries []os.DirEntry
+			if info.IsDir() {
+				if entries, err = os.ReadDir(root); err != nil {
+					return err
+				}
 			}
+			if !info.IsDir() || len(entries) > 0 {
+				return errors.New("this machine has files there that are not the repository's")
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
-		return errors.New("this machine has files there that are not the repository's")
+		// The unit owns the worktree from now on, though a barrier applies it later.
+		return manager.claim(unit.Main, []string{root}, []string{sessionFolder(manager.options.SessionsRoot, root)}, true)
 	}
 }
 
@@ -803,8 +815,11 @@ func shared(folders, others []string) (string, bool) {
 // worker, owns one of them: no root of one may be or be in a root of the other, and they never share a session folder,
 // which Pi names alike for paths such as /work/a-b and /work/a/b. A repository owns its roots and the session folders
 // of its folders and sessions, and until it returns to main, every folder that its mirrors cover or take back from
-// main's copies when they start again.
-func (manager *Manager) claim(main string, roots, sessionFolders []string) error {
+// main's copies when they start again. With keep, the repository owns the folders that it claimed from then on, as
+// main's copy does a worktree that it accepted before a barrier applies it.
+func (manager *Manager) claim(main string, roots, sessionFolders []string, keep bool) error {
+	manager.claiming.Lock()
+	defer manager.claiming.Unlock()
 	type owner struct {
 		unit          mirror.Unit
 		worker, where string
@@ -841,6 +856,13 @@ func (manager *Manager) claim(main string, roots, sessionFolders []string) error
 			}
 		}
 	}
+	if keep {
+		sessions := manager.sessionsMain(mirror.Unit{Main: main})
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		manager.accepted[main] = append(manager.accepted[main], roots...)
+		manager.accepted[sessions] = append(manager.accepted[sessions], sessionFolders...)
+	}
 	return nil
 }
 
@@ -860,8 +882,9 @@ func (manager *Manager) foreignSessions(unit mirror.Unit, folders []string) erro
 	return nil
 }
 
-// covered returns the folders of the unit whose main folder is main that its mirror covers on a worker, and those of
-// main's copy, which the mirror takes back when it starts again.
+// covered returns the folders of the unit whose main folder is main that its mirror covers on a worker, those of
+// main's copy, which the mirror takes back when it starts again, and those that main's copy accepted, which a barrier
+// applies later.
 func (manager *Manager) covered(main string) ([]string, error) {
 	checkpoint, err := mirror.ReadCheckpoint(filepath.Join(manager.mirrorFolder(main), "state"))
 	if err != nil {
@@ -870,6 +893,7 @@ func (manager *Manager) covered(main string) ([]string, error) {
 	folders := checkpoint.Roots
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	folders = append(folders, manager.accepted[main]...)
 	for _, worker := range manager.workers {
 		if live := worker.mirrors[main]; live != nil {
 			folders = append(folders, unitFolders(live.unit)...)
@@ -972,7 +996,7 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	if !placed {
 		// The mirror of a repository on a worker would replace what Pi here writes in one of the repository's session
 		// folders, which Pi names alike for paths such as /work/a-b and /work/a/b.
-		return nil, nil, manager.claim(cwd, nil, []string{sessionFolder(manager.options.SessionsRoot, cwd)})
+		return nil, nil, manager.claim(cwd, nil, []string{sessionFolder(manager.options.SessionsRoot, cwd)}, false)
 	}
 	ctx, cancel := context.WithTimeout(manager.ctx, connectTimeout)
 	defer cancel()
@@ -1132,7 +1156,7 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 	defer done()
 	// Once the unit is moving, a move of another unit with a shared folder is refused too.
 	sessionFolders, _ := manager.sessionFolders(unit, name)
-	if err := manager.claim(unit.Main, unitFolders(unit), sessionFolders); err != nil {
+	if err := manager.claim(unit.Main, unitFolders(unit), sessionFolders, false); err != nil {
 		return err
 	}
 	if err := manager.foreignSessions(unit, sessionFolders); err != nil {
@@ -1247,15 +1271,13 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 	}); err != nil {
 		return err
 	}
-	for _, sessions := range []bool{false, true} {
-		main := unit.Main
-		if sessions {
-			main = manager.sessionsMain(unit)
-		}
+	for _, main := range []string{unit.Main, manager.sessionsMain(unit)} {
 		// Main's own changes before the move are not changes to a read-only copy.
-		if err := os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
+		if err := manager.forgetMirror(main); err != nil {
 			return err
 		}
+	}
+	for _, sessions := range []bool{false, true} {
 		if err := manager.startMirror(ctx, worker, unit, sessions); err != nil {
 			return err
 		}
@@ -1323,7 +1345,7 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 		return err
 	}
 	for _, main := range mains {
-		if err := os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
+		if err := manager.forgetMirror(main); err != nil {
 			return err
 		}
 	}
@@ -1358,7 +1380,7 @@ func (manager *Manager) continueOnMain(ctx context.Context, placement Placement,
 		return err
 	}
 	for _, main := range mains {
-		if err := os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
+		if err := manager.forgetMirror(main); err != nil {
 			return err
 		}
 	}
