@@ -98,7 +98,7 @@ func (conn *Conn) start(ctx context.Context, version string) error {
 	// In the view, the helper is not the unit's main process, so NotifyAccess=all lets it feed systemd's watchdog.
 	serve := []string{"systemd-run", "--user", "--pipe", "--quiet", "--collect", "--unit", conn.options.Unit,
 		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL", "-p", "NotifyAccess=all",
-		conn.installDir + "/bin/gripi", "worker", "serve", "--lease", conn.options.Lease.String()}
+		conn.installDir + "/bin/gripi", "worker", "serve", "--lease", conn.options.Lease.String(), "--data-dir", conn.installDir}
 	if conn.options.RuntimeDir != "" {
 		serve = append(serve, "--runtime-dir", conn.options.RuntimeDir)
 	}
@@ -145,6 +145,16 @@ func (conn *Conn) Attach(ctx context.Context, session string) (command *exec.Cmd
 // prepared, for a mirror.Destination. Call release once it has ended.
 func (conn *Conn) AttachMirror(ctx context.Context, main string) (command *exec.Cmd, release func(), err error) {
 	return conn.stream(ctx, "mirror", main)
+}
+
+// AttachMoveMirror returns ssh that connects main's copy to one of a move's mirrors, which StartMoveMirror prepared:
+// with file, the session's file's, for a mirror.Destination whose File it is, and otherwise the move's copy's, for one
+// that keeps the worker's paths in main's shadow of them. Call release once it has ended.
+func (conn *Conn) AttachMoveMirror(ctx context.Context, id, file string) (command *exec.Cmd, release func(), err error) {
+	if file != "" {
+		return conn.stream(ctx, "mirror", "--move", id, "--file", file)
+	}
+	return conn.stream(ctx, "mirror", "--move", id)
 }
 
 // stream returns ssh that runs `gripi worker <subcommand> <arguments> <instance>` on the worker, which connects the

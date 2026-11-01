@@ -145,14 +145,30 @@ func (conn *Conn) CopyUnit(ctx context.Context, unit mirror.Unit, aside string) 
 	return conn.send(ctx, unit, unit.Main, aside, mirror.Options{})
 }
 
-// send copies main's unit to the folder to on the worker, where the helper makes the copy, so that the copy sees the
-// files as the helper's mirrors and sessions do, also in the view of main's home folder.
+// UploadMove fills a move's copy, which PrepareMove made, with folder, main's shadow of its home folder, as it is.
+func (conn *Conn) UploadMove(ctx context.Context, id, folder string) error {
+	return conn.upload(ctx, []string{"--move", id, folder}, mirror.Unit{Main: folder}, mirror.Options{})
+}
+
+// UploadSessionFile copies main's file of a session, which needn't exist, to the same path on the worker, where it
+// leaves the other files in its folder as they are.
+func (conn *Conn) UploadSessionFile(ctx context.Context, file string) error {
+	return conn.upload(ctx, []string{"--file", file}, mirror.Unit{Main: filepath.Dir(file), File: file}, mirror.Options{})
+}
+
+// send copies main's unit to the folder to on the worker.
 func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to, aside string, options mirror.Options) error {
 	var arguments []string
 	if aside != "" {
 		arguments = []string{"--aside", aside}
 	}
-	command, release, err := conn.stream(ctx, "receive", append(arguments, unit.Main, to)...)
+	return conn.upload(ctx, append(arguments, unit.Main, to), unit, options)
+}
+
+// upload copies main's unit to the worker with `gripi worker receive <arguments>`, where the helper makes the copy, so
+// that the copy sees the files as the helper's mirrors and sessions do, also in the view of main's home folder.
+func (conn *Conn) upload(ctx context.Context, arguments []string, unit mirror.Unit, options mirror.Options) error {
+	command, release, err := conn.stream(ctx, "receive", arguments...)
 	if err != nil {
 		return err
 	}

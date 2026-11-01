@@ -24,8 +24,9 @@ import (
 
 // These tests connect with the real ssh to GRIPI_TEST_SSH, such as localhost, and install the helper in
 // GRIPI_TEST_SSH_DIR there (gripi-helper-test in the home folder when unset), which they remove afterwards. The
-// worker needs a systemd user manager, and no other helper may run there. When the worker user's home folder differs
-// from this one's, the helper runs in the private view of this one.
+// worker needs a systemd user manager. The helper has a runtime folder of its own in /tmp, so a gateway's helper may
+// run there too. When the worker user's home folder differs from this one's, the helper runs in the private view of
+// this one.
 
 type realWorker struct {
 	t           *testing.T
@@ -61,8 +62,11 @@ func connectRealWorker(t *testing.T, lease time.Duration) *realWorker {
 	worker := &realWorker{t: t, destination: destination, ssh: ssh, options: Options{
 		Destination: destination, SocketDir: socketDir, Executable: gripi, Lease: lease, Home: home,
 		InstallDir: cmp.Or(os.Getenv("GRIPI_TEST_SSH_DIR"), "gripi-helper-test"), Unit: "gripi-test-" + hex.EncodeToString(unit),
+		RuntimeDir: "/tmp/gripi-test-" + hex.EncodeToString(unit),
 	}}
-	t.Cleanup(func() { worker.direct("rm -rf " + ShellQuote(worker.options.InstallDir)) })
+	t.Cleanup(func() {
+		worker.direct("rm -rf " + ShellQuote(worker.options.InstallDir) + " " + ShellQuote(worker.options.RuntimeDir))
+	})
 	start := time.Now()
 	if worker.conn, err = Connect(context.Background(), worker.options); err != nil {
 		t.Fatal(err)
