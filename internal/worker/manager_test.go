@@ -551,6 +551,33 @@ func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
 	}
 }
 
+// The sessions that started in a folder of a repository are another's once a worktree of another repository on a
+// worker is there, and the worker's copies of them are another's while that repository is on the worker or on its way
+// there.
+func TestTheSessionFoldersOfAWorktreeOfAnotherRepositoryOnAWorkerAreItsOwn(t *testing.T) {
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: t.TempDir(), SessionsRoot: "/sessions"})
+	project := mirror.Unit{Main: "/work/project"}
+	if err := manager.options.Placements.Add(Placement{Worker: "nuc", Unit: mirror.Unit{Main: "/work/other", Worktrees: []string{"/work/project/other"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.rememberSessions(project.Main, "beelink", []string{"/work/project/src", "/work/project/other/src"}); err != nil {
+		t.Fatal(err)
+	}
+	if folders, _ := manager.sessionFolders(project, "beelink"); !slices.Equal(folders, []string{"/sessions/--work-project--", "/sessions/--work-project-src--"}) {
+		t.Fatalf("session folders = %q", folders)
+	}
+
+	manager.copying = append(manager.copying, copying{unit: mirror.Unit{Main: "/work/third"}, worker: "beelink"})
+	for name, held := range map[string]bool{"nuc": true, "beelink": false} {
+		if manager.heldOn(name, project, "/work/project/other/src") != held {
+			t.Errorf("the other repository holds its worktree on %s: %v", name, !held)
+		}
+	}
+	if !manager.heldOn("beelink", project, "/work/third/src") || manager.heldOn("beelink", mirror.Unit{Main: "/work/third"}, "/work/third/src") {
+		t.Error("a repository on its way to beelink holds its folders there for others only")
+	}
+}
+
 // loseWorker makes the manager have lost its connection to the worker of a name, which is gone at goneAt.
 func loseWorker(manager *Manager, name string, goneAt time.Time) {
 	manager.mu.Lock()
@@ -991,6 +1018,96 @@ func TestTheMoveAfterAFailedOneDeletesTheSessionsThatMainDeleted(t *testing.T) {
 	}
 	if len(sshCalls(t, "'receive'", "'"+folder+"'")) == copies {
 		t.Fatal("the move left the worker's copy of the deleted session")
+	}
+}
+
+// git runs Git in dir, with no configuration of the user's.
+func git(t *testing.T, dir string, arguments ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", dir}, arguments...)...)
+	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", arguments, err, output)
+	}
+}
+
+// The sessions of a worktree that a repository no longer has are another repository's once that has the worktree's
+// folder: the next move of the first repository to a worker neither copies them there nor mirrors them from there,
+// and keeps aside what the worker has of them, unless they are on the worker as the other repository's.
+func TestAMoveLeavesTheSessionsOfAFolderThatAnotherRepositoryHasNow(t *testing.T) {
+	requireSystemd(t)
+	for _, other := range []string{"nuc", "beelink"} {
+		t.Run("the other repository on "+other, func(t *testing.T) {
+			options := localWorker(t, newBootstrapRig(t))
+			base := t.TempDir()
+			project, worktree := filepath.Join(base, "project"), filepath.Join(base, "feature")
+			git(t, base, "init", "-q", project)
+			git(t, project, "commit", "-q", "--allow-empty", "-m", "first")
+			git(t, project, "worktree", "add", "-q", worktree)
+			folder := sessionFolder(options.SessionsRoot, worktree)
+			ours, theirs := filepath.Join(folder, "ours.jsonl"), filepath.Join(folder, "theirs.jsonl")
+			writeTestFile(t, ours, "{}\n", 0600)
+			store := fakeStore{sessions: map[string]string{ours: worktree}}
+			options.Store = store
+			manager := newTestManager(t, options)
+			ctx := context.Background()
+			stop := func(func(string) bool) error { return nil }
+			if err := manager.Move(ctx, project, "beelink", stop); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.Return(ctx, project, stop); err != nil {
+				t.Fatal(err)
+			}
+			git(t, project, "worktree", "remove", worktree)
+			if err := os.Mkdir(worktree, 0700); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, theirs, "{}\n", 0600)
+			store.sessions[theirs] = worktree
+			if err := manager.options.Placements.Add(Placement{Worker: other, Unit: mirror.Unit{Main: worktree}}); err != nil {
+				t.Fatal(err)
+			}
+			copies := len(sshCalls(t, "'receive'", "'"+folder+"'"))
+
+			if err := manager.Move(ctx, project, "beelink", stop); err != nil {
+				t.Fatal(err)
+			}
+			if len(sshCalls(t, "'receive'", "'"+folder+"'")) != copies {
+				t.Fatal("the move copied the other repository's sessions to the worker")
+			}
+			manager.mu.Lock()
+			live := manager.workers["beelink"].mirrors[manager.sessionsMain(mirror.Unit{Main: project})]
+			manager.mu.Unlock()
+			if live == nil || live.unit.Contains(folder) {
+				t.Fatalf("the mirror of the repository's sessions: %+v", live)
+			}
+			// The worker is this machine, so its copy of the folder is main's.
+			asides, _ := filepath.Glob(filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".gripi-aside", "*", folder, "theirs.jsonl"))
+			_, err := os.Stat(theirs)
+			if other == "beelink" {
+				if len(asides) != 0 || err != nil {
+					t.Fatalf("the worker's copy of the other repository's sessions there: %v, kept aside in %q", err, asides)
+				}
+				return
+			}
+			if len(asides) != 1 || err == nil {
+				t.Fatalf("the worker's copy of the folder: %v, kept aside in %q", err, asides)
+			}
+
+			// The worker gets the other repository's sessions there later, which are no longer the first repository's to
+			// keep aside.
+			if err := manager.Return(ctx, project, stop); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, theirs, "{}\n", 0600)
+			if err := manager.Move(ctx, project, "beelink", stop); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(theirs); err != nil {
+				t.Fatalf("the worker's copy of the other repository's sessions: %v", err)
+			}
+		})
 	}
 }
 
