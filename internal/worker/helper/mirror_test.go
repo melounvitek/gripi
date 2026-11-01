@@ -175,6 +175,58 @@ func TestMirrorSendsTheUnitToMainAndAnswersTheBarriersOfItsSessions(t *testing.T
 	}
 }
 
+// The helper's view shows what was next to main's home folder when the helper started. Copies and mirrors both see
+// that view, so a project in a folder made there later can't be copied, and its mirror fails rather than delete main's
+// copy of the project, which a copy in another view could have put there.
+func TestCopiesAndMirrorsSeeTheFoldersOfTheHelpersView(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home", "alice")
+	if err := os.MkdirAll(filepath.Dir(home), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(buildGripi(t), "worker", "enter", "--home", home, "--", "true").CombinedOutput(); err != nil {
+		t.Skipf("this system has no private views: %v %s", err, output)
+	}
+	unit := startUnitHelperWith(t, helper.DefaultLease, nil, "--home", home)
+	project := filepath.Join(root, "home", "projects", "app")
+	mainCopy := t.TempDir()
+	for _, folder := range []string{project, filepath.Join(mainCopy, "app")} {
+		if err := os.MkdirAll(folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(folder, "README"), []byte("main's project\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	channel := exec.Command(buildGripi(t), "worker", "receive", "--runtime-dir", unit.runtimeDir, filepath.Join(mainCopy, "app"), project, unit.instance)
+	var stderr strings.Builder
+	channel.Stderr = &stderr
+	input, _ := channel.StdinPipe()
+	output, _ := channel.StdoutPipe()
+	if err := channel.Start(); err != nil {
+		t.Fatal(err)
+	}
+	synced := mirror.Sync(context.Background(), struct {
+		io.Reader
+		io.WriteCloser
+	}{output, input}, mirror.Unit{Main: filepath.Join(mainCopy, "app")}, mirror.Options{})
+	if err := channel.Wait(); synced == nil || err == nil || !strings.Contains(stderr.String(), "read-only file system") {
+		t.Fatalf("a copy into a folder that the helper's view lacks = %v, %v %s", synced, err, stderr.String())
+	}
+
+	if response := unit.request(map[string]any{"type": "mirror.start", "unit": mirror.Unit{Main: project}}); !response.OK {
+		t.Fatalf("mirror.start = %+v", response)
+	}
+	_, served := attachMain(t, unit, project, filepath.Dir(project), mainCopy)
+	if err := <-served; err == nil || !strings.Contains(err.Error(), project) {
+		t.Fatalf("main's copy of a project that the helper's view lacks = %v", err)
+	}
+	if contents, _ := os.ReadFile(filepath.Join(mainCopy, "app", "README")); string(contents) != "main's project\n" {
+		t.Fatalf("main's copy of the project has %q", contents)
+	}
+}
+
 func TestASessionsMirrorMakesItsFoldersAndSendsChangesUnasked(t *testing.T) {
 	unit := startUnitHelper(t, helper.DefaultLease)
 	root := t.TempDir()

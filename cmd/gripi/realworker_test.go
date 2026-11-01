@@ -213,6 +213,33 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	cli("send", fresh.ID, "Hello on the worker")
 	cli("wait", fresh.ID, "--timeout", "60")
 	repliesSoon(fresh.ID, 1)
+	// The helper's view shows what was next to main's home folder when it started. A move copies in that view, as the
+	// mirrors see the files, so a project in a folder made there later can't move, and stays whole on main.
+	localHost, _ := os.Hostname()
+	beside := filepath.Join(filepath.Dir(home), "projects", "app")
+	if output, err := onWorker("mkdir " + filepath.Dir(beside)); err != nil {
+		t.Fatalf("make a folder next to main's home folder on the worker: %v %s", err, output)
+	}
+	if err := os.MkdirAll(beside, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beside, "README"), []byte("next to home\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	besideSession := decodeSession(t, cli("new", beside, "--json"))
+	cli("send", besideSession.ID, "Hello next to home")
+	cli("wait", besideSession.ID, "--timeout", "60")
+	if code, _, stderr := runCLI("worker", "move", beside, "beelink"); code == 0 || !strings.Contains(stderr, "read-only file system") || !strings.Contains(stderr, "private view") {
+		t.Fatalf("move of a project in a folder that the helper doesn't see = %d %s", code, stderr)
+	}
+	if output, err := onWorker("test ! -e " + beside + " && echo absent"); err != nil || output != "absent" {
+		t.Fatalf("the worker got the project in a folder that its helper doesn't see: %q %v", output, err)
+	}
+	cli("send", besideSession.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && cat README"}}]]`)
+	cli("wait", besideSession.ID, "--timeout", "60")
+	if got := replies(besideSession.ID); len(got) != 2 || !strings.Contains(got[1], localHost+`\nnext to home\n`) {
+		t.Fatalf("the session of the project that stayed on main replied %q", got)
+	}
 	// The worker's logins follow main's while it is connected, without main's refresh tokens.
 	workerLogins := func(key string) {
 		t.Helper()
@@ -390,7 +417,6 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		t.Fatalf("main has the file of the step whose outcome is unknown: %v", err)
 	}
 	gitIn(project, "fsck", "--strict", "--no-dangling")
-	localHost, _ := os.Hostname()
 	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && cat before.txt"}}]]`)
 	cli("wait", session.ID, "--timeout", "60")
 	if got := replies(session.ID); !strings.Contains(got[len(got)-1], localHost+`\nbefore\n`) {
