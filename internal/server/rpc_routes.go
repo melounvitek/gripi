@@ -19,12 +19,13 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	if !ok {
 		return
 	}
-	path, err := app.canonicalCommandSessionPath(request, raw)
+	path, err := app.canonicalRPCSessionPath(request, raw)
 	if err != nil {
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
 	}
-	if path == "" {
+	// A new session that Pi has not saved yet has no Pi while its repository moves, which its page shows meanwhile.
+	if _, pending := app.pendingSessions.CWD(path); !pending && !app.commandSessionAvailable(path) {
 		http.NotFound(response, request)
 		return
 	}

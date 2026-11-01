@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/access"
@@ -30,6 +31,8 @@ type fakeWorkers struct {
 	notices    []gateway.WorkerNotice
 	// copying, if set, runs while the repository is copied, once its sessions stopped.
 	copying func()
+	// copyingSince is when the repository started being copied to the worker, while it is.
+	copyingSince time.Time
 }
 
 // refusal is an error of Workers that refuses what was asked.
@@ -55,7 +58,9 @@ func (workers *fakeWorkers) Move(_ context.Context, folder, worker string, stop 
 		return err
 	}
 	if workers.copying != nil {
+		workers.copyingSince = time.Now()
 		workers.copying()
+		workers.copyingSince = time.Time{}
 	}
 	workers.moves = append(workers.moves, "to "+worker)
 	workers.placed = true
@@ -98,10 +103,10 @@ func (workers *fakeWorkers) List() ([]gateway.Worker, error) {
 }
 
 func (workers *fakeWorkers) Location(folder string) (gateway.WorkerLocation, bool) {
-	if !workers.placed || !workers.inRepository(folder) {
+	if !workers.placed && workers.copyingSince.IsZero() || !workers.inRepository(folder) {
 		return gateway.WorkerLocation{}, false
 	}
-	location := gateway.WorkerLocation{Worker: "beelink", State: "connected", Repository: workers.repository, Ports: []gateway.WorkerPort{}}
+	location := gateway.WorkerLocation{Worker: "beelink", State: "connected", Repository: workers.repository, Copying: workers.copyingSince, Ports: []gateway.WorkerPort{}}
 	for port, local := range workers.forwards {
 		location.Ports = append(location.Ports, gateway.WorkerPort{Port: port, Local: local})
 	}
@@ -287,10 +292,23 @@ func TestANewSessionThatPiHasNotSavedStartsAgainWhereItsRepositoryMoved(t *testi
 			t.Fatalf("%s, the live page of the new session would show %q: %d", when, fragment.Session, response.Code)
 		}
 	}
-	workers.copying = func() { shown("while the repository moves") }
+	var cursor int64
+	workers.copying = func() {
+		shown("while the repository moves")
+		// The page's poll continues from its cursor and shows where the repository goes.
+		events := getWorkspace(handler, fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(session), cursor), "")
+		var payload struct {
+			LastSeq int64                   `json:"last_seq"`
+			Missed  bool                    `json:"missed"`
+			Worker  *gateway.WorkerLocation `json:"worker"`
+		}
+		if json.Unmarshal(events.Body.Bytes(), &payload) != nil || payload.LastSeq != cursor || payload.Missed || payload.Worker == nil || !payload.Worker.Copying.Equal(workers.copyingSince) {
+			t.Fatalf("while the repository moves, events = %d %s", events.Code, events.Body.String())
+		}
+	}
 
 	for _, step := range []struct{ route, worker string }{{"/workers/move", "beelink"}, {"/workers/return", ""}} {
-		cursor := fakePiEventCursor(t, handler, session)
+		cursor = fakePiEventCursor(t, handler, session)
 		if response := postWorkspaceForm(handler, step.route, url.Values{"session": {session}, "worker": {step.worker}}, ""); response.Code != http.StatusOK {
 			t.Fatalf("%s = %d %s", step.route, response.Code, response.Body.String())
 		}
