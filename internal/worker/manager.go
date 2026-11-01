@@ -69,6 +69,10 @@ const connectTimeout = 5 * time.Minute
 // another.
 const reconnectInterval = 2 * time.Second
 
+// closeSessionTimeout bounds closing a session's Pi on a worker, which the helper kills when it hasn't stopped 5
+// seconds after SIGTERM.
+const closeSessionTimeout = 10 * time.Second
+
 // ManagerOptions configure NewManager.
 type ManagerOptions struct {
 	// Destination returns where ssh connects for the worker of a name, as `gripi worker add` saved it.
@@ -121,6 +125,9 @@ type Manager struct {
 	launches    []string            // folders of sessions whose Pi is starting
 	launched    *sync.Cond          // signalled when a launch ends
 	notices     []Notice
+
+	// closing has the sessions whose Pi the helper is closing, by their ID on the worker, which their next Pi waits for.
+	closing map[string]chan struct{}
 }
 
 // Notice says that files of a repository on a worker, or of its sessions, changed on this machine, which keeps a
@@ -184,7 +191,8 @@ func NewManager(options ManagerOptions) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
 		options: options, ctx: ctx, cancel: cancel, started: options.Clock(), workers: map[string]*remote{}, sessions: map[string]launched{},
-		logins: newLogins(auth.Pi{Command: options.Pi.Command, AgentDir: options.Pi.AgentDir}, options.Clock),
+		logins:  newLogins(auth.Pi{Command: options.Pi.Command, AgentDir: options.Pi.AgentDir}, options.Clock),
+		closing: map[string]chan struct{}{},
 	}
 	manager.launched = sync.NewCond(&manager.mu)
 	go manager.logins.run(ctx, loginsPoll)
@@ -799,6 +807,16 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 		// gripi commands find the worker's socket where main's is.
 		Env: append(installation.Environment(process.Env), "GRIPI_SOCKET_PATH="+manager.options.SocketPath),
 	}
+	manager.mu.Lock()
+	closing := manager.closing[session.ID]
+	manager.mu.Unlock()
+	if closing != nil {
+		select {
+		case <-closing:
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
+	}
 	if err := conn.CreateSession(ctx, session); err != nil {
 		return nil, nil, err
 	}
@@ -810,7 +828,36 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	manager.mu.Lock()
 	manager.sessions[session.ID] = launched{worker: placement.Worker, cwd: cwd, lost: process.Lost}
 	manager.mu.Unlock()
-	return command, release, nil
+	return command, func() {
+		release()
+		manager.closeSession(conn, session.ID)
+	}, nil
+}
+
+// closeSession stops the Pi of a session on a worker, whose RPC has ended, and keeps the session's other processes,
+// as when Gripi stops an idle Pi here. Pi there may hang on its way out, such as in a session_shutdown handler, and
+// would keep the session's next Pi from starting. It closes Pi in the background, because the adapter waits for the
+// launcher's cleanup while it stops the RPC, and the session's next Pi waits for it.
+func (manager *Manager) closeSession(conn *Conn, id string) {
+	closed := make(chan struct{})
+	manager.mu.Lock()
+	manager.closing[id] = closed
+	manager.mu.Unlock()
+	go func() {
+		defer func() {
+			manager.mu.Lock()
+			if manager.closing[id] == closed {
+				delete(manager.closing, id)
+			}
+			manager.mu.Unlock()
+			close(closed)
+		}()
+		ctx, cancel := context.WithTimeout(manager.ctx, closeSessionTimeout)
+		defer cancel()
+		if err := conn.CloseSession(ctx, id); err != nil && !errors.Is(err, ErrControlClosed) && manager.ctx.Err() == nil {
+			log.Printf("close the Pi of session %s on its worker: %v", id, err)
+		}
+	}()
 }
 
 // sessionID names a session on its worker, the same for every Pi of the session, so they share its cgroup. A new

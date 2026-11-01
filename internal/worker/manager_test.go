@@ -12,8 +12,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -242,6 +244,59 @@ func TestLaunchFailsUnlessBothMirrorsOfTheRepositoryRun(t *testing.T) {
 	if command, _, err := manager.Launch(agent.Process{Dir: project, Command: []string{"pi", "--mode", "rpc"}}); err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("Launch without the mirror of the sessions = %v, %v", command, err)
 	}
+}
+
+// hangingPi stands in for Pi on the worker, with a background process, whose PID it prints. Once its input ends, it
+// hangs, as Pi does in a session_shutdown handler that never finishes.
+const hangingPi = `#!/usr/bin/env node
+if [ "$1" = --version ]; then exec cat "$HOME/pi-version"; fi
+setsid sleep 1000 > /dev/null &
+echo $!
+while read -r line; do :; done
+exec sleep 1000
+`
+
+func TestTheNextPiOfASessionStartsAfterAnIdlePiThatHangs(t *testing.T) {
+	requireSystemd(t)
+	rig := newBootstrapRig(t)
+	options := localWorker(t, rig)
+	writeTestFile(t, filepath.Join(rig.pkg, "dist", "cli.js"), hangingPi, 0755)
+	manager := newTestManager(t, options)
+	project := t.TempDir()
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+	process := agent.Process{Key: filepath.Join(sessionFolder(options.SessionsRoot, project), "s.jsonl"), Dir: project, Command: []string{"pi", "--mode", "rpc"}}
+	start := func() (*exec.Cmd, func(), int) {
+		t.Helper()
+		command, release, err := manager.Launch(process)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, _ := command.StdoutPipe()
+		if err := command.Start(); err != nil {
+			t.Fatal(err)
+		}
+		line, _ := bufio.NewReader(stdout).ReadString('\n')
+		background, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			t.Fatalf("Pi on the worker said %q", line)
+		}
+		return command, release, background
+	}
+
+	command, release, background := start()
+	// Gripi retires the idle Pi: its RPC ends, which the adapter stops when Pi doesn't exit.
+	command.Process.Kill()
+	command.Wait()
+	release()
+	command, release, _ = start()
+	if err := syscall.Kill(background, 0); err != nil {
+		t.Fatalf("the background process of the session's first Pi: %v", err)
+	}
+	command.Process.Kill()
+	command.Wait()
+	release()
 }
 
 // A worker that is this machine as the same user, or that mounts its home folder, would get main's own files instead
