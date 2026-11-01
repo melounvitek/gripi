@@ -1051,6 +1051,22 @@ func TestSnapshotRefusesWhatAMoveCantBringBack(t *testing.T) {
 	if _, err := Snapshot(context.Background(), move, Selection{Cwd: r.main, GitDir: r.gitDir, Roots: []string{r.feat}}, r.base, r.shadow); err == nil {
 		t.Errorf("a cwd outside the selected worktrees was taken")
 	}
+
+	// Git LFS keeps files' contents in .git/lfs, which a move doesn't bring back.
+	for _, use := range []string{"attributes", "folder", "config"} {
+		r = newRig(t)
+		switch use {
+		case "attributes":
+			r.write(r.feat, "assets/.gitattributes", "*.psd filter=lfs diff=lfs merge=lfs -text\n")
+		case "folder":
+			r.write(r.gitDir, "lfs/tmp/x", "")
+		case "config":
+			r.git(r.main, "config", "filter.lfs.process", "git-lfs filter-process")
+		}
+		if _, err := Snapshot(context.Background(), move, Selection{Cwd: r.feat, GitDir: r.gitDir, Roots: []string{r.feat}}, r.base, r.shadow); err == nil || !strings.Contains(err.Error(), "Git LFS") {
+			t.Errorf("Git LFS in the %s: %v", use, err)
+		}
+	}
 }
 
 func TestUnselectedWorktreesInASelectedOneStayOut(t *testing.T) {

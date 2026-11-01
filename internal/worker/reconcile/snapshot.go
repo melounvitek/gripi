@@ -68,6 +68,9 @@ func Snapshot(ctx context.Context, move string, sel Selection, base, shadow stri
 	if err != nil {
 		return nil, err
 	}
+	if err := checkLFS(ctx, sel.GitDir, paths); err != nil {
+		return nil, err
+	}
 	// What unselected worktrees in selected ones have stays out.
 	paths = slices.DeleteFunc(paths, func(p string) bool {
 		owner := ""
@@ -202,6 +205,34 @@ func check(ctx context.Context, sel Selection, registered []worktree) error {
 		}
 		if strings.HasPrefix(index, "160000 ") || strings.Contains(index, "\x00160000 ") {
 			return errors.New("a repository with submodules can't move")
+		}
+	}
+	return nil
+}
+
+var lfsFilter = regexp.MustCompile(`(?m)^[^#\n]*[ \t]filter=lfs\b`)
+
+// checkLFS refuses a repository that uses Git LFS, as a move doesn't bring back the files' contents that it keeps in
+// the Git folder: one with LFS's folder there, LFS in its config, or an LFS filter in the attributes among paths.
+func checkLFS(ctx context.Context, gitDir string, paths []string) error {
+	refused := errors.New("a repository that uses Git LFS can't move")
+	if _, err := os.Lstat(filepath.Join(gitDir, "lfs")); err == nil {
+		return refused
+	}
+	// git config fails when nothing matches.
+	if out, _ := (repo{}).git(ctx, nil, gitDir, "", "config", "--local", "--name-only", "--get-regexp", `^(lfs|filter\.lfs)\.`); out != "" {
+		return refused
+	}
+	for _, p := range paths {
+		if filepath.Base(p) != ".gitattributes" && p != filepath.Join(gitDir, "info", "attributes") {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if lfsFilter.Match(data) {
+			return refused
 		}
 	}
 	return nil
