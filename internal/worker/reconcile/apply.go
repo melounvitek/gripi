@@ -45,12 +45,9 @@ func (r *reconciler) apply() error {
 	if err != nil {
 		return err
 	}
-	// Only worktrees that the return makes, or whose checkouts it takes while main's HEAD and index there are still as
-	// planned, may have a ref that it changes checked out.
+	// Only worktrees whose checkouts the return takes while main's HEAD and index there are still as planned may have a
+	// ref that it changes checked out. Those it makes come after the refs.
 	var taking []string
-	for _, w := range p.Worktrees {
-		taking = append(taking, w.Root)
-	}
 	for _, c := range p.Checkouts {
 		i := slices.IndexFunc(mTrees, func(w worktree) bool { return w.Root == c.Root && w.GitDir == c.GitDir })
 		if i < 0 || mTrees[i].Head.Branch != c.Old.Branch {

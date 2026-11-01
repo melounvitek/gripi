@@ -885,29 +885,37 @@ func TestAWorktreeThatMainMakesAfterAStopKeepsTheWorkersFilesOut(t *testing.T) {
 }
 
 func TestABranchThatMainChecksOutAfterAStopKeepsItsCommit(t *testing.T) {
-	r := newRig(t)
-	r.git(r.main, "branch", "fast")
-	r.git(r.main, "branch", "diverged")
-	r.snapshot(r.main)
-	worker := func(args ...string) string { return r.worker(r.main, args...) }
-	fast := r.commit(worker, "fast", "worker")
-	r.commit(worker, "diverged", "worker")
-	r.commit(r.onMain, "diverged", "main") // for a recovery ref, the first change
-	stopWhen(t, func() bool { return true })
-	if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
-		t.Fatal("the reconcile didn't stop")
-	}
-	interrupt = nil
-	before := r.rev(r.main, "fast")
-	r.git(r.other, "switch", "-q", "fast")
+	for _, where := range []string{"another worktree", "a worktree at the path of one that the worker made"} {
+		r := newRig(t)
+		r.git(r.main, "branch", "fast")
+		r.git(r.main, "branch", "diverged")
+		r.snapshot(r.main)
+		made := filepath.Join(filepath.Dir(r.feat), "made")
+		r.workerWorktree(made, "made")
+		worker := func(args ...string) string { return r.worker(r.main, args...) }
+		fast := r.commit(worker, "fast", "worker")
+		r.commit(worker, "diverged", "worker")
+		r.commit(r.onMain, "diverged", "main") // for a recovery ref, the first change
+		stopWhen(t, func() bool { return true })
+		if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
+			t.Fatal("the reconcile didn't stop")
+		}
+		interrupt = nil
+		before := r.rev(r.main, "fast")
+		if where == "another worktree" {
+			r.git(r.other, "switch", "-q", "fast")
+		} else {
+			r.git(r.main, "worktree", "add", "-q", made, "fast")
+		}
 
-	r.reconcile()
+		r.reconcile()
 
-	if got := r.rev(r.main, "fast"); got != before {
-		t.Errorf("fast = %s, want main's %s", got, before)
-	}
-	if got := r.rev(r.main, "refs/gripi/returns/"+move+"/refs/heads/fast"); got != fast {
-		t.Errorf("the worker's fast = %s, want %s", got, fast)
+		if got := r.rev(r.main, "fast"); got != before {
+			t.Errorf("checked out in %s: fast = %s, want main's %s", where, got, before)
+		}
+		if got := r.rev(r.main, "refs/gripi/returns/"+move+"/refs/heads/fast"); got != fast {
+			t.Errorf("checked out in %s: the worker's fast = %s, want %s", where, got, fast)
+		}
 	}
 }
 
