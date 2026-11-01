@@ -136,21 +136,26 @@ func writeWorkersError(response http.ResponseWriter, action string, err error) {
 	writeJSONStatus(response, http.StatusBadGateway, map[string]string{"error": err.Error()})
 }
 
-// holdMoving holds a repository for its move or return, unless a move or return holds it, a folder in it, or a folder
-// that it is in, which holdMoving then returns.
-func (app *application) holdMoving(repository string) (release func(), held string) {
+// holdMoving holds the folders of a repository for its move or return, unless a move or return holds one of them, a
+// folder in one of them, or a folder that one of them is in, which holdMoving then returns.
+func (app *application) holdMoving(folders []string) (release func(), held string) {
 	app.movingMu.Lock()
 	defer app.movingMu.Unlock()
-	for _, other := range app.movingFolders {
-		if folderWithin(repository, other) || folderWithin(other, repository) {
-			return nil, other
+	for _, folder := range folders {
+		for _, other := range app.movingFolders {
+			if folderWithin(folder, other) || folderWithin(other, folder) {
+				return nil, other
+			}
 		}
 	}
-	app.movingFolders = append(app.movingFolders, repository)
+	app.movingFolders = append(app.movingFolders, folders...)
 	return func() {
 		app.movingMu.Lock()
 		defer app.movingMu.Unlock()
-		app.movingFolders = slices.DeleteFunc(app.movingFolders, func(folder string) bool { return folder == repository })
+		for _, folder := range folders {
+			i := slices.Index(app.movingFolders, folder)
+			app.movingFolders = slices.Delete(app.movingFolders, i, i+1)
+		}
 	}, ""
 }
 
@@ -165,14 +170,16 @@ func (app *application) moveRepository(response http.ResponseWriter, request *ht
 	}
 	// Workers refuse to start a session while its repository moves, so another move or return that started before the
 	// new sessions that this one stops have started again would end them. What is on a worker moves as it was placed
-	// there, which can be a folder outside Git with Git repositories in it.
+	// there, which can be a folder outside Git with Git repositories in it, and a repository's worktrees can be outside it.
 	repository := folder
 	if location, found := app.workers.Location(folder); found {
 		repository = location.Repository
-	} else if main, _, err := app.workers.Repository(folder); err == nil {
-		repository = main
 	}
-	release, held := app.holdMoving(repository)
+	folders := []string{repository}
+	if main, worktrees, err := app.workers.Repository(repository); err == nil {
+		folders = append([]string{main}, worktrees...)
+	}
+	release, held := app.holdMoving(folders)
 	if held != "" {
 		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the repository of " + held + " is moving already"})
 		return

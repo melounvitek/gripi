@@ -38,6 +38,9 @@ type fakeWorkers struct {
 	// gitRepository, if set, is a Git repository in the repository, which then moves as one folder outside Git:
 	// Repository finds it for its folders, while Location reports the repository that holds them.
 	gitRepository string
+	// worktree, if set, is the repository's linked worktree instead of one beside it. A folder outside Git that holds
+	// it is a repository of its own.
+	worktree string
 }
 
 // refusal is an error of Workers that refuses what was asked.
@@ -124,6 +127,12 @@ func (workers *fakeWorkers) Location(folder string) (gateway.WorkerLocation, boo
 func (workers *fakeWorkers) Repository(folder string) (string, []string, error) {
 	if git := workers.gitRepository; git != "" && (folder == git || strings.HasPrefix(folder, git+"/")) {
 		return git, nil, nil
+	}
+	if workers.worktree != "" {
+		if !workers.inRepository(folder) {
+			return folder, nil, nil
+		}
+		return workers.repository, []string{workers.worktree}, nil
 	}
 	return workers.repository, []string{workers.repository + "-feature"}, nil
 }
@@ -448,6 +457,32 @@ func TestARepositoryMovesNoFurtherUntilItsNewSessionsStartedAgain(t *testing.T) 
 	}
 	if !slices.Equal(onWorker, []bool{false, true, false}) {
 		t.Fatalf("Pi of the new session started on the worker %v", onWorker)
+	}
+}
+
+// A repository's linked worktree can be outside it, in a folder outside Git that moves on its own, whose move would
+// end the worktree's new sessions while the repository's move starts them again.
+func TestAFolderWithAWorktreeOfAMovingRepositoryWaits(t *testing.T) {
+	cfg, _, _, project := fakePiConfig(t)
+	task := filepath.Join(filepath.Dir(project), "jobs", "task")
+	workers := &fakeWorkers{repository: project, worktree: filepath.Join(task, "wt")}
+	handler, err := gateway.NewPiHandlerWithLauncher(cfg, gripi.WebFiles, func(agent.Process) (*exec.Cmd, func(), error) { return nil, nil, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	local := localHandler(t, handler)
+	var overlapping *httptest.ResponseRecorder
+	workers.copying = func() {
+		overlapping = command(local, http.MethodPost, "/workers/move", url.Values{"folder": {task}, "worker": {"beelink"}})
+	}
+
+	if moved := command(local, http.MethodPost, "/workers/move", url.Values{"folder": {project}, "worker": {"beelink"}}); moved.Code != http.StatusOK {
+		t.Fatalf("move = %d %s", moved.Code, moved.Body.String())
+	}
+	if overlapping == nil || overlapping.Code != http.StatusConflict || !strings.Contains(overlapping.Body.String(), "moving already") {
+		t.Fatalf("move of the folder with the repository's worktree while the repository moved = %v", overlapping)
 	}
 }
 
