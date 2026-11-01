@@ -54,6 +54,11 @@ func TestAMoveGetsACopyOfItsOwnInTheFoldersThatItNames(t *testing.T) {
 	if again := prepare("m1", roots, work); !again.OK || again.Path != copy {
 		t.Fatalf("move.prepare again = %+v", again)
 	}
+	// The view would show the copy at the link's target, where Git would name a new worktree outside the private root.
+	linked, elsewhere := filepath.Join(home, "Linked"), t.TempDir()
+	if err := os.Symlink(elsewhere, linked); err != nil {
+		t.Fatal(err)
+	}
 	for _, refused := range []struct {
 		move    string
 		roots   []string
@@ -65,6 +70,7 @@ func TestAMoveGetsACopyOfItsOwnInTheFoldersThatItNames(t *testing.T) {
 		{"m2", roots, []string{filepath.Join(work, "gripi")}, "directly in"},
 		{"m2", roots, nil, "private"},
 		{"m2", nil, []string{work}, "folders"},
+		{"m2", []string{filepath.Join(linked, "gripi")}, []string{work, linked}, "Linked in the worker user's home folder is a symbolic link to " + elsewhere},
 		{"../m2", roots, []string{work}, "letters"},
 	} {
 		if response := prepare(refused.move, refused.roots, refused.private...); response.OK || !strings.Contains(response.Error, refused.reason) {

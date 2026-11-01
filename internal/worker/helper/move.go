@@ -139,7 +139,13 @@ func (s *server) prepare(request Message) (string, error) {
 	if known != nil && !known.sameFolders(prepared) {
 		return "", fmt.Errorf("move %s was prepared with other folders", prepared.id)
 	}
-	// The view shows the copy's folders at the private roots, which need folders to show them on.
+	// The view shows the copy's folders at the private roots, which need folders to show them on. A mount on a link
+	// would show them at its target, whose paths Git would give the worktrees that the session makes.
+	for _, root := range prepared.Private {
+		if target, err := os.Readlink(root); err == nil {
+			return "", fmt.Errorf("%s in the worker user's home folder is a symbolic link to %s; a move needs a folder there to show its copy of %s", filepath.Base(root), target, root)
+		}
+	}
 	for _, root := range prepared.Private {
 		for _, folder := range []string{filepath.Join(copy, filepath.Base(root)), root} {
 			if err := os.MkdirAll(folder, 0o700); err != nil {
