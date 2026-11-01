@@ -16,7 +16,8 @@ import (
 // they are.
 type Workers interface {
 	// Move runs the sessions of the repository that holds folder on the named worker from now on. Before it copies
-	// anything, it calls stop with the repository's test for a folder, and stop ends the Pi of every session there.
+	// anything, it calls stop with a test for the folder of a session, which the repository's folders pass, and stop
+	// ends the Pi of every session there.
 	Move(ctx context.Context, folder, worker string, stop func(inRepository func(folder string) bool) error) error
 	// Return runs the sessions of the repository that holds folder on this machine again, calling stop as Move does.
 	Return(ctx context.Context, folder string, stop func(inRepository func(folder string) bool) error) error

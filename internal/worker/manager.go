@@ -371,11 +371,16 @@ func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mir
 	}
 	if sessions != nil && sessions.running() {
 		folders, _ := manager.sessionFolders(unit, worker.name)
-		if !slices.ContainsFunc(folders, func(folder string) bool { return !sessions.unit.Contains(folder) }) {
+		added := slices.DeleteFunc(slices.Clone(folders), sessions.unit.Contains)
+		if len(added) == 0 {
 			return nil
 		}
-		// A folder of another repository is refused before the running mirror stops for it.
+		// A folder of another repository, or with sessions of another folder, is refused before the running mirror stops
+		// for it.
 		if err := manager.claim(unit.Main, nil, folders); err != nil {
+			return err
+		}
+		if err := manager.foreignSessions(unit, added); err != nil {
 			return err
 		}
 		// The worker's helper watches only the folders that its mirror started with.
@@ -594,13 +599,18 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 		return err
 	}
 	if sessions {
+		roots := destination.Checkpoint().Roots
+		added := slices.DeleteFunc(unitFolders(unit), func(folder string) bool { return slices.Contains(roots, folder) })
 		// Main's copy keeps every folder that it had, whose sessions would go if the worker sent no folder of them.
-		for _, root := range destination.Checkpoint().Roots {
+		for _, root := range roots {
 			if !unit.Contains(root) {
 				unit.Worktrees = append(unit.Worktrees, root)
 			}
 		}
 		if err := manager.claim(repository.Main, nil, unitFolders(unit)); err != nil {
+			return err
+		}
+		if err := manager.foreignSessions(repository, added); err != nil {
 			return err
 		}
 		// The worker's helper makes the folders that the worker doesn't have yet.
@@ -829,6 +839,22 @@ func (manager *Manager) claim(main string, roots, sessionFolders []string) error
 			if slices.Contains(ownedFolders, folder) {
 				return refuse("%s and %s, which is %s, would share Pi's session folder %s", main, owner.unit.Main, owner.where, folder)
 			}
+		}
+	}
+	return nil
+}
+
+// foreignSessions refuses session folders that a unit's mirror would add while this machine has sessions of another
+// folder in one of them, such as those of /work/a/b in the folder of /work/a-b, which Pi names alike: the worker's copy
+// of the folder would replace them.
+func (manager *Manager) foreignSessions(unit mirror.Unit, folders []string) error {
+	sessions, err := manager.options.Store.Sessions()
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if folder := filepath.Dir(session.Path); slices.Contains(folders, folder) && !unit.Contains(session.CWD) {
+			return refuse("%s and %s, which has sessions on this machine, would share Pi's session folder %s", unit.Main, session.CWD, folder)
 		}
 	}
 	return nil
@@ -1077,8 +1103,9 @@ func (manager *Manager) startMoving(unit mirror.Unit) (done func(), err error) {
 
 // Move moves the repository that holds folder, with all its worktrees and sessions, to the worker of a name: main
 // copies it there with the sessions' folders, and the worker's mirror keeps main's copy up to date from then on.
-// stop gets the repository's test for a folder before anything is copied, and must stop the Pi of every session
-// there, or fail when one is working.
+// stop gets a test for the folder of a session before anything is copied, which the repository's folders pass, and so
+// do those whose sessions Pi keeps in the repository's session folders, and must stop the Pi of every session there,
+// or fail when one is working.
 func (manager *Manager) Move(ctx context.Context, folder, name string, stop func(inRepository func(folder string) bool) error) error {
 	if _, err := manager.options.Destination(name); err != nil {
 		return refusal{err}
@@ -1106,7 +1133,13 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 	if err := manager.claim(unit.Main, unitFolders(unit), sessionFolders); err != nil {
 		return err
 	}
-	if err := stop(unit.Contains); err != nil {
+	if err := manager.foreignSessions(unit, sessionFolders); err != nil {
+		return err
+	}
+	// Pi would also keep a new session of another folder in the unit's session folders once it saves the session.
+	if err := stop(func(folder string) bool {
+		return unit.Contains(folder) || slices.Contains(sessionFolders, sessionFolder(manager.options.SessionsRoot, folder))
+	}); err != nil {
 		return err
 	}
 	manager.mu.Lock()
