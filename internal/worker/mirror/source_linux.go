@@ -180,6 +180,12 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) (err error) {
 	readErr := make(chan error, 1)
 	go func() { readErr <- s.read() }()
 
+	// The worktrees that joined a unit of selected folders before are its own again.
+	if s.within != nil {
+		if _, err := s.joinWorktrees(); err != nil {
+			return s.fail(err)
+		}
+	}
 	s.mapIndexes()
 	seen, err := s.scan()
 	if err != nil {
@@ -682,7 +688,7 @@ func (s *Source) moved(from, to string, isDir bool) error {
 
 func (s *Source) refreshWorktrees() error {
 	s.wtChanged = false
-	worktrees, err := listWorktrees(s.main)
+	worktrees, err := listWorktrees(s.gitFolder())
 	if err != nil {
 		return nil // the main folder is gone, which is mirrored as such
 	}

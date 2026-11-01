@@ -429,10 +429,11 @@ func (s *sender) checkRoots() error {
 		if info, err := os.Lstat(r); err == nil && info.IsDir() {
 			continue
 		}
-		if s.gitDir != "" && r != s.main && r != s.gitDir {
+		// The main folder of a unit of selected folders may be a linked worktree too.
+		if s.gitDir != "" && (r != s.main || s.within != nil) && r != s.gitDir {
 			if listed == nil {
 				var err error
-				if listed, err = gitWorktrees(s.main); err != nil {
+				if listed, err = gitWorktrees(s.gitFolder()); err != nil {
 					return err
 				}
 			}
@@ -444,6 +445,29 @@ func (s *sender) checkRoots() error {
 		return fmt.Errorf("mirror: %s is not a folder here, so the mirror stops rather than delete the other side's copy of it", r)
 	}
 	return nil
+}
+
+// gitFolder is where Git lists the unit's worktrees: the main folder, unless the session removed that linked worktree.
+func (s *sender) gitFolder() string {
+	if _, err := os.Stat(s.main); err != nil && s.within != nil {
+		return s.gitDir
+	}
+	return s.main
+}
+
+// joinWorktrees adds the existing worktrees that Git lists and that join a unit of selected folders (see Unit.Within),
+// and returns every worktree that Git lists.
+func (s *sender) joinWorktrees() ([]string, error) {
+	listed, err := gitWorktrees(s.gitFolder())
+	if err != nil {
+		return nil, err
+	}
+	for i, worktree := range listed {
+		if _, err := os.Stat(worktree); err == nil && !s.isRoot(worktree) && joins(s.within, worktree, i == 0) {
+			s.addRoot(worktree)
+		}
+	}
+	return listed, nil
 }
 
 // fail tells the destination why the source stops, and returns err.

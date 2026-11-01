@@ -92,6 +92,49 @@ func TestAUnitOfSelectedFoldersNeverTakesTheOthers(t *testing.T) {
 	}
 }
 
+// A mirror that starts again keeps the worktrees that joined the unit, also once the session removed the one that it
+// started in.
+func TestAUnitOfSelectedFoldersKeepsTheWorktreesThatJoinedIt(t *testing.T) {
+	repository := newRepo(t)
+	featA := repository.Worktrees[0]
+	asACopy(t, repository)
+	r := newRig(t, Unit{Main: featA, GitDir: repository.GitDir, Within: []string{filepath.Dir(filepath.Dir(repository.Main))}})
+	featC := filepath.Join(filepath.Dir(featA), "feat-c")
+	git(t, featA, "worktree", "add", "-q", "-b", "feat-c", featC)
+	r.barrier(t)
+	restart := func() {
+		t.Helper()
+		r.conn.Close()
+		<-r.served
+		<-r.ran
+		r.start(t, nil)
+	}
+
+	restart()
+	writeFile(t, featC, "after.txt", "after the restart\n")
+	r.barrier(t)
+	git(t, featC, "worktree", "remove", "--force", featA)
+	featE := filepath.Join(filepath.Dir(featA), "feat-e")
+	git(t, featC, "worktree", "add", "-q", "-b", "feat-e", featE)
+	writeFile(t, featE, "new.txt", "in feat-e\n")
+	r.barrier(t)
+	restart()
+	writeFile(t, featC, "last.txt", "after the second restart\n")
+	r.barrier(t)
+
+	for path, want := range map[string]string{
+		filepath.Join(featC, "after.txt"): "after the restart\n", filepath.Join(featE, "new.txt"): "in feat-e\n",
+		filepath.Join(featC, "last.txt"): "after the second restart\n",
+	} {
+		if got, _ := os.ReadFile(r.dst + path); string(got) != want {
+			t.Errorf("main's copy of %s = %q, want %q", path, got, want)
+		}
+	}
+	if _, err := os.Lstat(r.dst + featA); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("main's copy of the removed worktree: %v", err)
+	}
+}
+
 func sorted(paths []string) []string {
 	paths = slices.Clone(paths)
 	slices.Sort(paths)
