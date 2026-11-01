@@ -137,6 +137,33 @@ func (synchronizer *Synchronizer) Forget(path string) {
 		synchronizer.saveExternalLocked()
 	}
 }
+
+// Rewritten takes the session's file as it is now for the gateway's own, unless another program wrote it before. A
+// look at the file after the rewrite took it for another program's, which this undoes.
+func (synchronizer *Synchronizer) Rewritten(path string) {
+	unlock := synchronizer.locks.Lock(path)
+	defer unlock()
+	state := synchronizer.state(path)
+	if state.Snapshot == nil {
+		// The first look takes the file as it is.
+		return
+	}
+	snapshot, err := readFileSnapshot(path)
+	if err != nil || !snapshot.Complete {
+		return
+	}
+	switch state.Mode {
+	case agent.SyncExternalFollow:
+		// Pi CLI wrote the session, which stays so.
+	case agent.SyncConflict:
+		// Only when the look that found the conflict saw the file as the gateway wrote it.
+		if state.Snapshot.Revision() == snapshot.Revision() {
+			synchronizer.update(path, snapshot, agent.SyncAvailable, "", "")
+		}
+	default:
+		synchronizer.update(path, snapshot, state.Mode, state.RPCLeafID, state.Error)
+	}
+}
 func (synchronizer *Synchronizer) RetireManagedClientIfAvailable(path string, retire func() (bool, error)) (bool, error) {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {

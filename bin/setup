@@ -7,5 +7,5 @@ root="$(cd -- "$script_dir/.." && pwd)"
 cd "$root"
 mise exec -- npm ci
 mkdir -p tmp
-mise exec -- go build -o tmp/gripi ./cmd/gripi
+CGO_ENABLED=0 mise exec -- go build -o tmp/gripi ./cmd/gripi
 "$script_dir/gripi-password"

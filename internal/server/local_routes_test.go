@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -35,19 +37,23 @@ func TestLocalHandlerServesNoBrowserRoutes(t *testing.T) {
 	}
 }
 
-func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
+const alice, bob = "piu_alice_token_0001", "piu_bob_token_000002"
+
+// multiUserFakePiGateway runs the gateway of fakePiGateway in multi-user mode, where Alice owns alpha and Bob owns
+// beta, and returns the secret of the users' workspaces.
+func multiUserFakePiGateway(t *testing.T) (handler http.Handler, alpha, beta, secret string) {
+	t.Helper()
 	cfg, alpha, beta, _ := fakePiConfig(t)
 	root := filepath.Dir(cfg.ReadStatePath)
 	cfg.MultiUserMode = true
 	cfg.WorkspaceSecretPath = filepath.Join(root, "secret")
 	cfg.WorkspaceAccessPath = filepath.Join(root, "workspace-access.json")
 	cfg.WorkspaceOwnershipPath = filepath.Join(root, "owners.json")
-	local := localHandler(t, startGateway(t, cfg))
+	handler = startGateway(t, cfg)
 	secret, err := access.NewWorkspaceSecretStore(cfg.WorkspaceSecretPath).Secret()
 	if err != nil {
 		t.Fatal(err)
 	}
-	const alice, bob = "piu_alice_token_0001", "piu_bob_token_000002"
 	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, gateway.NewPiStore(cfg.SessionsRoot, ""))
 	for token, path := range map[string]string{alice: alpha, bob: beta} {
 		if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace(access.WorkspaceID(secret, token)); err != nil {
@@ -57,6 +63,12 @@ func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return handler, alpha, beta, secret
+}
+
+func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
+	handler, alpha, beta, secret := multiUserFakePiGateway(t)
+	local := localHandler(t, handler)
 	get := func(target string, header ...string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "http://gripi"+target, nil)
 		for index := 0; index < len(header); index += 2 {
@@ -247,6 +259,39 @@ func TestPromptsReportWhatPiDidWithThem(t *testing.T) {
 	}
 	if got := disposition("Continue with the queued follow-up"); got != "queued" {
 		t.Fatalf("prompt during a turn = %v", got)
+	}
+}
+
+func TestThePromptAfterPiEndedStartsANewPi(t *testing.T) {
+	handler, alpha, _, _ := fakePiGateway(t)
+	local := localHandler(t, handler)
+	if response := postPrompt(local, socketHost, url.Values{"session": {alpha}, "message": {"Hello"}}); response.Code != http.StatusOK {
+		t.Fatalf("first prompt = %d %s", response.Code, response.Body.String())
+	}
+	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
+	// Pi ends by itself, as when it crashes or the connection to the worker that runs it breaks.
+	started, _ := fakePiPIDs(t, alpha)
+	if err := syscall.Kill(int(started[0]), syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	// The gateway has reaped it once it is gone.
+	for deadline := time.Now().Add(5 * time.Second); syscall.Kill(int(started[0]), 0) == nil; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("Pi is still there")
+		}
+	}
+
+	cursor := fakePiEventCursor(t, handler, alpha)
+	if response := postPrompt(local, socketHost, url.Values{"session": {alpha}, "message": {"Hello again"}}); response.Code != http.StatusOK {
+		t.Fatalf("prompt after Pi ended = %d %s", response.Code, response.Body.String())
+	}
+	if started, _ := fakePiPIDs(t, alpha); len(started) != 2 {
+		t.Fatalf("Pi started %v", started)
+	}
+	// The new Pi's events follow the old one's, so the browser misses nothing.
+	events := serveAction(handler, getActionRequest("/events?session="+url.QueryEscape(alpha)+"&after="+strconv.FormatInt(cursor, 10)))
+	if events.Code != http.StatusOK || strings.Contains(events.Body.String(), `"missed":true`) {
+		t.Fatalf("events after the old Pi's last = %d %s", events.Code, events.Body.String())
 	}
 }
 

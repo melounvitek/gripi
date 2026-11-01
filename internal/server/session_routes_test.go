@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -883,3 +884,43 @@ func snapshotJSONL(t *testing.T, root string) map[string][]byte {
 }
 func jsonString(value string) string { data, _ := json.Marshal(value); return string(data) }
 func strconvItoa(value int) string   { return fmt.Sprintf("%d", value) }
+
+// Losing the Pi that ran a step, such as with its worker, ends the run without the step's result. History shows such a
+// call as unknown rather than pending, as the live page does when the run settles, also while another run goes on.
+func TestHistoryShowsTheOutcomeOfAToolCallThatARunLeftWithoutAResultAsUnknown(t *testing.T) {
+	handler, alpha, _, _ := fakePiGateway(t)
+	file, err := os.OpenFile(alpha, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"type":"message","id":"assistant-2","parentId":"assistant-1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"lost-1","name":"bash","arguments":{"command":"npx playwright test"}}],"stopReason":"toolUse"}}` + "\n")
+	file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := getWorkspace(handler, "/?session="+url.QueryEscape(alpha), "").Body.String()
+	if !strings.Contains(page, `class="message message--assistant message--compact message--tool-call message--tool-unknown" data-role="assistant"`) || strings.Contains(page, "message--tool-pending") {
+		t.Fatalf("page = %s", page)
+	}
+
+	if response := postPrompt(handler, browserHost, url.Values{"session": {alpha}, "message": {"Hold ordinary tools for activity recovery until abort"}}); response.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
+	}
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(page, `data-tool-call-id="recovery-bash"`); time.Sleep(25 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the run's tool calls never showed: %s", page)
+		}
+		page = getWorkspace(handler, "/?session="+url.QueryEscape(alpha), "").Body.String()
+	}
+	classes := func(id string) string {
+		match := regexp.MustCompile(`class="([^"]*)"[^>]*data-tool-call-id="` + id + `"`).FindStringSubmatch(page)
+		if match == nil {
+			t.Fatalf("no tool call %s: %s", id, page)
+		}
+		return match[1]
+	}
+	if lost, running := classes("lost-1"), classes("recovery-bash"); !strings.Contains(lost, "message--tool-unknown") || strings.Contains(lost, "pending") ||
+		!strings.Contains(running, "message--tool-pending") || strings.Contains(running, "unknown") {
+		t.Fatalf("lost call class = %q, running call class = %q", lost, running)
+	}
+}

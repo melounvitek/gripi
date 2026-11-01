@@ -270,6 +270,8 @@ func (guard routerGuard) KnownBlocked(key string) *SyncResult { return guard.of(
 
 func (guard routerGuard) Forget(key string) { guard.of(key).Forget(key) }
 
+func (guard routerGuard) Rewritten(key string) { guard.of(key).Rewritten(key) }
+
 func (guard routerGuard) TakeOver(ctx context.Context, key string, beforeManaged func() error) (SyncResult, error) {
 	return guard.of(key).TakeOver(ctx, key, beforeManaged)
 }

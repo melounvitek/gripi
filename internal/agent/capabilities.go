@@ -13,6 +13,12 @@ type CompactionPromptDeferrer interface {
 	DeferPrompt(context.Context, Prompt) (PromptResult, bool, error)
 }
 
+// Exiter is a client whose agent can end by itself, such as a process that crashed or whose computer the gateway lost,
+// after which the client serves nothing.
+type Exiter interface {
+	Exited() bool
+}
+
 // QueueRestorer is a client that hands back its queued messages when a stop retires it.
 type QueueRestorer interface {
 	QueuedMessagesForStop() (Queue, bool)

@@ -134,6 +134,9 @@ func (app *application) visibleTagCounts(request *http.Request, tags map[string]
 	}
 	counts := make(map[string]int)
 	for path := range paths {
+		if !reachesSession(request, path) {
+			continue
+		}
 		if app.ownsSession != nil {
 			owned := ownedPaths[path]
 			if app.ownershipStore == nil {

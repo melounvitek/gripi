@@ -162,7 +162,7 @@ test("setup installs Node dependencies, builds Go, and delegates password creati
   await cp(path.join(repoRoot, "bin/setup"), path.join(project, "bin/setup"));
   await cp(path.join(repoRoot, "bin/gripi-password"), path.join(project, "bin/gripi-password"));
   await executable(path.join(fakeBin, "mise"), `#!/bin/sh
-printf '%s\n' "$*" >> "$MISE_CALLS"
+printf '%s%s\n' "\${CGO_ENABLED:+CGO_ENABLED=$CGO_ENABLED }" "$*" >> "$MISE_CALLS"
 if [ "$*" = "exec -- go build -o tmp/gripi ./cmd/gripi" ]; then
   mkdir -p tmp
   cat > tmp/gripi <<'EOF'
@@ -173,9 +173,10 @@ EOF
   chmod +x tmp/gripi
 fi
 `);
-  const result = run(path.join(project, "bin/setup"), [], { cwd: project, env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, MISE_CALLS: calls, GRIPI_ENV_PATH: envPath } });
+  const result = run(path.join(project, "bin/setup"), [], { cwd: project, env: { ...process.env, CGO_ENABLED: "", PATH: `${fakeBin}:${process.env.PATH}`, MISE_CALLS: calls, GRIPI_ENV_PATH: envPath } });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual((await readFile(calls, "utf8")).trim().split("\n"), ["exec -- npm ci", "exec -- go build -o tmp/gripi ./cmd/gripi"]);
+  // Workers run the uploaded gateway binary, so it must be static.
+  assert.deepEqual((await readFile(calls, "utf8")).trim().split("\n"), ["exec -- npm ci", "CGO_ENABLED=0 exec -- go build -o tmp/gripi ./cmd/gripi"]);
   assert.equal(await readFile(envPath, "utf8"), "GRIPI_ADMIN_PASSWORD=0123456789abcdef01234567\n");
 });
 
@@ -306,7 +307,7 @@ test("launcher atomically bootstraps a missing Go binary only once across restar
   const fixture = await launcherFixture();
   const buildCalls = path.join(fixture.root, "build-calls");
   await executable(path.join(fixture.fakeBin, "mise"), `#!/bin/sh
-printf '%s\n' "$*" >> "$BUILD_CALLS"
+printf '%s%s\n' "\${CGO_ENABLED:+CGO_ENABLED=$CGO_ENABLED }" "$*" >> "$BUILD_CALLS"
 previous=''
 for argument in "$@"; do
   if [ "$previous" = "-o" ]; then output="$argument"; break; fi
@@ -324,7 +325,7 @@ chmod +x "$output"
   const result = run(fixture.launcher, [], { cwd: fixture.project, env: { ...fixture.env, BUILD_CALLS: buildCalls } });
   assert.equal(result.status, 0, result.stderr);
   assert.equal((await readFile(buildCalls, "utf8")).trim().split("\n").length, 1);
-  assert.match(await readFile(buildCalls, "utf8"), /exec -- go build -o .*gripi\.new\./);
+  assert.match(await readFile(buildCalls, "utf8"), /^CGO_ENABLED=0 exec -- go build -o .*gripi\.new\./);
   assert.deepEqual((await readFile(fixture.calls, "utf8")).trim().split("\n"), ["run", "run"]);
 });
 

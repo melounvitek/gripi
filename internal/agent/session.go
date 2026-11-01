@@ -44,6 +44,7 @@ type Message struct {
 	ToolName                string
 	ToolResultPersisted     bool
 	ToolPending             bool
+	ToolUnknown             bool
 	Thinking                bool
 	ToolSummaryHTML         string
 	ToolTranscript          bool

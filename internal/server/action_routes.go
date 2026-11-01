@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -643,6 +644,10 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		}
 		return
 	}
+	if !reachesFolder(request, cwd) {
+		writeJSONStatus(response, http.StatusForbidden, map[string]any{"valid": false, "error": "a worker can start sessions only in the repositories on it"})
+		return
+	}
 	forkFrom := ""
 	if raw := request.FormValue("fork_from"); raw != "" {
 		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so Pi forks the session into the
@@ -781,6 +786,12 @@ func (app *application) deleteSessionBlockReason(currentPath, targetPath string)
 	}
 	if app.rpcClients.Busy(targetPath) || app.rpcClients.Compacting(targetPath) {
 		return "Cannot delete a running session"
+	}
+	if app.workers != nil && app.agentOf(targetPath) != "hermes" {
+		// Main's copy would come back from the worker without what the gateway keeps about the session.
+		if location, found := app.workers.Location(app.currentSessionCWD(targetPath)); found {
+			return fmt.Sprintf("Cannot delete a session that runs on worker %s; continue on main first", location.Worker)
+		}
 	}
 	return ""
 }
@@ -1520,7 +1531,7 @@ func (app *application) actionSessionPath(response http.ResponseWriter, request 
 }
 
 func (app *application) validOwnedSessionPath(request *http.Request, path string) bool {
-	if path == "" || len(path) > maximumSessionPathBytes || !app.sessionStore.ValidKey(path) || strings.ContainsRune(path, 0) {
+	if path == "" || len(path) > maximumSessionPathBytes || !app.sessionStore.ValidKey(path) || strings.ContainsRune(path, 0) || !reachesSession(request, path) {
 		return false
 	}
 	return app.ownsSession == nil || app.ownsSession(request, path)
@@ -1686,6 +1697,11 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 		return true
 	}
 	if app.writeRPCError(response, err) {
+		return true
+	}
+	// The workers refuse to start a session on this machine in a session folder of a repository on a worker, for one.
+	if refused(err) {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": err.Error()})
 		return true
 	}
 	if errors.Is(err, agent.ErrStartFailed) {

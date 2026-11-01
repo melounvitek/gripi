@@ -453,7 +453,7 @@ func validateCheckout(ctx context.Context, directory, target string) *StepFailur
 		args          []string
 	}{
 		{"Install tools", "The tools the new version needs could not be installed.", miseInstallTimeout, []string{"mise", "install"}},
-		{"Build", "The new version did not build.", goBuildTimeout, []string{"mise", "exec", "--", "go", "build", "-o", target, "./cmd/gripi"}},
+		{"Build", "The new version did not build.", goBuildTimeout, []string{"env", "CGO_ENABLED=0", "mise", "exec", "--", "go", "build", "-o", target, "./cmd/gripi"}},
 		// The test suite runs in CI. Here the new build only has to work with this machine's Pi.
 		{"Check with Pi", "The new version failed its check on this machine.", checkTimeout, []string{target, "check"}},
 	}

@@ -820,3 +820,41 @@ test("terminal updates coalesce to the latest screen and stale bindings do not r
   await settle(() => renderer.terminalRenderStates.get(staleBody)?.rendering === false);
   assert.equal(rendered.length, 1);
 });
+
+test("a run that settles without a tool's result leaves the tool's outcome unknown, as history shows it", () => {
+  const scroll = new FakeElement("section");
+  const running = new FakeElement("article");
+  running.className = "message message--tool-call message--tool-pending";
+  const output = new FakeElement("div");
+  output.className = "tool-output-collapse";
+  const body = new FakeElement("pre");
+  body.className = "message-body";
+  body.dataset.rawText = "(running…)";
+  output.append(body);
+  running.append(output);
+  const finished = new FakeElement("article");
+  finished.className = "message message--tool-call";
+  scroll.append(running, finished);
+  const renderer = new LiveMessageRenderer(new FakeDocument(), {}, {}, { bind() {} });
+  renderer.conversationScroll = scroll;
+
+  renderer.settleUnfinishedTools();
+  assert.equal(running.className, "message message--tool-call message--tool-unknown");
+  assert.equal(running.children.length, 0);
+  assert.equal(finished.className, "message message--tool-call");
+});
+
+test("a new run's tool call is pending while one that an earlier run left without a result stays unknown, as history shows them", () => {
+  const conversation = { element: new FakeElement("section"), followLiveOutput: () => false, afterLiveOutputChange() {}, resetOversizedFollow() {} };
+  const renderer = new LiveMessageRenderer(new FakeDocument(), conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("section");
+  renderer.conversationScroll = conversation.element;
+  const lost = new FakeElement("article");
+  lost.className = "message message--tool-call message--tool-unknown";
+  conversation.element.append(lost, renderer.liveOutput);
+
+  renderer.renderMessageEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "bash-2", name: "bash", arguments: { command: "make check" } }] } });
+  const running = renderer.liveOutput.children[0];
+  assert.match(running.className, /message--tool-pending/);
+  assert.equal(lost.className, "message message--tool-call message--tool-unknown");
+});

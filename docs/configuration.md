@@ -280,6 +280,107 @@ Browsers allow the microphone only over HTTPS or on `localhost`, so other device
 
 The waveform button next to ＋ in the Hermes panel's composer starts a voice conversation, which takes the place of the panel's messages until it ends: bars follow your voice and Hermes's, with the sentence Hermes is speaking underneath. In the conversation, what you said shows as bars too; tap them to read the transcript. Pause to send what you said; if you go on talking before Hermes gets it, the rest joins the same message. Quiet blips play until Hermes's reply starts. Talk over a reply to interrupt it, or over Hermes's work to stop it and send what you said instead; noise without words leaves Hermes working. Saying “stop” finishes the conversation without stopping Hermes; `end` finishes it at any time, and Stop still stops Hermes. `mute` stops listening, though what you said just before is still sent. Ctrl+Shift+H starts and ends a voice conversation, and Ctrl+Shift+M mutes it, also from the session while the panel is open.
 
+## Workers
+
+A worker is another computer that runs the sessions of chosen repositories for the gateway, which [`gripi worker`](../README.md#workers) adds and moves repositories to. Main, here, is the gateway’s machine. It keeps the interface, Gripi’s settings, and a copy of each repository on a worker and of its sessions, which follows the worker’s. Gripi reaches a worker only with main’s `ssh`, as the gateway’s OS user and with that user’s SSH configuration.
+
+### Setting up a worker
+
+The worker needs:
+
+- Linux on the same architecture as main, which must run Linux too.
+- Pi 0.99.0 or later on main. Gripi copies main’s Pi to the worker, and refuses to connect to a worker with an older one.
+- A systemd user manager with cgroup v2. Gripi runs its helper there with `systemd-run --user`, which lets it stop everything that a session started.
+- Git, and the tools that the projects need, on the `PATH` of the user’s login shell. Gripi brings only Node and Pi.
+- Unprivileged user namespaces, when the worker user’s home folder has another path than the gateway user’s on main (see below). Arch, Fedora and Debian allow them. Ubuntu 23.10 and later block them with AppArmor; allow them with `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`, and put `kernel.apparmor_restrict_unprivileged_userns=0` in a file in `/etc/sysctl.d/` to keep that after a restart.
+- Logins from main’s `ssh` without a prompt: run `ssh user@host` once to accept the host key, and `ssh-copy-id user@host` to log in with a key. The gateway runs `ssh` too, so a key with a passphrase needs an agent that the gateway’s environment reaches through `SSH_AUTH_SOCK`. sshd on the worker must allow forwarding TCP ports and Unix sockets (`AllowTcpForwarding` and `AllowStreamLocalForwarding`) and at least 8 sessions per connection (`MaxSessions`), as it does by default.
+
+In practice, give Gripi a dedicated user on the worker, with any name and home folder, such as one that `useradd -m gripi` makes. Everything that the sessions run, runs as that user.
+
+Pi’s sessions name the paths of the projects and of Pi’s agent folder, so sessions on the worker use main’s paths. When the worker user’s home folder has another path than the gateway user’s on main, everything that Gripi runs there with main’s paths, such as Pi with everything it starts and the copies of main’s files, runs in a private view of the worker’s files: main’s home folder, such as `/home/alice`, shows the worker user’s home folder, such as `/home/gripi`. A user of the worker whose home folder has main’s path is never touched. Everything else stays as it is, such as `/tmp`, `/usr`, `/srv`, and what is next to main’s home folder, such as `/home/projects` or the other users’ home folders, which stay as private as they are. So projects outside main’s home folder need the same paths on the worker, where its user can write. The view shows what was next to main’s home folder when the gateway connected to the worker: a folder made there later is missing from it, and a move of a project in that folder fails, until the gateway connects again, such as after a restart. Nothing new can be made directly in the folder that holds main’s home folder, such as `/home`, because the view would lose it. The folder that holds main’s home folder, such as `/home`, must exist on the worker, and main’s home folder must not be directly in `/`, as `/root` is.
+
+In the view:
+
+- Tools see the worker’s user as itself, with `HOME` set to main’s home folder, and the files that they write belong to it.
+- Programs that need setuid don’t work, such as `sudo`, and rootless Podman, which needs `newuidmap`.
+- Services that the worker user’s systemd starts, such as with `systemd-run --user` without `--scope`, run outside the view and don’t see main’s paths. They run as the worker’s user, so they can’t change other users’ files either.
+- Docker works: sessions get a Docker socket of Gripi’s own in `DOCKER_HOST`, in place of main’s, which passes their requests on to the worker’s Docker, as `DOCKER_HOST` in the worker user’s systemd environment (not its login shell’s), the current Docker context or `/var/run/docker.sock` names it. The Docker daemon runs outside the view, so the socket changes paths in main’s home folder to the worker user’s home folder where requests name host folders: in bind mounts of new containers and in local volumes bound to a folder. It first follows the symbolic links in those paths as the sessions see them, because the daemon would follow them outside the view, where main’s home folder may be another user’s, and refuses a path whose links it cannot follow, such as a link to a missing path. It doesn’t change them in Swarm services, and it cannot reach Docker over `ssh://` or over `tcp://` with TLS, so with such an endpoint, Docker fails in the sessions.
+
+Membership of the `docker` group makes the worker’s user root on the worker in effect, and containers can leave files owned by root in the projects; rootless Docker avoids both. So the Docker socket only prevents accidents: sessions can still reach other users’ files through Docker on purpose.
+
+Then add the worker on main:
+
+```sh
+gripi worker add gripi@beelink.example.ts.net
+```
+
+`add` checks the system, Git and systemd, and when the worker user’s home folder differs from main’s, it installs Gripi’s helper there and checks the private view, saying what to do when the system blocks it. It fails when the worker’s user cannot create Pi’s agent folder at its path on main, as the sessions there see it, or when the worker shares main’s files, as main itself as the same user or a home folder mounted on both would: the worker’s files would replace main’s, such as Pi’s logins. Main checks that again whenever it connects. A worker that is main as another user is fine, because the sessions there see that user’s home folder at main’s. The worker is named after the first part of the host name, `beelink` here, unless `--name` names it. `gripi worker list` lists the workers.
+
+### What a worker gets
+
+The first time a session or a move needs a worker, main connects to it. On every connection, it brings the worker up to date, sending only what changed:
+
+- Gripi’s own executable, as the helper that runs the sessions, and Node and the Pi package at main’s versions, in `~/.local/share/gripi/worker` on the worker. Pi there has `node`, `pi` and `gripi` on its `PATH`.
+- Pi’s agent folder, with everything in it, such as settings, models, extensions, skills, prompts and installed Pi packages, but without `auth.json`, `mcp-auth.json` and the sessions. Links in it to files elsewhere, such as a folder of your own settings, are copied as the files they point to. Other files that Pi’s settings name, such as a package loaded from a local folder, are not copied.
+- Gripi’s Pi extensions, at their paths on main.
+
+Later changes to Pi’s configuration on main reach a worker the next time main connects to it, such as after the gateway restarts. Logins follow at once:
+
+- The worker’s `auth.json` has main’s API keys as they are, and main’s OAuth logins with their access tokens but without their refresh tokens. Some providers’ refresh tokens work only once, so two machines that refresh the same login revoke it on both.
+- Only main refreshes logins. About 15 minutes before a token expires, or halfway through a shorter token’s life, main has its own Pi refresh the login with `pi auth print-bearer-token`. Main checks its `auth.json` and `models.json` every few seconds and gives connected workers what changed; Pi there picks it up without a restart. Gripi only reads main’s `auth.json`.
+- Keys that Pi gets by running a command, `!command` in `auth.json` or `models.json`, are resolved on main with `pi auth print-api-key`, because the command may read files that only main has. A key that main cannot resolve, such as from a locked password store, is left out, with a warning in the gateway’s log, and main tries again a minute later.
+
+Pi on a worker gets the environment variables that it gets on main, including the saved [environment variables](#environment-variables), except those that describe main, such as `HOME`, `USER`, `SHELL`, `SSH_*`, `XDG_*`, and the terminal’s and the desktop’s. Its `PATH` is the worker user’s login `PATH`, with the `bin` folder of Gripi’s files first.
+
+Every `localhost` port in the URLs of Pi’s `models.json` and `mcp.json`, such as a local model proxy or an MCP server, reaches the same port on main from the worker while main is connected to it. A port that cannot be forwarded, such as one that something on the worker uses, keeps main from connecting.
+
+A `gripi` socket of the worker’s own is forwarded to the path of main’s socket on the worker, so the [`gripi` command](../README.md#command-line) works in sessions there. It reaches only the sessions on that worker, and refuses `gripi sudo` and `gripi claim`.
+
+### Moving a repository
+
+`gripi worker move <session or folder> <worker>`, or **Run on worker…** in the Ctrl+K palette, moves the repository of the folder, or of the session’s folder, to the worker: all its worktrees with their shared `.git`, and the sessions started anywhere in it. A folder outside Git moves on its own, and a bare repository cannot move. Nor can a folder that holds or is in Pi’s agent folder, the sessions’ folder, or Gripi’s state or configuration folder, such as a home folder outside Git, because the worker’s copy would replace main’s logins and state. Main stops the Pi of each session there first, and the move fails while one of them is working, or in [multi-user mode](#multi-user-mode) when the repository has another user’s sessions.
+
+The copy has the tracked and untracked files, and Git-ignored files of up to 10 MB, such as `.env` or `config/master.key`. Ignored folders, such as `node_modules/` or `tmp/`, stay as they are on each machine, so install the dependencies on the worker too.
+
+From then on, every session in the repository runs on the worker, including new ones and those in worktrees made there, and so does everything that Pi starts: tools, `!` commands, subagents and Docker. Files outside the repository, such as in `/tmp`, exist only on the worker. The conversation’s header and the editor’s footer show the worker’s name and state.
+
+Pi there loads a second Gripi extension, which holds each tool result and `!` command until main has the changes it made, usually a fraction of a second. If main cannot confirm them, or not within a minute, the result becomes an error that says that the changes may be missing on main, and the session’s next tool calls fail until main’s copy follows again. A file in the repository that the worker cannot read, such as one without read permission, also stops confirmations until the worker can read it, while main keeps its last copy.
+
+Treat main’s copy as read-only while the repository is on a worker. Changes made to it anyway don’t reach the worker. Main’s copy takes the worker’s changes only in the repository’s folders and in worktrees made on the worker, and refuses a worktree made there that holds or is in Pi’s or Gripi’s own folders or another repository on a worker. A refused worktree stops confirmations. When the worker’s version of a file that changed on main replaces or deletes it, main’s version is first saved in a folder under `mirrors/` in Gripi’s state folder (see [gateway state](#gateway-state)), at its full path, and the conversation names that folder until you dismiss the notice. Git’s index alone doesn’t count, so `git status` on main is harmless.
+
+`gripi worker return <session or folder>`, or **Continue on main** in the palette, brings the repository back. It stops everything that the repository’s sessions run on the worker, including background processes, takes their last changes, and runs the sessions on main again. The worker keeps its copy, which the next move updates. When sessions there started in a folder that is no longer the repository’s, such as a removed worktree, the next move keeps the worker’s copies of them aside, in `.<folder>.gripi-aside/` next to their Pi session folder there.
+
+### Losing a worker
+
+The helper pings main every second. When main has not answered for 30 seconds, or at once when the connection closes, it stops Pi and everything that Pi started on the worker. Main treats the worker as unreachable when it has had no ping to answer for 15 seconds, or when the connection ends. The step that each session there was running then ends with an unknown outcome, because nobody knows whether it finished, and its tool block says so. Main has each session up to the entries that reached it, and the repository as it was after the last tool result that main confirmed.
+
+What happens next is up to you:
+
+- If the worker answers again, the session’s next message connects again and continues on the worker, from its copy there.
+- Otherwise, continue on main. In the editor’s place, Gripi counts down to when the worker must have stopped everything, 32 seconds after main’s last answer, and then offers **continue on main**; `gripi worker return` refuses until then and says when that is. The repository then continues on main as main last got it. The worker’s copies of the repository and of its sessions may have changes that main never got: the next move to that worker saves what it replaces there in `.<repository>.gripi-aside/`, next to the repository on the worker, and in `.<folder>.gripi-aside/` next to each of Pi’s session folders.
+
+Losing a worker loses the running step and the background processes that the sessions started there, such as dev servers, which, unlike on main, stop with the connection. Continuing on main also leaves the files outside the repository behind on the worker. Stopping the gateway, such as for an update, also stops everything that sessions run on workers.
+
+The helper cannot stop what others run for Pi: Docker and Podman containers, which their daemons own, and anything started with `systemd-run --user`, such as the Pi sessions that the `gripi-orchestrate` skill starts. These keep running after a disconnect or a return, and what they change afterwards stays on the worker, so stop them yourself.
+
+### Forwarding ports
+
+`gripi worker forward <session or folder> <port>`, or **Forward a port…** in the palette, makes a port on the worker’s localhost, such as a dev server’s, available on main’s localhost: at the same port, or at the next free one, which it prints. Main listens on localhost only. The editor’s footer shows the forwarded ports. A forward lasts until `gripi worker unforward` or **Stop forwarding** in the palette, or until main’s connection to the worker ends; it isn’t restored when main connects again.
+
+### Limits
+
+- Pi’s `mcp-auth.json` isn’t copied, so MCP servers that need an OAuth login are not logged in on workers.
+- Main cannot refresh logins of providers that Pi extensions add, so on a worker such a login stops working when its token expires, unless main’s own Pi has refreshed it meanwhile.
+- A session on a worker can be deleted only once its repository continues on main, because the worker would send main its copy again.
+- A repository on a worker never shares a folder with another repository on a worker, nor one of Pi’s session folders with sessions of another folder, which Pi keeps in the same session folder for paths such as `/work/a-b` and `/work/a/b`. A move, a worktree made on a worker or a session in a new folder is refused when one of its folders is, holds or is in a folder of another repository on a worker or moving to one, or when they would share a session folder, and a move or a session in a new folder also when its session folder has sessions of another folder on main. A move or a session in a new folder stops the new sessions of other folders that Pi would save in the repository’s session folders, or is refused while one of them works, and while the repository is on a worker, such sessions don’t start on main. A repository keeps every session folder that it had on a worker, also that of a removed worktree, until it continues on main.
+- Continue a session on a worker only in Gripi. If Pi CLI on main writes it, Gripi asks to take the session over, as for any session in use in Pi CLI, and then shows a conflict, because the worker’s copy replaces what Pi CLI wrote.
+- The `mirrors/` folder in Gripi’s state folder must be on the same file system as the repositories and Pi’s sessions.
+- The notice about main’s files saved aside is lost when the gateway restarts; the files stay.
+
+### Removing a worker
+
+`gripi worker remove <worker>` forgets a worker once no repository is on it. Gripi’s files there stay: `~/.local/share/gripi/worker`, Gripi’s state folder, and the copies of Pi’s agent folder, the repositories and their sessions, which are in the worker user’s home folder for those in main’s. Delete them on the worker when you no longer need them.
+
 ## Session location
 
 Gripi lists sessions from `~/.pi/agent/sessions`. If Pi stores sessions somewhere else, for example because `PI_CODING_AGENT_DIR` is set, point Gripi there:
@@ -363,11 +464,15 @@ Gripi stores its own data separately from Pi’s. Each location can be changed w
 | `~/.pi/gripi/pinned-sessions.json` | Pinned sessions | `GRIPI_PINNED_SESSIONS_PATH` |
 | `~/.pi/gripi/session-tags.json` | Session tags | `GRIPI_SESSION_TAGS_PATH` |
 | `~/.pi/gripi/environment.json` | Saved [environment variables](#environment-variables); contains secrets in plain text, so do not share it | `GRIPI_ENVIRONMENT_PATH` |
+| `~/.pi/gripi/workers.json` | Workers added with `gripi worker` | `GRIPI_WORKERS_PATH` |
+| `~/.pi/gripi/worker-placements.json` | Repositories moved to workers with `gripi worker move` | `GRIPI_WORKER_PLACEMENTS_PATH` |
 | `~/.pi/gripi/attachments/` | Uploaded attachments | `GRIPI_ATTACHMENTS_ROOT` |
 | `~/.pi/gripi/web-push-vapid.json` | Web Push keys | `GRIPI_WEB_PUSH_VAPID_PATH` |
 | `~/.pi/gripi/push-subscriptions.json` | Web Push subscriptions | `GRIPI_PUSH_SUBSCRIPTIONS_PATH` |
 | `~/.pi/gripi/restart-request` | Restart signal for `bin/start` (not read from the env file) | `GRIPI_RESTART_PATH` |
 | `~/.pi/gripi/gripi.sock` | Socket for the [`gripi` command](../README.md#command-line), which must run with the same value (not read from the env file) | `GRIPI_SOCKET_PATH` |
+
+Gripi’s state folder, the folder of `read-state.json`, also holds Gripi’s Pi extensions in `pi-extensions/` and, for [workers](#workers), SSH’s control sockets in `ssh/`, each worker’s `gripi` socket in `workers/`, and in `mirrors/` main’s side of the copies of repositories on workers, with main’s files saved aside.
 
 If a file is malformed, Gripi leaves it untouched instead of replacing it. Requests that depend on it fail, and the gateway log names the file. To recover, stop the gateway, back up the file, then fix it or move it aside. Moving a file aside resets only its own data, such as approvals or read markers. Pi’s session files are not affected.
 

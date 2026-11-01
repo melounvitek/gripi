@@ -73,7 +73,9 @@ export const sessions = {
   liveThinking: "E2E Live Thinking Desktop",
   paletteCommands: "E2E Palette Commands Desktop",
   sudo: "E2E Sudo Desktop",
-  sudoMobile: "E2E Sudo Mobile"
+  sudoMobile: "E2E Sudo Mobile",
+  worker: "E2E Worker Desktop",
+  workerMobile: "E2E Worker Mobile"
 };
 
 export const footerModel = {

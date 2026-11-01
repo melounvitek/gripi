@@ -24,9 +24,13 @@ import (
 	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
+	remote "github.com/melounvitek/gripi/internal/worker"
+	"github.com/melounvitek/gripi/internal/worker/view"
 )
 
 func main() {
+	// gripi worker enter and serve start gripi again to enter the private view on a worker.
+	view.Init()
 	// The gateway runs gripi as sudo's askpass program, which gets only sudo's prompt.
 	if os.Getenv("GRIPI_SUDO_TOKEN") != "" {
 		os.Exit(answerSudoPrompt(os.Args[1:], os.Stdout, os.Stderr))
@@ -39,11 +43,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	adapter, err := newAdapter(cfg)
-	if err != nil {
-		return err
-	}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, adapter)
+	handler, workers, err := newGateway(cfg, remote.Options{})
 	if err != nil {
 		return err
 	}
@@ -118,35 +118,57 @@ func serve() error {
 			exitCode = 1
 		}
 	}
+	// The workers stop their sessions' processes once the connections close.
+	workers.Close()
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
 	return nil
 }
 
-// newAdapter returns Pi's adapter alone, unless GRIPI_HERMES adds Hermes next to it.
-func newAdapter(cfg config.Config) (agent.Adapter, error) {
-	piAdapter, err := newPiAdapter(cfg)
+// newGateway returns the gateway's handler, and the workers that run the sessions of repositories placed on them,
+// connecting to them with the options of connection.
+func newGateway(cfg config.Config, connection remote.Options) (http.Handler, *remote.Manager, error) {
+	var workers *remote.Manager
+	piAdapter, err := newPiAdapter(cfg, func(process agent.Process) (*exec.Cmd, func(), error) { return workers.Launch(process) })
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, newAdapter(cfg, piAdapter))
+	if err != nil {
+		return nil, nil, err
+	}
+	if workers, err = newWorkers(cfg, piAdapter, handler, connection); err != nil {
+		return nil, nil, err
+	}
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(gatewayWorkers{workers, cfg.WorkersPath})
+	return handler, workers, nil
+}
+
+// newAdapter returns Pi's adapter alone, unless GRIPI_HERMES adds Hermes next to it.
+func newAdapter(cfg config.Config, piAdapter *pi.Adapter) agent.Adapter {
 	if cfg.HermesPath == "" {
-		return piAdapter, nil
+		return piAdapter
 	}
 	return agent.NewRouter(
 		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
 		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)})},
-	), nil
+	)
 }
 
-func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
+// newPiAdapter returns Pi's adapter, which starts each session's Pi with launcher when it is set.
+func newPiAdapter(cfg config.Config, launcher agent.Launcher) (*pi.Adapter, error) {
 	extension, err := fs.ReadFile(gripi.WebFiles, "pi_extensions/gripi-tree.ts")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
+	}
+	workerExtension, err := fs.ReadFile(gripi.WebFiles, "pi_extensions/gripi-worker.ts")
 	if err != nil {
 		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
 	}
 	return pi.New(pi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
-		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg),
+		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg), Launcher: launcher,
 	}), nil
 }
 

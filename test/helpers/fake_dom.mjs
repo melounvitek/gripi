@@ -74,6 +74,8 @@ export class FakeElement extends FakeEventTarget {
     if (this.selectors.has(selector) || selector === this.tagName.toLowerCase()) return true;
     if (selector === "[hidden]") return this.hidden;
     if (selector.startsWith(".")) return this.classList.contains(selector.slice(1));
+    const attribute = selector.match(/^\[([\w-]+)="([^"]*)"\]$/);
+    if (attribute) return this.getAttribute(attribute[1]) === attribute[2];
     return false;
   }
   closest(selector) {

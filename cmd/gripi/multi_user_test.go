@@ -30,10 +30,11 @@ func multiUserGateway(t *testing.T) (alpha, beta string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter, err := newAdapter(cfg)
+	piAdapter, err := newPiAdapter(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	adapter := newAdapter(cfg, piAdapter)
 	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, adapter.Store())
 	workspaceCookies = map[string]string{}
 	for token, path := range map[string]string{aliceToken: alpha, bobToken: beta} {

@@ -79,6 +79,8 @@ type application struct {
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
 	sudoRequests            sudoRequests
+	// workers move repositories to workers and back, which gripi commands can't ask for when it is nil.
+	workers Workers
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
 	voice  *hermesdashboard.Client
 	hermes hermesConversation
@@ -103,6 +105,7 @@ func writeInternalError(response http.ResponseWriter, operation string, err erro
 type Handler struct {
 	next            http.Handler
 	local           http.Handler
+	commands        http.Handler // the routes of Local, which Worker serves in part
 	app             *application
 	closeMu         sync.Mutex
 	closed          bool
@@ -319,6 +322,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.registerSessionRoutes(mux)
 	app.registerActionRoutes(mux)
 	app.registerEnvironmentRoutes(mux)
+	app.registerWorkerRoutes(mux)
 	if cfg.HermesPath != "" {
 		app.registerHermesRoutes(mux)
 	}
@@ -346,6 +350,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	socket.HandleFunc("POST /sudo/askpass", app.sudoAskpass)
 	socket.Handle("/", commands)
 	gateway.local = app.limitRequestBody(socket)
+	gateway.commands = commands
 	return gateway, nil
 }
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -182,7 +181,8 @@ func TestSelectedOversizedToolCallsAndResultsRenderWithCorrectPairing(t *testing
 	}
 }
 
-func TestToolCallsWithoutResultsArePending(t *testing.T) {
+// A model change can happen while a turn runs; a later message can't.
+func TestToolCallsWithoutResultsArePendingInTheLatestTurnAndUnknownBefore(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	call := func(id, parent, callID, name string) string {
 		return `{"type":"message","id":"` + id + `","parentId":` + parent + `,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"` + callID + `","name":"` + name + `","arguments":{"command":"true"}}]}}`
@@ -202,25 +202,34 @@ func TestToolCallsWithoutResultsArePending(t *testing.T) {
 		result("custom-result", "custom-call", "custom-done", "screenshot"),
 		call("orphan-paired", `"custom-result"`, "bash-orphan", "bash"),
 		call("orphan-custom", `"orphan-paired"`, "custom-orphan", "screenshot"),
-		call("empty-paired", `"orphan-custom"`, "bash-empty", "bash"),
+		userLine("next", "orphan-custom", "2026-01-01T00:00:03Z", "Next run"),
+		call("empty-paired", `"next"`, "bash-empty", "bash"),
 		result("empty-paired-result", "empty-paired", "bash-empty", "bash", `[{"type":"text","text":""}]`),
 		call("empty-custom", `"empty-paired-result"`, "custom-empty", "screenshot"),
 		result("empty-custom-result", "empty-custom", "custom-empty", "screenshot", `[]`),
+		`{"type":"message","id":"latest","parentId":"empty-custom-result","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[` +
+			`{"type":"toolCall","id":"bash-running","name":"bash","arguments":{"command":"true"}},` +
+			`{"type":"toolCall","id":"custom-running","name":"screenshot","arguments":{}},` +
+			`{"type":"toolCall","id":"bash-sibling","name":"bash","arguments":{"command":"true"}}]}}`,
+		result("sibling-result", "latest", "bash-sibling", "bash"),
+		`{"type":"model_change","id":"model","parentId":"sibling-result","timestamp":"2026-01-01T00:00:04Z","provider":"test","modelId":"test"}`,
 	})
 
 	window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := map[string]bool{}
+	var pending, unknown []string
 	for _, message := range window.Messages {
-		if message.Role == "assistant" {
-			pending[message.ToolCallID] = message.ToolPending
+		if message.ToolPending {
+			pending = append(pending, message.ToolCallID)
+		}
+		if message.ToolUnknown {
+			unknown = append(unknown, message.ToolCallID)
 		}
 	}
-	want := map[string]bool{"bash-done": false, "custom-done": false, "bash-orphan": true, "custom-orphan": true, "bash-empty": false, "custom-empty": false}
-	if !maps.Equal(pending, want) {
-		t.Fatalf("pending tool calls = %v, want %v", pending, want)
+	if !slices.Equal(pending, []string{"bash-running", "custom-running"}) || !slices.Equal(unknown, []string{"bash-orphan", "custom-orphan"}) {
+		t.Fatalf("pending tool calls = %v, unknown = %v", pending, unknown)
 	}
 }
 

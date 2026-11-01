@@ -17,15 +17,25 @@ func NewPiHandler(cfg config.Config, files fs.FS) (http.Handler, error) {
 	return newPiHandler(cfg, files, randomBrowserToken)
 }
 
+// NewPiHandlerWithLauncher builds the gateway as NewPiHandler does, with a launcher that may start Pi elsewhere, as the
+// workers' does.
+func NewPiHandlerWithLauncher(cfg config.Config, files fs.FS, launcher agent.Launcher) (http.Handler, error) {
+	adapter, err := piAdapter(cfg, files, launcher)
+	if err != nil {
+		return nil, err
+	}
+	return newHandler(cfg, files, adapter, randomBrowserToken)
+}
+
 func newPiHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, error)) (http.Handler, error) {
-	adapter, err := piAdapter(cfg, files)
+	adapter, err := piAdapter(cfg, files, nil)
 	if err != nil {
 		return nil, err
 	}
 	return newHandler(cfg, files, adapter, newBrowserToken)
 }
 
-func piAdapter(cfg config.Config, files fs.FS) (*agentpi.Adapter, error) {
+func piAdapter(cfg config.Config, files fs.FS, launcher agent.Launcher) (*agentpi.Adapter, error) {
 	extension, err := fs.ReadFile(files, "pi_extensions/gripi-tree.ts")
 	if err != nil {
 		return nil, err
@@ -36,7 +46,7 @@ func piAdapter(cfg config.Config, files fs.FS) (*agentpi.Adapter, error) {
 	}
 	return agentpi.New(agentpi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
-		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir,
+		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir, Launcher: launcher,
 	}), nil
 }
 
@@ -54,7 +64,7 @@ func inspectGuard(guard agent.Guard, ctx context.Context, key string, includePos
 
 // NewHandlerWithHermes builds the gateway with Pi and the Hermes that cfg.HermesPath runs, as cmd/gripi does.
 func NewHandlerWithHermes(cfg config.Config, files fs.FS) (http.Handler, error) {
-	pi, err := piAdapter(cfg, files)
+	pi, err := piAdapter(cfg, files, nil)
 	if err != nil {
 		return nil, err
 	}

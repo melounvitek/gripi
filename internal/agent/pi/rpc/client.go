@@ -14,8 +14,10 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -149,6 +151,7 @@ type Client struct {
 	stderr io.ReadCloser
 
 	process            *exec.Cmd
+	release            func() // tells the launcher that process has ended
 	processGroup       processGroup
 	pid                int
 	waitDone           chan struct{}
@@ -199,6 +202,8 @@ type Client struct {
 	extensionTitle       map[string]any
 
 	busy                        bool
+	busyWhenStopped             bool // whether a run was going when Pi's output ended
+	lostReported                bool
 	busySince                   *time.Time
 	agentRunning                bool
 	settledAt                   *time.Time
@@ -223,49 +228,72 @@ type Client struct {
 	sampleInterval     time.Duration
 }
 
-// Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top. Pi starts a new
-// session in cwd when sessionPath does not exist yet, and saves it there.
-func Start(sessionPath, cwd string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+// Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top, or what launch
+// runs instead when it is set. Pi starts a new session in cwd when sessionPath does not exist yet, and saves it there.
+func Start(sessionPath, cwd string, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath, "--session", sessionPath}
-	return startProcess(cwd, command, args, variables, diagnostics, observer)
+	return startProcess(sessionPath, cwd, command, args, variables, launch, diagnostics, observer)
 }
 
 // StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set.
-func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
 	if forkFrom != "" {
 		args = append(args, "--fork", forkFrom)
 	}
-	return startProcess(cwd, command, args, variables, diagnostics, observer)
+	return startProcess("", cwd, command, args, variables, launch, diagnostics, observer)
 }
 
-func startProcess(cwd string, command, args, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func startProcess(key, cwd string, command, args, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	if len(command) == 0 {
 		return nil, errors.New("Pi RPC command is empty")
 	}
-	cmd := exec.Command(command[0], append(command[1:], args...)...)
-	cmd.Dir = cwd
-	cmd.Env = append(agent.ScrubbedEnvironment(os.Environ()), variables...)
+	var cmd *exec.Cmd
+	release := func() {}
+	var started atomic.Pointer[Client]
+	if launch != nil {
+		lost := func(message string) {
+			if client := started.Load(); client != nil {
+				client.lost(message)
+			}
+		}
+		launched, done, err := launch(agent.Process{Key: key, Dir: cwd, Command: append(slices.Clone(command), args...), Env: variables, Lost: lost})
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", agent.ErrStartFailed, err)
+		}
+		if launched != nil {
+			cmd, release = launched, done
+		}
+	}
+	if cmd == nil {
+		cmd = exec.Command(command[0], append(command[1:], args...)...)
+		cmd.Dir = cwd
+		cmd.Env = append(agent.ScrubbedEnvironment(os.Environ()), variables...)
+	}
 	configureProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		release()
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
+		release()
 		return nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
+		release()
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		_ = stderr.Close()
+		release()
 		return nil, fmt.Errorf("%w: %w", agent.ErrStartFailed, err)
 	}
 	group, err := attachProcessGroup(cmd)
@@ -275,10 +303,13 @@ func startProcess(cwd string, command, args, variables []string, diagnostics *ag
 		_ = stdout.Close()
 		_ = stderr.Close()
 		_ = cmd.Wait()
+		release()
 		return nil, fmt.Errorf("attach Pi RPC process group: %w", err)
 	}
 	client := NewClient(stdin, stdout, stderr, ClientOptions{Diagnostics: diagnostics, EventObserver: observer})
+	started.Store(client)
 	client.process = cmd
+	client.release = release
 	client.processGroup = group
 	client.pid = cmd.Process.Pid
 	client.waitDone = make(chan struct{})
@@ -1049,6 +1080,7 @@ func (client *Client) sampleOversizedToolUpdate(id string) bool {
 
 func (client *Client) readerStopped() {
 	client.mu.Lock()
+	client.busyWhenStopped = client.busy
 	client.agentRunning = false
 	client.activeBashToken = nil
 	client.activeBashID = ""
@@ -1078,6 +1110,18 @@ func (client *Client) readerStopped() {
 	client.busy = false
 	client.busySince = nil
 	client.mu.Unlock()
+}
+
+// lost ends the run that was going when the launcher lost Pi with the launcher's message, because nobody knows how the
+// run ended. Pi's events end with its output, so the gateway ends the run as Pi's agent_settled does, with an error.
+func (client *Client) lost(message string) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.lostReported || !client.busy && !client.busyWhenStopped {
+		return
+	}
+	client.lostReported = true
+	client.appendGatewayEventLocked(map[string]any{"type": "agent_settled", "aborted": false, "error": message, "gatewayTimestamp": client.clock().UnixMilli()})
 }
 
 func (client *Client) storeResponse(response map[string]any, serializedBytes int) {
@@ -1219,6 +1263,17 @@ func (client *Client) ContinueEventsAfter(sequence int64) {
 	}
 	client.rebuildCoalescedPointersLocked()
 }
+
+// Exited reports whether Pi's output has ended, as it does when Pi exits, so that Pi can answer nothing more.
+func (client *Client) Exited() bool {
+	select {
+	case <-client.readerDone:
+		return true
+	default:
+		return false
+	}
+}
+
 func (client *Client) Busy() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()
@@ -1359,6 +1414,7 @@ func (client *Client) waitForProcess() {
 	if client.processGroup != nil {
 		_ = client.processGroup.Close()
 	}
+	client.release()
 	close(client.waitDone)
 }
 

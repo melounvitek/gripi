@@ -310,6 +310,9 @@ func (registry *Registry) with(ctx context.Context, path string, serial lane, cr
 }
 
 func (registry *Registry) acquire(path string, create, touch, observer bool) (*clientEntry, error) {
+	if create {
+		registry.retireExited(path)
+	}
 	registry.mu.Lock()
 	if registry.closed {
 		registry.mu.Unlock()
@@ -389,6 +392,26 @@ func (registry *Registry) acquire(path string, create, touch, observer bool) (*c
 	}
 	return entry, nil
 }
+
+// retireExited retires the client of a session whose agent has ended by itself, so that a new client starts in its
+// place, which continues its events as after an idle retirement.
+func (registry *Registry) retireExited(path string) {
+	registry.mu.Lock()
+	entry := registry.clients[path]
+	var exited bool
+	if entry != nil && !entry.retiring {
+		exiter, ok := entry.client.(Exiter)
+		exited = ok && exiter.Exited()
+	}
+	if exited {
+		registry.retiredSequences[path] = entry.client.EventSequence()
+	}
+	registry.mu.Unlock()
+	if exited {
+		registry.discard(entry, ErrProcessExited)
+	}
+}
+
 func (registry *Registry) release(entry *clientEntry, touch, observer bool) {
 	registry.mu.Lock()
 	if entry.activeRequests > 0 {
