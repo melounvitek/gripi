@@ -69,6 +69,10 @@ const connectTimeout = 5 * time.Minute
 // another.
 const reconnectInterval = 2 * time.Second
 
+// firstBarrierTimeout bounds waiting until main's copies of a repository on a worker and of its sessions have the
+// first barriers of their mirrors, which a session's Pi waits for.
+var firstBarrierTimeout = time.Minute
+
 // closeSessionTimeout bounds closing a session's Pi on a worker, which the helper kills when it hasn't stopped 5
 // seconds after SIGTERM.
 const closeSessionTimeout = 10 * time.Second
@@ -174,8 +178,10 @@ type launched struct {
 type liveMirror struct {
 	unit        mirror.Unit
 	destination *mirror.Destination
+	started     time.Time // before the mirror's first barrier
 	cancel      context.CancelFunc
 	done        chan struct{}
+	err         error // why the mirror stopped, once done is closed
 }
 
 func (live *liveMirror) running() bool {
@@ -614,21 +620,21 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 		return err
 	}
 	mirrorCtx, cancel := context.WithCancel(manager.ctx)
-	live := &liveMirror{unit: unit, destination: destination, cancel: cancel, done: make(chan struct{})}
+	live := &liveMirror{unit: unit, destination: destination, started: time.Now(), cancel: cancel, done: make(chan struct{})}
 	manager.mu.Lock()
 	worker.mirrors[unit.Main] = live
 	manager.mu.Unlock()
 	go func() {
 		defer close(live.done)
 		aside := filepath.Join(folder, "aside", time.Now().UTC().Format("20060102T150405.000000000Z"))
-		err := destination.Serve(mirrorCtx, struct {
+		live.err = destination.Serve(mirrorCtx, struct {
 			io.Reader
 			io.WriteCloser
 		}{output, input}, aside)
 		command.Wait()
 		release()
-		if err != nil {
-			log.Printf("mirror of %s from worker %s: %v %s", unit.Main, worker.name, err, stderr)
+		if live.err != nil {
+			log.Printf("mirror of %s from worker %s: %v %s", unit.Main, worker.name, live.err, stderr)
 		}
 	}()
 	return nil
@@ -760,16 +766,36 @@ func unitFolders(unit mirror.Unit) []string {
 	return folders
 }
 
-// waitForMirror returns once main's copy of a unit has taken a barrier that started after since.
-func waitForMirror(ctx context.Context, live *liveMirror, since time.Time) error {
+// waitForMirrors returns once main's copies of a placed unit and of its sessions' folders have the first barriers of
+// their running mirrors, which a failed apply, a file that the worker cannot read or a stalled channel hold up.
+func (manager *Manager) waitForMirrors(ctx context.Context, worker *remote, unit mirror.Unit) error {
+	ctx, cancel := context.WithTimeoutCause(ctx, firstBarrierTimeout,
+		fmt.Errorf("main got no barrier from it within %s; the worker may be unable to read some of its files", firstBarrierTimeout))
+	defer cancel()
+	for _, main := range []string{unit.Main, manager.sessionsMain(unit)} {
+		manager.mu.Lock()
+		live := worker.mirrors[main]
+		manager.mu.Unlock()
+		if live == nil {
+			return fmt.Errorf("%s is not mirrored from worker %s", main, worker.name)
+		}
+		if err := waitForMirror(ctx, live); err != nil {
+			return fmt.Errorf("mirror %s from worker %s: %w", main, worker.name, err)
+		}
+	}
+	return nil
+}
+
+// waitForMirror returns once main's copy of a unit has applied the first barrier of its running mirror.
+func waitForMirror(ctx context.Context, live *liveMirror) error {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
-	for !live.destination.Checkpoint().Time.After(since) {
+	for !live.destination.Checkpoint().Time.After(live.started) {
 		select {
 		case <-live.done:
-			return errors.New("the mirror stopped before main had the repository")
+			return fmt.Errorf("the mirror stopped before its first barrier: %v", live.err)
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case <-ticker.C:
 		}
 	}
@@ -830,6 +856,9 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	// The session's barriers need both mirrors of its repository.
 	worker, err := manager.connect(ctx, placement.Worker, placement.Unit.Main)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := manager.waitForMirrors(ctx, worker, placement.Unit); err != nil {
 		return nil, nil, err
 	}
 	conn, err := manager.connection(worker)
@@ -1054,7 +1083,6 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 			return err
 		}
 	}
-	started := time.Now()
 	for _, sessions := range []bool{false, true} {
 		main := unit.Main
 		if sessions {
@@ -1067,14 +1095,8 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 		if err := manager.startMirror(ctx, worker, unit, sessions); err != nil {
 			return err
 		}
-		manager.mu.Lock()
-		live := worker.mirrors[main]
-		manager.mu.Unlock()
-		if err := waitForMirror(ctx, live, started); err != nil {
-			return err
-		}
 	}
-	return nil
+	return manager.waitForMirrors(ctx, worker, unit)
 }
 
 // Return brings the repository that holds folder back from its worker: it stops everything that the repository's

@@ -246,6 +246,48 @@ func TestLaunchFailsUnlessBothMirrorsOfTheRepositoryRun(t *testing.T) {
 	}
 }
 
+func TestLaunchWaitsUntilMainHasTheRepositoryAndTheSessionsAsTheWorkerHasThem(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	manager := newTestManager(t, options)
+	project := t.TempDir()
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+	// The worker cannot read a folder among the sessions' files, so main never gets them as they are there.
+	sessions := sessionFolder(options.SessionsRoot, project)
+	unreadable := filepath.Join(sessions, "private")
+	if err := os.MkdirAll(unreadable, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unreadable, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(unreadable, 0700) })
+	defer func(timeout time.Duration) { firstBarrierTimeout = timeout }(firstBarrierTimeout)
+	firstBarrierTimeout = time.Second
+	process := agent.Process{Dir: project, Command: []string{"pi", "--mode", "rpc"}}
+
+	if command, _, err := manager.Launch(process); command != nil || err == nil || !strings.Contains(err.Error(), sessions) || !strings.Contains(err.Error(), "no barrier") {
+		t.Fatalf("Launch while main lacks the sessions = %v, %v", command, err)
+	}
+	firstBarrierTimeout = 10 * time.Second
+	if err := os.Chmod(unreadable, 0700); err != nil {
+		t.Fatal(err)
+	}
+	command, release, err := manager.Launch(process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Run(); err != nil {
+		t.Fatal(err)
+	}
+	release()
+}
+
 // hangingPi stands in for Pi on the worker, with a background process, whose PID it prints. Once its input ends, it
 // hangs, as Pi does in a session_shutdown handler that never finishes.
 const hangingPi = `#!/usr/bin/env node
