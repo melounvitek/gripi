@@ -38,7 +38,9 @@ The worker tests run the helper under `systemd-run --user` on this machine when 
 GRIPI_TEST_SSH=localhost go test ./internal/worker/ -run RealSSH -v
 ```
 
-`GRIPI_TEST_SSH` can name any worker that `ssh` reaches without a prompt and that has a systemd user manager. The tests install the helper in `GRIPI_TEST_SSH_DIR` there (`~/gripi-helper-test` by default) and remove it afterwards.
+`GRIPI_TEST_SSH` can name any worker that `ssh` reaches without a prompt and that has a systemd user manager. The tests install the helper in `GRIPI_TEST_SSH_DIR` there (`~/gripi-helper-test` by default) and remove it afterwards. When the worker user's home folder differs from yours, the helper runs in the [private view](configuration.md#setting-up-a-worker) of your home folder, and the tests check that sessions and copies see the worker user's home folder at yours, and that systemd's watchdog stops a helper that hangs there.
+
+The tests of the private view itself, in `internal/worker/view`, skip where unprivileged user namespaces are blocked, such as on Ubuntu. To run them, and the helper's tests under systemd in the view, on a worker without Go, build both with `CGO_ENABLED=0 go test -c` and Gripi with `CGO_ENABLED=0 go build`, copy them there, and run the helper's tests with `GRIPI_TEST_GRIPI` naming that Gripi and `GRIPI_TEST_VIEW_HOME` naming a home folder that the view should show, such as `/home/alice`.
 
 The mirror's test with three parallel commit loops checks 8 barriers; for 100, run:
 
@@ -46,13 +48,13 @@ The mirror's test with three parallel commit loops checks 8 barriers; for 100, r
 GRIPI_MIRROR_STRESS=1 go test ./internal/worker/mirror/ -run ParallelCommitLoops -v
 ```
 
-An end-to-end test moves a repository with a worktree to a real worker and back, with a gateway whose Pi folder, state and projects all live in `/tmp/gripi-e2e`, which the worker gets at the same paths, and a scripted model, so no real model is called. On the way, it checks that main's copies of the sessions follow the worker's and outlive a gateway restart, that the worker's `auth.json` follows changes to main's without its refresh tokens, that a file edited on main is saved aside, and that a worktree made on the worker runs its sessions there. It then freezes the ssh master connection: a few seconds cost nothing, while half a lease ends the running step with an unknown outcome, and the repository continues on main once the worker is gone. The next move keeps aside on the worker what main never got, and after the master is killed, the next prompt of a session whose Pi ran there connects again and starts its Pi there. It needs another machine, because the worker must not share main's files:
+An end-to-end test moves a repository with a worktree to a real worker and back, with a scripted model, so no real model is called. The gateway's home folder is `/tmp/gripi-e2e/home/vitek`, which the worker lacks, and its Pi folder, state and projects are in that home folder, so the worker's sessions see them in its user's own home folder through the private view. On the way, it checks that main's copies of the sessions follow the worker's and outlive a gateway restart, that the worker's `auth.json` follows changes to main's without its refresh tokens, that a file edited on main is saved aside, and that a worktree made on the worker runs its sessions there. It then freezes the ssh master connection: a few seconds cost nothing, while half a lease ends the running step with an unknown outcome, and the repository continues on main once the worker is gone. The next move keeps aside on the worker what main never got, and after the master is killed, the next prompt of a session whose Pi ran there connects again and starts its Pi there. It needs another machine, because the worker must not share main's files:
 
 ```sh
 GRIPI_TEST_WORKER=gripi@beelink.example.ts.net go test ./cmd/gripi -run RealWorker -v
 ```
 
-It installs the helper in `~/gripi-e2e` on the worker and removes it and `/tmp/gripi-e2e` on both machines afterwards.
+It installs the helper in `~/gripi-e2e` on the worker, which also gets what the worker has of the gateway's home folder, and removes it and `/tmp/gripi-e2e` on both machines afterwards.
 
 ## Browser contract suite
 

@@ -23,13 +23,14 @@ import (
 	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
-// realWorkerRoot holds everything of the test gateway: Pi's folder, Gripi's state and the projects. The worker gets
-// them at the same paths, whatever its home folder is.
+// realWorkerRoot holds everything of the test gateway: its executable, the helper's sockets, which the worker gets at
+// the same path, and its home folder, which the worker lacks. Pi's folder, Gripi's state and the projects are in that
+// home folder, which the worker's sessions see as the worker user's own.
 const realWorkerRoot = "/tmp/gripi-e2e"
 
 // Set GRIPI_TEST_WORKER to a worker that ssh reaches without a prompt, such as gripi@beelink.example.ts.net, to move
-// a repository there and back with a scripted model. The test removes /tmp/gripi-e2e on both machines and the
-// helper's folder on the worker afterwards.
+// a repository there and back with a scripted model. The test removes /tmp/gripi-e2e on both machines and
+// ~/gripi-e2e on the worker afterwards, which has the helper and what the worker got of main's home folder.
 func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	destination := os.Getenv("GRIPI_TEST_WORKER")
 	if destination == "" {
@@ -50,17 +51,28 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	removeEverything()
 	t.Cleanup(removeEverything)
 
-	// Built before HOME changes, which holds Go's caches.
 	gripi := filepath.Join(realWorkerRoot, "bin", "gripi")
-	build := exec.Command("go", "build", "-o", gripi, "github.com/melounvitek/gripi/cmd/gripi")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, output)
+	buildGripi(t, gripi)
+	// Main's home folder doesn't exist on the worker, whose user keeps its own; the folder that holds it does, as /home
+	// would.
+	home := filepath.Join(realWorkerRoot, "home", "vitek")
+	if output, err := onWorker("mkdir -p " + filepath.Dir(home) + " && test ! -e " + home); err != nil {
+		t.Fatalf("the worker has main's home folder %s: %v %s", home, err, output)
 	}
-	home := filepath.Join(realWorkerRoot, "home")
-	agentDir := filepath.Join(home, ".pi", "agent")
+	// What the worker gets of main's home folder is in its gripi-e2e, which the worker has in its own home folder, next to
+	// the helper's folder.
+	shared := filepath.Join(home, "gripi-e2e")
+	agentDir := filepath.Join(shared, "agent")
+	connection := remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run")}
+	workerHelper = connection
+	t.Cleanup(func() { workerHelper = remote.Options{} })
+	// inView runs a sh script on the worker, which sees main's home folder there as the sessions do.
+	inView := func(script string) (string, error) {
+		return onWorker(remote.ShellQuote("gripi-e2e/bin/gripi", "worker", "enter", "--home", home, "--", "sh", "-c", script))
+	}
 	for name, value := range map[string]string{
-		"HOME": home, "PI_CODING_AGENT_DIR": agentDir, "GRIPI_SOCKET_PATH": filepath.Join(realWorkerRoot, "gripi.sock"), "GRIPI_ENV_PATH": filepath.Join(home, ".config", "gripi", "env"),
+		"HOME": home, "PI_CODING_AGENT_DIR": agentDir, "GRIPI_SESSIONS_ROOT": filepath.Join(agentDir, "sessions"), "GRIPI_ENV_PATH": filepath.Join(home, ".config", "gripi", "env"),
+		"GRIPI_READ_STATE_PATH": filepath.Join(shared, "state", "read-state.json"), "GRIPI_SOCKET_PATH": filepath.Join(shared, "gripi.sock"),
 		"GRIPI_BROWSER_AUTH_DISABLED": "true", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
 		"GIT_AUTHOR_NAME": "Gripi test", "GIT_AUTHOR_EMAIL": "test@example.com", "GIT_COMMITTER_NAME": "Gripi test", "GIT_COMMITTER_EMAIL": "test@example.com",
 	} {
@@ -71,9 +83,9 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, contents := range map[string]string{
-		filepath.Join(agentDir, "settings.json"):                    `{"defaultProvider": "fake", "defaultModel": "fake-1"}`,
-		filepath.Join(agentDir, "extensions", "fake_provider.ts"):   string(provider),
-		filepath.Join(realWorkerRoot, "projects", "repo", "README"): "A project\n",
+		filepath.Join(agentDir, "settings.json"):                  `{"defaultProvider": "fake", "defaultModel": "fake-1"}`,
+		filepath.Join(agentDir, "extensions", "fake_provider.ts"): string(provider),
+		filepath.Join(shared, "projects", "repo", "README"):       "A project\n",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
@@ -82,7 +94,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	project, feature := filepath.Join(realWorkerRoot, "projects", "repo"), filepath.Join(realWorkerRoot, "projects", "repo-feature")
+	project, feature := filepath.Join(shared, "projects", "repo"), filepath.Join(shared, "projects", "repo-feature")
 	gitIn := func(dir string, arguments ...string) string {
 		t.Helper()
 		output, err := exec.Command("git", append([]string{"-C", dir}, arguments...)...).CombinedOutput()
@@ -108,7 +120,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	var browser http.Handler
 	startGateway := func() {
 		t.Helper()
-		handler, manager, err := newGateway(cfg, remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run")})
+		handler, manager, err := newGateway(cfg, connection)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -192,6 +204,10 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The worker's copy is in the worker user's own home folder, and main's home folder exists only in the view.
+	if output, err := onWorker("test -d gripi-e2e/projects/repo/.git && test -f gripi-e2e/agent/settings.json && test ! -e " + home + " && echo ok"); err != nil || output != "ok" {
+		t.Fatalf("the worker's copy is not in its user's home folder: %q %v", output, err)
+	}
 	// A session that starts on the worker has its file on main, which outlives the gateway.
 	fresh := decodeSession(t, cli("new", project, "--json"))
 	cli("send", fresh.ID, "Hello on the worker")
@@ -207,7 +223,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		}
 		started := time.Now()
 		for {
-			copied, err := onWorker("cat " + authJSON)
+			copied, err := inView("cat " + authJSON)
 			if err == nil && strings.Contains(copied, key) {
 				if strings.Contains(copied, "main's refresh") || !strings.Contains(copied, "gripi:refresh-on-main") {
 					t.Fatalf("the worker's auth.json: %s", copied)
@@ -272,7 +288,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	}
 
 	// A worktree made on the worker runs its sessions there too.
-	second := filepath.Join(realWorkerRoot, "projects", "repo-second")
+	second := filepath.Join(shared, "projects", "repo-second")
 	cli("send", fresh.ID, `RUN [[{"name":"bash","arguments":{"command":"git worktree add -q -b second ../repo-second"}}]]`)
 	cli("wait", fresh.ID, "--timeout", "60")
 	if _, err := os.Stat(filepath.Join(second, "README")); err != nil {
@@ -384,7 +400,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 
 	// The next move to the worker keeps aside there what the worker had that main never got.
 	cli("worker", "move", project, "beelink")
-	if output, err := onWorker("cat " + filepath.Join(filepath.Dir(project), ".repo.gripi-aside") + "/*/main/*" + feature + "/during.txt; test ! -e " + feature + "/during.txt"); err != nil || output != "during" {
+	if output, err := inView("cat " + filepath.Join(filepath.Dir(project), ".repo.gripi-aside") + "/*/main/*" + feature + "/during.txt; test ! -e " + feature + "/during.txt"); err != nil || output != "during" {
 		t.Fatalf("the worker's file that main never got: %q %v", output, err)
 	}
 
