@@ -181,7 +181,7 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) (err error) {
 	go func() { readErr <- s.read() }()
 
 	// The worktrees that joined a unit of selected folders before are its own again.
-	if s.within != nil {
+	if s.within != nil && s.gitDir != "" {
 		if _, err := s.joinWorktrees(); err != nil {
 			return s.fail(err)
 		}

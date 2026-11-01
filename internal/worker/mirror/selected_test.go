@@ -135,6 +135,17 @@ func TestAUnitOfSelectedFoldersKeepsTheWorktreesThatJoinedIt(t *testing.T) {
 	}
 }
 
+func TestAUnitOfSelectedFoldersMayBeOutsideGit(t *testing.T) {
+	folder := filepath.Join(t.TempDir(), "notes")
+	writeFile(t, folder, "todo.txt", "first\n")
+	r := newRig(t, Unit{Main: folder, Within: []string{filepath.Dir(folder)}})
+	writeFile(t, folder, "todo.txt", "second\n")
+	r.barrier(t)
+	if got, _ := os.ReadFile(r.dst + filepath.Join(folder, "todo.txt")); string(got) != "second\n" {
+		t.Fatalf("main has %q", got)
+	}
+}
+
 func sorted(paths []string) []string {
 	paths = slices.Clone(paths)
 	slices.Sort(paths)
