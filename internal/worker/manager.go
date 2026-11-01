@@ -158,6 +158,9 @@ type remote struct {
 	stopSocket   func() error
 	mirrors      map[string]*liveMirror // by the unit's main folder
 	forwards     map[int]forwarded      // by the port on the worker; they end with the connection
+	// tornDown is closed once the last disconnect has stopped the mirrors of its connection, whose copies on main
+	// nothing else may use until then.
+	tornDown chan struct{}
 }
 
 // launched is a session whose Pi the manager started on a worker.
@@ -320,6 +323,9 @@ func (manager *Manager) connect(ctx context.Context, name, required string) (*re
 		}
 	}
 	if conn == nil {
+		if err := manager.waitForTeardown(ctx, name); err != nil {
+			return nil, err
+		}
 		if err := manager.dial(ctx, worker); err != nil {
 			return nil, fmt.Errorf("connect to worker %s: %w", name, err)
 		}
@@ -448,8 +454,11 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 		manager.mu.Unlock()
 		return
 	}
+	tornDown := make(chan struct{})
+	defer close(tornDown)
 	mirrors, stopSocket := worker.mirrors, worker.stopSocket
 	worker.conn, worker.installation, worker.stopSocket, worker.mirrors, worker.state = nil, nil, nil, map[string]*liveMirror{}, Disconnected
+	worker.tornDown = tornDown
 	worker.forwards = nil
 	var sessions []launched
 	for id, session := range manager.sessions {
@@ -478,6 +487,25 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 	}
 	stopSocket()
 	conn.Close()
+}
+
+// waitForTeardown waits until the last disconnect from the worker of a name has stopped its mirrors.
+func (manager *Manager) waitForTeardown(ctx context.Context, name string) error {
+	manager.mu.Lock()
+	var tornDown chan struct{}
+	if worker := manager.workers[name]; worker != nil {
+		tornDown = worker.tornDown
+	}
+	manager.mu.Unlock()
+	if tornDown == nil {
+		return nil
+	}
+	select {
+	case <-tornDown:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Close stops every worker's mirrors after a last barrier, and closes the connections, which stops every session on
@@ -1054,11 +1082,11 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 		return err
 	}
 	if state := manager.Status(placement.Worker).State; state == Unreachable || state == Gone {
-		return manager.continueOnMain(placement, fmt.Errorf("worker %s is unreachable", placement.Worker))
+		return manager.continueOnMain(ctx, placement, fmt.Errorf("worker %s is unreachable", placement.Worker))
 	}
 	worker, err := manager.connect(ctx, placement.Worker, "")
 	if err != nil {
-		return manager.continueOnMain(placement, err)
+		return manager.continueOnMain(ctx, placement, err)
 	}
 	// connect leaves the mirrors of a moving unit alone, so that they don't start again during the return.
 	if err := manager.runMirrors(ctx, worker, unit); err != nil {
@@ -1107,11 +1135,14 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 // consistent. It refuses with unreachable while the worker may still run the repository's sessions, whose Pi must
 // never run again. The worker's copy may have changes that main never got, which the next move to the worker saves
 // aside there.
-func (manager *Manager) continueOnMain(placement Placement, unreachable error) error {
+func (manager *Manager) continueOnMain(ctx context.Context, placement Placement, unreachable error) error {
 	unit := placement.Unit
 	if goneAt, now := manager.goneAt(placement.Worker), manager.options.Clock(); now.Before(goneAt) {
 		return refuse("%w; it may still run the sessions of %s until %s, so they can continue on this machine from then (in %s)",
 			unreachable, unit.Main, goneAt.Local().Format(time.TimeOnly), goneAt.Sub(now).Round(time.Second))
+	}
+	if err := manager.waitForTeardown(ctx, placement.Worker); err != nil {
+		return err
 	}
 	mains := []string{unit.Main, manager.sessionsMain(unit)}
 	for _, main := range mains {

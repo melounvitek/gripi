@@ -574,6 +574,70 @@ func TestARepositoryOnALostWorkerContinuesOnMainOnceTheWorkerIsGone(t *testing.T
 	}
 }
 
+// Main's copies are consistent once their mirrors have stopped, which a disconnect waits for after it published that
+// the worker is lost.
+func TestAReturnOrReconnectWaitsUntilALostConnectionsMirrorsHaveStopped(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	project := t.TempDir()
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: t.TempDir(), SessionsRoot: t.TempDir(), Clock: func() time.Time { return now }})
+	dialed := make(chan struct{}, 1)
+	manager.options.Destination = func(string) (string, error) {
+		dialed <- struct{}{}
+		return "", errors.New("no worker in this test")
+	}
+	unit := mirror.Unit{Main: project}
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: unit}); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(manager.mirrorFolder(project), "state")
+	writeTestFile(t, filepath.Join(state, "checkpoint.json"), `{"barrier":3}`, 0600)
+	conn := connectWorker(t, manager, "beelink")
+	// The repository's mirror is applying a barrier.
+	applying := make(chan struct{})
+	manager.mu.Lock()
+	worker := manager.workers["beelink"]
+	worker.goneAt = now
+	worker.mirrors[project] = &liveMirror{unit: unit, cancel: func() {}, done: applying}
+	manager.mu.Unlock()
+	now = now.Add(helper.DefaultLease + GoneMargin)
+
+	disconnected := make(chan struct{})
+	go func() {
+		manager.disconnect(worker, conn, false)
+		close(disconnected)
+	}()
+	for manager.Status("beelink").State != Gone {
+		time.Sleep(time.Millisecond)
+	}
+	returned, reconnected := make(chan error, 1), make(chan error, 1)
+	go func() {
+		returned <- manager.Return(context.Background(), project, func(func(string) bool) error { return nil })
+	}()
+	go func() { reconnected <- manager.Reconnect(context.Background(), "beelink") }()
+	select {
+	case err := <-returned:
+		t.Fatalf("returned while the mirror ran: %v", err)
+	case <-dialed:
+		t.Fatal("connected again while the mirror ran")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("main's copy while its mirror ran: %v", err)
+	}
+
+	close(applying)
+	<-disconnected
+	if err := <-returned; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reconnected; err == nil || !strings.Contains(err.Error(), "no worker in this test") {
+		t.Fatalf("Reconnect = %v", err)
+	}
+	if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("main's copy after the return: %v", err)
+	}
+}
+
 // A gateway that cannot reach a worker can still bring its repositories back, a lease after it started, when no
 // helper that an earlier gateway answered can run sessions there any more.
 func TestReturnContinuesOnMainWhenTheWorkerCannotBeReached(t *testing.T) {
