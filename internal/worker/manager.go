@@ -374,7 +374,7 @@ func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mir
 		if !slices.ContainsFunc(folders, func(folder string) bool { return !sessions.unit.Contains(folder) }) {
 			return nil
 		}
-		// The running mirror keeps running when another repository has a new folder.
+		// A folder of another repository is refused before the running mirror stops for it.
 		if err := manager.claim(unit.Main, nil, folders); err != nil {
 			return err
 		}
@@ -703,8 +703,8 @@ func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirr
 }
 
 // allowRoot is the AllowRoot of main's copy of a unit: a placed unit's copy writes in the unit's folders and in
-// worktrees that the worker made, but never in Pi's or Gripi's own folders, in another unit on a worker, or in a
-// folder of this machine's own files, which the worker's would replace without saving them aside; the copy of the
+// worktrees that the worker made, but never in Pi's or Gripi's own folders, in a folder that another repository on a
+// worker owns (see claim), or in a folder of this machine's own files, which the worker's would replace without saving them aside; the copy of the
 // folders of a unit's sessions, which are its unit, writes only in those.
 func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root string) error {
 	return func(root string) error {
@@ -789,11 +789,11 @@ func shared(folders, others []string) (string, bool) {
 }
 
 // claim refuses the folders that the repository whose main folder is main would take, roots such as its main folder
-// and worktrees, and Pi's session folders, when another repository on a worker, or moving to one, owns one of them: no
-// root of one may be or be in a root of the other, and they never share a session folder, which Pi names alike for
-// paths such as /work/a-b and /work/a/b. A repository owns the session folders of its folders and sessions, and until
-// it returns to main, every one that the mirror of its sessions covers, or takes back from main's copy when it starts
-// again.
+// and worktrees, and Pi's session folders, when another repository on a worker, or moving between this machine and a
+// worker, owns one of them: no root of one may be or be in a root of the other, and they never share a session folder,
+// which Pi names alike for paths such as /work/a-b and /work/a/b. A repository owns its roots and the session folders
+// of its folders and sessions, and until it returns to main, every folder that its mirrors cover or take back from
+// main's copies when they start again.
 func (manager *Manager) claim(main string, roots, sessionFolders []string) error {
 	type owner struct {
 		unit          mirror.Unit
@@ -805,37 +805,51 @@ func (manager *Manager) claim(main string, roots, sessionFolders []string) error
 	}
 	manager.mu.Lock()
 	for _, unit := range manager.movingUnits {
-		owners = append(owners, owner{unit, "", "moving to a worker"})
+		owners = append(owners, owner{unit, "", "moving between this machine and a worker"})
 	}
 	manager.mu.Unlock()
 	for _, owner := range owners {
 		if owner.unit.Main == main {
 			continue
 		}
-		if folder, found := shared(roots, unitFolders(owner.unit)); found {
-			return refuse("%s and %s, which is %s, would share %s", main, owner.unit.Main, owner.where, folder)
-		}
-		owned, _ := manager.sessionFolders(owner.unit, owner.worker)
-		sessionsMain := manager.sessionsMain(owner.unit)
-		checkpoint, err := mirror.ReadCheckpoint(filepath.Join(manager.mirrorFolder(sessionsMain), "state"))
+		ownedRoots, err := manager.covered(owner.unit.Main)
 		if err != nil {
 			return err
 		}
-		owned = append(owned, checkpoint.Roots...)
-		manager.mu.Lock()
-		for _, worker := range manager.workers {
-			if live := worker.mirrors[sessionsMain]; live != nil {
-				owned = append(owned, unitFolders(live.unit)...)
-			}
+		if folder, found := shared(roots, append(ownedRoots, unitFolders(owner.unit)...)); found {
+			return refuse("%s and %s, which is %s, would share %s", main, owner.unit.Main, owner.where, folder)
 		}
-		manager.mu.Unlock()
+		ownedFolders, err := manager.covered(manager.sessionsMain(owner.unit))
+		if err != nil {
+			return err
+		}
+		folders, _ := manager.sessionFolders(owner.unit, owner.worker)
+		ownedFolders = append(ownedFolders, folders...)
 		for _, folder := range sessionFolders {
-			if slices.Contains(owned, folder) {
+			if slices.Contains(ownedFolders, folder) {
 				return refuse("%s and %s, which is %s, would share Pi's session folder %s", main, owner.unit.Main, owner.where, folder)
 			}
 		}
 	}
 	return nil
+}
+
+// covered returns the folders of the unit whose main folder is main that its mirror covers on a worker, and those of
+// main's copy, which the mirror takes back when it starts again.
+func (manager *Manager) covered(main string) ([]string, error) {
+	checkpoint, err := mirror.ReadCheckpoint(filepath.Join(manager.mirrorFolder(main), "state"))
+	if err != nil {
+		return nil, err
+	}
+	folders := checkpoint.Roots
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	for _, worker := range manager.workers {
+		if live := worker.mirrors[main]; live != nil {
+			folders = append(folders, unitFolders(live.unit)...)
+		}
+	}
+	return folders, nil
 }
 
 // unitFolders are a unit's main folder, worktrees and Git folder.

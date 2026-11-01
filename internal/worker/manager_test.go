@@ -628,17 +628,24 @@ func TestARepositoryOnAWorkerKeepsItsSessionFoldersUntilItReturns(t *testing.T) 
 	}
 	manager.options.Destination = func(string) (string, error) { return "gripi@worker", nil }
 	stopped := errors.New("stopped")
-	move := func() error {
-		return manager.Move(ctx, worktree, "nuc", func(func(string) bool) error { return stopped })
-	}
 	wantRefused := func(err error, what string) {
 		t.Helper()
 		if !refused(err) || !strings.Contains(err.Error(), project) || !strings.Contains(err.Error(), worktree) {
 			t.Fatalf("%s = %v", what, err)
 		}
 	}
+	// moves moves the worktree's folder and a folder in it, each to another worker, and returns the errors.
+	moves := func() []error {
+		var errs []error
+		for _, folder := range []string{worktree, filepath.Join(worktree, "sub")} {
+			errs = append(errs, manager.Move(ctx, folder, "nuc", func(func(string) bool) error { return stopped }))
+		}
+		return errs
+	}
 
-	wantRefused(move(), "Move of the worktree's folder while the repository's mirrors run")
+	for _, err := range moves() {
+		wantRefused(err, "Move of the worktree's folder while the repository's mirrors run")
+	}
 	other := mirror.Unit{Main: filepath.Join(base, "other")}
 	if err := manager.options.Placements.Add(Placement{Worker: "nuc", Unit: other}); err != nil {
 		t.Fatal(err)
@@ -653,7 +660,9 @@ func TestARepositoryOnAWorkerKeepsItsSessionFoldersUntilItReturns(t *testing.T) 
 			t.Fatalf("status of the lost worker = %+v", manager.Status("beelink"))
 		}
 	}
-	wantRefused(move(), "Move of the worktree's folder once the repository's mirrors have stopped")
+	for _, err := range moves() {
+		wantRefused(err, "Move of the worktree's folder once the repository's mirrors have stopped")
+	}
 
 	// A repository took the folder anyway, such as before Gripi refused it.
 	if err := manager.options.Placements.Add(Placement{Worker: "nuc", Unit: mirror.Unit{Main: worktree}}); err != nil {
@@ -668,8 +677,10 @@ func TestARepositoryOnAWorkerKeepsItsSessionFoldersUntilItReturns(t *testing.T) 
 	if err := manager.Return(ctx, project, func(func(string) bool) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := move(); err != stopped {
-		t.Fatalf("Move of the worktree's folder once the repository is back = %v", err)
+	for _, err := range moves() {
+		if err != stopped {
+			t.Fatalf("Move of the worktree's folder once the repository is back = %v", err)
+		}
 	}
 }
 
