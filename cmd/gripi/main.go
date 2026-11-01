@@ -25,9 +25,12 @@ import (
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
 	remote "github.com/melounvitek/gripi/internal/worker"
+	"github.com/melounvitek/gripi/internal/worker/view"
 )
 
 func main() {
+	// gripi worker enter and serve start gripi again to enter the private view on a worker.
+	view.Init()
 	// The gateway runs gripi as sudo's askpass program, which gets only sudo's prompt.
 	if os.Getenv("GRIPI_SUDO_TOKEN") != "" {
 		os.Exit(answerSudoPrompt(os.Args[1:], os.Stdout, os.Stderr))

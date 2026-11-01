@@ -11,6 +11,7 @@ import (
 
 	"github.com/melounvitek/gripi/internal/worker/auth"
 	"github.com/melounvitek/gripi/internal/worker/helper"
+	"github.com/melounvitek/gripi/internal/worker/view"
 )
 
 // serveWorker runs the helper on a worker, under the systemd unit that main starts it in.
@@ -104,6 +105,25 @@ func receiveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return failure(stderr, "worker", err)
 	}
 	return 0
+}
+
+// enterWorker runs a command in the private view of main's home folder (package view), or as it is when this user's
+// home folder is main's.
+func enterWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("worker enter", flag.ContinueOnError)
+	home := flags.String("home", "", "")
+	command, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "worker", err.Error())
+	}
+	if len(command) == 0 {
+		return usageError(stderr, "worker", "enter takes a command after --")
+	}
+	code, err := view.Run(*home, command, stdin, stdout, stderr)
+	if err != nil {
+		return failure(stderr, "worker", err)
+	}
+	return code
 }
 
 // runtimeDirectory is the helper's socket folder as an absolute path, because Pi gets the path of a socket in it.

@@ -37,6 +37,7 @@ Internal, run by Gripi on a worker over SSH:
   gripi worker attach [--runtime-dir <folder>] <session> <helper instance>
   gripi worker receive [--aside <folder>] <folder on main> <folder>
   gripi worker mirror [--runtime-dir <folder>] <unit> <helper instance>
+  gripi worker enter [--home <folder>] -- <command>
 
 A worker is another computer that runs sessions for this gateway. Gripi
 reaches it with this machine's ssh, as the gateway's user and with that
@@ -85,7 +86,9 @@ receive makes a folder a copy of one that this machine sends, or, given the
 same folder twice, a copy of its repository at the same paths, and keeps
 what it replaces or deletes in the folder of --aside first. mirror
 connects this machine's copy of a repository, or of its sessions, to the
-helper, which sends their changes.
+helper, which sends their changes. enter runs a command in a private view in
+which the folder of --home, this machine's home folder, shows the worker
+user's own home folder, unless that is the same folder.
 
 Gripi keeps the workers in ~/.pi/gripi/workers.json, or in the file named by
 GRIPI_WORKERS_PATH, and which repositories are on which worker in
@@ -161,6 +164,8 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return receiveWorker(arguments[1:], stdin, stdout, stderr)
 	case "mirror":
 		return mirrorWorker(arguments[1:], stdin, stdout, stderr)
+	case "enter":
+		return enterWorker(arguments[1:], stdin, stdout, stderr)
 	}
 	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list, remove, move, return, forward or unforward", arguments[0]))
 }

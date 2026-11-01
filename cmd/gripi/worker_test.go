@@ -273,6 +273,21 @@ func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {
 	}
 }
 
+// Main runs worker commands that use its paths through enter, which runs them as they are when the worker user's
+// home folder is main's.
+func TestWorkerEnterRunsACommandAsItIsWithMainsHomeFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	code, stdout, stderr := runCLI("worker", "enter", "--home", home, "--", "sh", "-c", `echo "$HOME"; exit 3`)
+	if code != 3 || stdout != home+"\n" || stderr != "" {
+		t.Fatalf("gripi worker enter = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, _, stderr := runCLI("worker", "enter", "--home", home); code != 2 || !strings.Contains(stderr, "command") {
+		t.Fatalf("gripi worker enter without a command = %d, stderr %q", code, stderr)
+	}
+}
+
 // A worker gets the folder of the extensions at the same path, and its sessions' Pi loads both.
 func TestThePiAdapterExtractsBothExtensionsIntoOneFolder(t *testing.T) {
 	adapter, err := newPiAdapter(config.Config{}, nil)

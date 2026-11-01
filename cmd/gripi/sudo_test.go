@@ -26,6 +26,7 @@ import (
 	"time"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
+	"github.com/melounvitek/gripi/internal/worker/view"
 )
 
 type cliResult struct {
@@ -310,6 +311,8 @@ func TestOnlyTheOwnerOfTheSessionSeesAndAnswersItsSudoRequest(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
+	// gripi worker enter, run by a test, starts the test binary again to enter the private view.
+	view.Init()
 	// The gateway of these tests runs the test binary as sudo's askpass program, as it would run gripi.
 	if os.Getenv("GRIPI_SUDO_TOKEN") != "" {
 		os.Exit(answerSudoPrompt(os.Args[1:], os.Stdout, os.Stderr))
