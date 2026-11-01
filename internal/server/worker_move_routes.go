@@ -60,7 +60,7 @@ func (handler *Handler) Guard() agent.Guard {
 // for the workers, whose copy of a session folder that a repository on a worker takes would replace what such a session
 // saves there.
 func (handler *Handler) StopSessions(inFolder func(folder string) bool) error {
-	_, err := handler.app.stopSessionsIn(context.Background(), nil, inFolder)
+	_, err := handler.app.stopSessionsIn(context.Background(), nil, inFolder, nil)
 	return err
 }
 
@@ -141,18 +141,25 @@ func (app *application) moveRepository(response http.ResponseWriter, request *ht
 		return
 	}
 	var stopped []string
+	unsaved := map[string]func(context.Context) error{}
 	var owns func(key string) bool
 	if app.ownsSession != nil {
 		owns = func(key string) bool { return app.ownsSession(request, key) }
 	}
 	err := move(folder, func(inRepository func(string) bool) error {
 		var err error
-		stopped, err = app.stopSessionsIn(request.Context(), owns, inRepository)
+		stopped, err = app.stopSessionsIn(request.Context(), owns, inRepository, unsaved)
 		return err
 	})
 	// The sessions' files may have come back from the worker, which the guard must not take for another program's.
 	for _, key := range stopped {
 		app.guard.Forget(key)
+	}
+	// The Pi of new sessions that Pi has not saved yet starts again where the repository runs now.
+	for key, restart := range unsaved {
+		if restartErr := restart(movingContext(request)); restartErr != nil {
+			err = errors.Join(err, fmt.Errorf("new session %s could not start again: %w", key, restartErr))
+		}
 	}
 	switch {
 	case errors.Is(err, errSessionWorking) || errors.Is(err, errOtherUsersSessions):
@@ -208,8 +215,9 @@ func (app *application) unforwardPort(response http.ResponseWriter, request *htt
 }
 
 // stopSessionsIn ends the Pi of every Pi session in a repository, unless one of them is working or, with owns, is not
-// the user's, and returns their keys.
-func (app *application) stopSessionsIn(ctx context.Context, owns func(key string) bool, inRepository func(string) bool) ([]string, error) {
+// the user's, and returns their keys. With unsaved, a new session that Pi has not saved yet, which exists only in its
+// Pi, keeps its key, and unsaved gets the function that starts its Pi again.
+func (app *application) stopSessionsIn(ctx context.Context, owns func(key string) bool, inRepository func(string) bool, unsaved map[string]func(context.Context) error) ([]string, error) {
 	saved, err := app.sessionStore.Sessions()
 	if err != nil {
 		return nil, err
@@ -235,7 +243,15 @@ func (app *application) stopSessionsIn(ctx context.Context, owns func(key string
 		}
 	}
 	for _, key := range keys {
-		err := app.retireRPCClient(ctx, key, func() (bool, error) { return app.rpcClients.CloseClientIfIdle(key) })
+		var err error
+		if _, pending := app.pendingSessions.CWD(key); unsaved != nil && pending && !app.sessionStore.Exists(key) {
+			var restart func(context.Context) error
+			if restart, err = agent.StopUnsavedSession(ctx, key, app.rpcClients, app.pendingSessions); restart != nil {
+				unsaved[key] = restart
+			}
+		} else {
+			err = app.retireRPCClient(ctx, key, func() (bool, error) { return app.rpcClients.CloseClientIfIdle(key) })
+		}
 		if err == nil && app.rpcClients.Registered(key) {
 			err = fmt.Errorf("session %s is %w; wait until it finishes or stop it", key, errSessionWorking)
 		}

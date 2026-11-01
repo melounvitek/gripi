@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -27,6 +28,8 @@ type fakeWorkers struct {
 	forwards   map[int]int
 	placed     bool
 	notices    []gateway.WorkerNotice
+	// copying, if set, runs while the repository is copied, once its sessions stopped.
+	copying func()
 }
 
 // refusal is an error of Workers that refuses what was asked.
@@ -51,6 +54,9 @@ func (workers *fakeWorkers) Move(_ context.Context, folder, worker string, stop 
 	if err := stop(workers.inRepository); err != nil {
 		return err
 	}
+	if workers.copying != nil {
+		workers.copying()
+	}
 	workers.moves = append(workers.moves, "to "+worker)
 	workers.placed = true
 	return nil
@@ -59,6 +65,9 @@ func (workers *fakeWorkers) Move(_ context.Context, folder, worker string, stop 
 func (workers *fakeWorkers) Return(_ context.Context, folder string, stop func(func(string) bool) error) error {
 	if err := stop(workers.inRepository); err != nil {
 		return err
+	}
+	if workers.copying != nil {
+		workers.copying()
 	}
 	workers.moves = append(workers.moves, "back")
 	workers.placed = false
@@ -228,6 +237,84 @@ func TestTheWorkersStopTheSessionsOfAFolderUnlessOneIsWorking(t *testing.T) {
 	}
 	if _, stopped := fakePiPIDs(t, working); len(stopped) != 0 {
 		t.Fatalf("the stop ended the Pi of a session in another folder: %v", stopped)
+	}
+}
+
+// A new session that Pi has not saved yet exists only in its Pi, which a move or a return stops, so it starts again
+// afterwards under its key, with what was chosen in it, where its repository runs now. Meanwhile and afterwards, the
+// page that shows it keeps showing it.
+func TestANewSessionThatPiHasNotSavedStartsAgainWhereItsRepositoryMoved(t *testing.T) {
+	cfg, _, _, project := fakePiConfig(t)
+	workers := &fakeWorkers{repository: project}
+	// Whether the repository was on the worker at each start of a Pi in it, and whether the worker answers.
+	var onWorker []bool
+	answers := true
+	handler, err := gateway.NewPiHandlerWithLauncher(cfg, gripi.WebFiles, func(process agent.Process) (*exec.Cmd, func(), error) {
+		if process.Dir == project {
+			onWorker = append(onWorker, workers.placed)
+		}
+		if workers.placed && !answers {
+			return nil, nil, errors.New("beelink is not answering")
+		}
+		return nil, nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	created := serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": project}, true))
+	var payload struct{ Session string }
+	if err := json.Unmarshal(created.Body.Bytes(), &payload); err != nil || created.Code != http.StatusOK {
+		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
+	}
+	session := payload.Session
+	if response := postWorkspaceForm(handler, "/sessions/model_settings", url.Values{"session": {session}, "provider": {"e2e"}, "model": {"contract-model"}, "thinking": {"high"}}, ""); response.Code != http.StatusOK {
+		t.Fatalf("model settings = %d %s", response.Code, response.Body.String())
+	}
+	// A shell command adds events, whose cursor a page keeps, and leaves the session unsaved.
+	if response := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": session, "message": "!printf hi"}, true)); response.Code != http.StatusOK {
+		t.Fatalf("shell command = %d %s", response.Code, response.Body.String())
+	}
+	shown := func(when string) {
+		t.Helper()
+		if page := getWorkspace(handler, "/?session="+url.QueryEscape(session), ""); !strings.Contains(page.Body.String(), `data-events-url="/events?session=`+url.QueryEscape(session)+`"`) {
+			t.Fatalf("%s, the page of the new session shows another: %d", when, page.Code)
+		}
+		// What a live page gets when it refreshes in the background, which goes to another session that it names.
+		var fragment struct{ Session string }
+		if response := getWorkspace(handler, "/session_fragment?session="+url.QueryEscape(session), ""); json.Unmarshal(response.Body.Bytes(), &fragment) != nil || fragment.Session != session {
+			t.Fatalf("%s, the live page of the new session would show %q: %d", when, fragment.Session, response.Code)
+		}
+	}
+	workers.copying = func() { shown("while the repository moves") }
+
+	for _, step := range []struct{ route, worker string }{{"/workers/move", "beelink"}, {"/workers/return", ""}} {
+		cursor := fakePiEventCursor(t, handler, session)
+		if response := postWorkspaceForm(handler, step.route, url.Values{"session": {session}, "worker": {step.worker}}, ""); response.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", step.route, response.Code, response.Body.String())
+		}
+		shown("after " + step.route)
+		if events := getWorkspace(handler, fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(session), cursor), ""); events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"missed":false`) {
+			t.Fatalf("after %s, events = %d %s", step.route, events.Code, events.Body.String())
+		}
+		if status := getWorkspace(handler, "/status?session="+url.QueryEscape(session), "").Body.String(); !strings.Contains(status, `"model":"e2e/contract-model"`) || !strings.Contains(status, `"thinking":"high"`) {
+			t.Fatalf("after %s, the new session's status = %s", step.route, status)
+		}
+	}
+	if started, stopped := fakePiPIDs(t, session); len(started) != 3 || len(stopped) != 2 || !slices.Equal(onWorker, []bool{false, true, false}) {
+		t.Fatalf("Pi of the new session started %v, on the worker %v, and stopped %v", started, onWorker, stopped)
+	}
+
+	// A session that cannot start again is gone, which the move says, with the reason.
+	answers = false
+	workers.copying = nil
+	response := postWorkspaceForm(handler, "/workers/move", url.Values{"session": {session}, "worker": {"beelink"}}, "")
+	if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), session) || !strings.Contains(response.Body.String(), "beelink is not answering") {
+		t.Fatalf("move whose new session can't start again = %d %s", response.Code, response.Body.String())
+	}
+	if sidebar := getWorkspace(handler, "/sidebar", "").Body.String(); strings.Contains(sidebar, session) {
+		t.Fatalf("the sidebar lists the new session that could not start again: %s", sidebar)
 	}
 }
 

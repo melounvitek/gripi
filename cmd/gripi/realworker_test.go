@@ -196,6 +196,8 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	session := decodeSession(t, cli("new", feature, "--json"))
 	cli("send", session.ID, "Hello from main")
 	cli("wait", session.ID, "--timeout", "60")
+	// Pi has not saved a blank session, which only its Pi has, so the move starts it again on the worker.
+	blank := decodeSession(t, cli("new", project, "--json"))
 
 	started := time.Now()
 	cli("worker", "move", session.ID, "beelink")
@@ -203,6 +205,11 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	workerHost, err := onWorker("hostname")
 	if err != nil {
 		t.Fatal(err)
+	}
+	cli("send", blank.Path, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
+	cli("wait", blank.Path, "--timeout", "60")
+	if got := repliesSoon(blank.Path, 1); !strings.Contains(got[0], `"text":"`+workerHost+`\n"`) {
+		t.Fatalf("the blank session started before the move replied %q", got[0])
 	}
 	// The worker's copy is in the worker user's own home folder, and main's home folder exists only in the view.
 	if output, err := onWorker("test -d gripi-e2e/projects/repo/.git && test -f gripi-e2e/agent/settings.json && test ! -e " + home + " && echo ok"); err != nil || output != "ok" {
@@ -300,7 +307,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		t.Fatalf("the session is %s, not still working on its next step", state)
 	}
 	cli("wait", session.ID, "--timeout", "60")
-	if got := repliesSoon(session.ID, 2); !strings.Contains(got[1], `"isError":false,"text":"`+workerHost+`\n2\n"`) {
+	if got := repliesSoon(session.ID, 2); !strings.Contains(got[1], `"isError":false,"text":"`+workerHost+`\n3\n"`) {
 		t.Fatalf("main's copy of the session has the reply %q", got[1])
 	}
 	notices := workers.Notices(feature)
