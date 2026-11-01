@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func TestLeaseExpiryKillsEverySessionAtOnceBeforeMainTakesThemOver(t *testing.T)
 	unit.answering.Store(true)
 	// The first session stops slowly: its Pi ignores SIGTERM, and one of its processes takes long to die.
 	slow := unit.createSession("s1", "FAKE_PI_IGNORE_TERM=1")
-	killed := startSlowToDie(t, cgroupOf(t, slow[0]))
+	killed, _ := startSlowToDie(t, cgroupOf(t, slow[0]))
 	s2, s3 := unit.createSession("s2"), unit.createSession("s3")
 	helperPID, _ := strconv.Atoi(stat(slow[0])[1])
 
@@ -55,10 +56,10 @@ func cgroupOf(t *testing.T, pid int) string {
 	return filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(strings.TrimSpace(string(contents)), "0::"))
 }
 
-// startSlowToDie starts a process in a cgroup that, once killed, stays in the cgroup until the test ends, as a process
-// does that waits for a slow disk. It stops on its way out for the test, which traces it. The returned channel is closed
-// when the process has been killed.
-func startSlowToDie(t *testing.T, cgroup string) (killed <-chan struct{}) {
+// startSlowToDie starts a process in a cgroup that, once killed, stays in the cgroup until the test ends or calls die,
+// as a process does that waits for a slow disk. It stops on its way out for the test, which traces it. The returned
+// channel is closed when the process has been killed.
+func startSlowToDie(t *testing.T, cgroup string) (killed <-chan struct{}, die func()) {
 	t.Helper()
 	started := make(chan error)
 	stopped := make(chan struct{})
@@ -116,10 +117,14 @@ func startSlowToDie(t *testing.T, cgroup string) (killed <-chan struct{}) {
 		<-finished
 		t.Skipf("cannot start a traced process in the helper's cgroup: %v", err)
 	}
-	t.Cleanup(func() {
-		process.Kill()
-		close(release)
-		<-finished
-	})
-	return stopped
+	var once sync.Once
+	die = func() {
+		once.Do(func() {
+			process.Kill()
+			close(release)
+			<-finished
+		})
+	}
+	t.Cleanup(die)
+	return stopped, die
 }

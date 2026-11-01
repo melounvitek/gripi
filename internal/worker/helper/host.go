@@ -212,14 +212,18 @@ func (host *hostServer) runMirror(hello Message, reader io.Reader, connection ne
 		replyHello(connection, err)
 		return
 	}
-	current.run(&host.mu, connection, reader, "move "+host.config.Move)
+	current.run(connection, reader, "move "+host.config.Move)
 }
 
 // release has main take the last barrier of each mirror, then stops them, once they have stopped. A mirror that
-// never started has no barrier to take.
+// never started has no barrier to take, and without mirrors, there are no barriers.
 func (host *hostServer) release() (*Barriers, error) {
 	host.mu.Lock()
 	units := []*mirroredUnit{host.repository, host.session}
+	if units[0] == nil && units[1] == nil {
+		host.mu.Unlock()
+		return nil, nil
+	}
 	attached := []bool{host.repository != nil && host.repository.attached, host.session != nil && host.session.attached}
 	host.repository, host.session = nil, nil
 	host.mu.Unlock()

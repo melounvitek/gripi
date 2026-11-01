@@ -78,7 +78,10 @@ func (s *server) create(request Message, inMove *move) error {
 	}
 	current := s.sessions[id]
 	if current == nil {
-		current = &session{cgroup: filepath.Join(s.options.Cgroup, "session-"+id), move: moveID}
+		current = &session{cgroup: s.sessionCgroup(id), move: moveID}
+		if inMove != nil {
+			inMove.sessions = append(inMove.sessions, id)
+		}
 		for _, name := range []string{id + ".attach", id + ".sock"} {
 			listener, err := net.Listen("unix", filepath.Join(s.options.RuntimeDir, name))
 			if err != nil {
@@ -138,6 +141,10 @@ func (s *server) create(request Message, inMove *move) error {
 	current.pi, current.exited, current.stdin, current.stdout, current.attached = pi, make(chan struct{}), stdin, stdout, false
 	go s.waitForPi(id, current)
 	return nil
+}
+
+func (s *server) sessionCgroup(id string) string {
+	return filepath.Join(s.options.Cgroup, "session-"+id)
 }
 
 func (s *server) waitForPi(id string, current *session) {

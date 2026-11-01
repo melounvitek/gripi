@@ -318,18 +318,51 @@ func TestAReleaseThatMissedTheLastChangesKeepsSayingSo(t *testing.T) {
 	if response := rig.request(create); response.OK || !strings.Contains(response.Error, "released") {
 		t.Fatalf("session.create in a released move = %+v", response)
 	}
+	if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); response.OK || !strings.Contains(response.Error, "isn't connected") {
+		t.Fatalf("move.release after the refused session = %+v", response)
+	}
 	repositoryDestination, _ := rig.destinations(shadow, t.TempDir(), filepath.Join(t.TempDir(), "s1.jsonl"))
 	served := rig.mirror("m1", "", repositoryDestination)
 	for repositoryDestination.Checkpoint().Barrier == 0 {
 		time.Sleep(10 * time.Millisecond)
 	}
+	var barriers []helper.Barriers
 	for range 2 {
-		if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); !response.OK || response.Barriers.Repository == 0 {
+		response := rig.request(map[string]any{"type": "move.release", "move": "m1"})
+		if !response.OK || response.Barriers.Repository == 0 {
 			t.Fatalf("move.release once main's copy is connected = %+v", response)
 		}
+		barriers = append(barriers, *response.Barriers)
+	}
+	if barriers[0] != barriers[1] {
+		t.Fatalf("move.release answered %+v, then %+v", barriers[0], barriers[1])
 	}
 	if err := <-served; err != nil {
 		t.Fatalf("main's copy ended with %v", err)
+	}
+}
+
+// A release takes no final barriers while a process of the move outlives its kill, also when main tries again.
+func TestAReleaseWaitsForEveryProcessOfTheMoveToDie(t *testing.T) {
+	rig := startMoveHelper(t, helper.DefaultLease)
+	private := rig.privateRoot()
+	shadow, repository := rig.shadow(private, "first\n")
+	rig.move("m1", private, shadow, repository)
+	pi := rig.session("s1", "m1", repository)
+	pid, _ := strconv.Atoi(strings.TrimSpace(pi("echo $$")))
+	_, die := startSlowToDie(t, cgroupOf(t, pid))
+
+	for range 2 {
+		if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); response.OK || !strings.Contains(response.Error, "still has processes") {
+			t.Fatalf("move.release while a process survives = %+v", response)
+		}
+	}
+	if response := rig.request(map[string]any{"type": "move.delete", "move": "m1"}); response.OK {
+		t.Fatalf("move.delete while a process survives = %+v", response)
+	}
+	die()
+	if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); !response.OK {
+		t.Fatalf("move.release once the process died = %+v", response)
 	}
 }
 

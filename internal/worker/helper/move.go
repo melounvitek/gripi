@@ -37,8 +37,11 @@ type move struct {
 	Private    []string  `json:"private"`
 	Created    time.Time `json:"created"`
 
-	id     string
-	closed bool // once released or deleted, which server.mu guards, no session starts in the move
+	id string
+	// Guarded by server.mu: every session that started in the move, and whether it is closed to new ones, as once
+	// released or deleted.
+	sessions []string
+	closed   bool
 
 	mu   sync.Mutex // held while the host starts, answers move.release or stops
 	host *hostProcess
@@ -237,7 +240,11 @@ func (s *server) releaseMove(id string) (Barriers, error) {
 	if err != nil {
 		return Barriers{}, err
 	}
-	if err := s.release(releaseTimeout, s.closeMove(m)...); err != nil {
+	running, cgroups := s.closeMove(m)
+	s.mu.Lock()
+	s.forget(running...)
+	s.mu.Unlock()
+	if err := killCgroups(releaseTimeout, cgroups...); err != nil {
 		return Barriers{}, err
 	}
 	m.mu.Lock()
@@ -249,6 +256,10 @@ func (s *server) releaseMove(id string) (Barriers, error) {
 	if stopped := s.stopHost(m); err == nil {
 		err = stopped
 	}
+	// A host without mirrors, as one that a refused session started, has no last barriers to change.
+	if err == nil && answer.Barriers == nil {
+		return m.released, m.releaseFail
+	}
 	m.released, m.releaseFail = Barriers{}, err
 	if err == nil {
 		m.released = *answer.Barriers
@@ -256,18 +267,19 @@ func (s *server) releaseMove(id string) (Barriers, error) {
 	return m.released, m.releaseFail
 }
 
-// closeMove keeps new sessions from starting in the move, and returns those that run in it.
-func (s *server) closeMove(m *move) []string {
+// closeMove keeps new sessions from starting in the move, and returns those that run in it and the cgroups of every
+// session that ran in it, whose processes may have outlived a release.
+func (s *server) closeMove(m *move) (running, cgroups []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m.closed = true
-	var ids []string
-	for id, current := range s.sessions {
-		if current.move == m.id {
-			ids = append(ids, id)
+	for _, id := range m.sessions {
+		if current := s.sessions[id]; current != nil && current.move == m.id {
+			running = append(running, id)
 		}
+		cgroups = append(cgroups, s.sessionCgroup(id))
 	}
-	return ids
+	return running, cgroups
 }
 
 // deleteMove deletes a released move's copy, once main has what it needs of it, and leaves the folders in it that Git
@@ -280,8 +292,12 @@ func (s *server) deleteMove(id string) error {
 	if err != nil {
 		return err
 	}
-	if len(s.closeMove(m)) > 0 {
+	running, cgroups := s.closeMove(m)
+	if len(running) > 0 {
 		return fmt.Errorf("move %s still runs sessions; release it first", id)
+	}
+	if err := killCgroups(releaseTimeout, cgroups...); err != nil {
+		return err
 	}
 	s.cache.Lock()
 	defer s.cache.Unlock()
