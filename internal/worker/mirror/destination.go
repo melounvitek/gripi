@@ -38,6 +38,11 @@ type Destination struct {
 	// there, new ones included. A barrier that was finished after a crash,
 	// as the destination opened, is reported when Serve starts.
 	Applied func(checkpoint Checkpoint, aside string, saved, replaced []string)
+	// AllowRoot, if set before Serve, is asked about each folder of the unit,
+	// with the source's path, before Serve accepts it: those the source names
+	// at the start and as it adds worktrees, and those of the checkpoint. If
+	// it refuses one, Serve fails.
+	AllowRoot func(root string) error
 
 	state     string
 	recovered replayed // what finishing an interrupted barrier did, which Serve reports
@@ -974,9 +979,15 @@ func (r *receiver) addRoots(roots []string) error {
 		if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" || !within(root, r.d.from) {
 			return fmt.Errorf("mirror: refusing the folder %q", root)
 		}
-		if !slices.Contains(r.roots, root) {
-			r.roots = append(r.roots, root)
+		if slices.Contains(r.roots, root) {
+			continue
 		}
+		if r.d.AllowRoot != nil {
+			if err := r.d.AllowRoot(root); err != nil {
+				return fmt.Errorf("mirror: refusing the folder %s: %w", root, err)
+			}
+		}
+		r.roots = append(r.roots, root)
 	}
 	return nil
 }
