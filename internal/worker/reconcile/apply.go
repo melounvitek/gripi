@@ -237,7 +237,8 @@ func (r *reconciler) applyWorktree(w worktree) error {
 	}
 	i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root })
 	if i < 0 {
-		if e, err := lstat(w.Root); err != nil || e.Type != "" {
+		// Git would make the worktree where a link above its path leads, and register it there.
+		if e, err := lstat(w.Root); err != nil || e.Type != "" || blocked("/", w.Root) {
 			return r.keepWorktree(w, "made on the worker, but main has something at its path")
 		}
 		args := []string{"worktree", "add", "--no-checkout", w.Root, strings.TrimPrefix(w.Head.Branch, "refs/heads/")}
@@ -253,7 +254,9 @@ func (r *reconciler) applyWorktree(w worktree) error {
 		if mTrees, err = r.main.worktrees(ctx, mRefs); err != nil {
 			return err
 		}
-		i = slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root })
+		if i = slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root }); i < 0 {
+			return r.keepWorktree(w, "made on the worker, but Git on main registered it at another path")
+		}
 	}
 	mw, made := mTrees[i], r.madeOnMain(mTrees)
 	if e, err := lstat(w.Root); err != nil || e.Type != "d" {

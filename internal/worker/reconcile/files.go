@@ -130,7 +130,9 @@ func (r repo) walk(ctx context.Context, root string, others []string, base map[s
 	return found, r.hashInto(ctx, found, files)
 }
 
-func within(p, dir string) bool { return p == dir || strings.HasPrefix(p, dir+"/") }
+func within(p, dir string) bool {
+	return p == dir || strings.HasPrefix(p, strings.TrimSuffix(dir, "/")+"/") // dir may be /
+}
 
 // blocked reports whether something other than a folder is at root or between it and p, so that p can't hold
 // anything, and a change to it would go through a link.
