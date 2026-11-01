@@ -585,14 +585,12 @@ func TestAutoBarrierAppliesChangesWithoutBeingAsked(t *testing.T) {
 	first := r.d.Checkpoint().Barrier
 	started := time.Now()
 	writeFile(t, folder, "session.jsonl", "{\"id\":\"1\"}\n")
-	waitFor(t, "main to have the file", func() bool {
+	// A barrier writes the files before it records itself, so wait for both.
+	waitFor(t, "a barrier to apply the file on main", func() bool {
 		data, _ := os.ReadFile(r.dst + filepath.Join(folder, "session.jsonl"))
-		return string(data) == "{\"id\":\"1\"}\n"
+		return string(data) == "{\"id\":\"1\"}\n" && r.d.Checkpoint().Barrier != first
 	})
 	t.Logf("applied after %s", time.Since(started).Round(time.Millisecond))
-	if r.d.Checkpoint().Barrier == first {
-		t.Fatal("no barrier applied the change")
-	}
 	time.Sleep(200 * time.Millisecond)
 	settled := r.d.Checkpoint().Barrier
 	time.Sleep(300 * time.Millisecond)
