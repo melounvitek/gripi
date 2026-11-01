@@ -474,7 +474,7 @@ func (a *applier) parent(p string) (*os.Root, string, error) {
 		err = fmt.Errorf("%s is a worktree folder", p)
 	}
 	if err == nil {
-		_, err = a.folders(root, rel, true)
+		_, err = a.folders(root, p, rel, true)
 	}
 	return root, rel, err
 }
@@ -489,7 +489,7 @@ func (a *applier) existing(p string) (*os.Root, string, bool, error) {
 	if err != nil {
 		return nil, "", false, err
 	}
-	ok, err := a.folders(root, rel, false)
+	ok, err := a.folders(root, p, rel, false)
 	if ok {
 		_, err = root.Lstat(rel)
 	}
@@ -499,9 +499,9 @@ func (a *applier) existing(p string) (*os.Root, string, bool, error) {
 	return root, rel, ok && err == nil, err
 }
 
-// folders reports whether the folders above rel are real folders; with
-// create, it makes them so, replacing files and symlinks.
-func (a *applier) folders(root *os.Root, rel string, create bool) (bool, error) {
+// folders reports whether the folders above rel, the path p, are real
+// folders; with create, it makes them so, replacing files and symlinks.
+func (a *applier) folders(root *os.Root, p, rel string, create bool) (bool, error) {
 	dir := filepath.Dir(rel)
 	key := root.Name() + "/" + dir
 	if dir == "." || a.dirs[key] {
@@ -521,11 +521,11 @@ func (a *applier) folders(root *os.Root, rel string, create bool) (bool, error) 
 			return false, nil
 		}
 		if err == nil {
-			err = root.Remove(cur)
-		} else if errors.Is(err, fs.ErrNotExist) {
-			err = nil
+			if err = a.keep(root, cur, p[:len(p)-len(rel)]+cur); err == nil {
+				err = root.Remove(cur)
+			}
 		}
-		if err == nil {
+		if err == nil || errors.Is(err, fs.ErrNotExist) { // nothing there, or moved aside
 			err = root.Mkdir(cur, 0o755)
 		}
 		if err != nil {

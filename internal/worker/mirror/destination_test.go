@@ -152,6 +152,31 @@ func TestTheDestinationRemembersWhatItWroteAcrossRestarts(t *testing.T) {
 	}
 }
 
+func TestMainsFileInPlaceOfAFolderGoesAsideBeforeTheWorkerWritesIntoIt(t *testing.T) {
+	folder := t.TempDir()
+	writeFile(t, folder, "file/f.txt", "1\n")
+	writeFile(t, folder, "link/f.txt", "1\n")
+	r := newRig(t, Unit{Main: folder})
+	onMain := func(name string) string { return r.dst + filepath.Join(folder, name) }
+	os.RemoveAll(onMain("file"))
+	writeFile(t, r.dst+folder, "file", "main's file\n")
+	os.RemoveAll(onMain("link"))
+	if err := os.Symlink("elsewhere", onMain("link")); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, folder, "file/f.txt", "2\n")
+	writeFile(t, folder, "link/f.txt", "2\n")
+	aside := filepath.Join(r.dst, "aside", "1", "main", strconv.FormatUint(r.barrier(t), 10), folder)
+	if data, err := os.ReadFile(filepath.Join(aside, "file")); string(data) != "main's file\n" {
+		t.Errorf("main's file aside: %q, %v", data, err)
+	}
+	if target, err := os.Readlink(filepath.Join(aside, "link")); target != "elsewhere" {
+		t.Errorf("main's symlink aside: %q, %v", target, err)
+	}
+	checkFiles(t, Unit{Main: folder}, r.dst)
+}
+
 // Finishing a barrier that main couldn't apply must save main's changes aside like applying it does.
 func TestFinishingAnInterruptedBarrierSavesMainsChangesAside(t *testing.T) {
 	folder := t.TempDir()
