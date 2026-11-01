@@ -600,6 +600,79 @@ func TestARunningMirrorNeverTakesASessionFolderOfAnotherRepository(t *testing.T)
 	}
 }
 
+// A repository on a worker keeps every session folder that the mirror of its sessions covers, also that of a worktree
+// that it no longer has, until it returns to main: meanwhile, no other repository may move there or make a worktree
+// there, and the mirror never takes a folder back from main's copy that another repository has.
+func TestARepositoryOnAWorkerKeepsItsSessionFoldersUntilItReturns(t *testing.T) {
+	requireSystemd(t)
+	options := localWorker(t, newBootstrapRig(t))
+	manager := newTestManager(t, options)
+	base := t.TempDir()
+	project, worktree := filepath.Join(base, "project"), filepath.Join(base, "feature")
+	git(t, base, "init", "-q", project)
+	git(t, project, "commit", "-q", "--allow-empty", "-m", "first")
+	git(t, project, "worktree", "add", "-q", worktree)
+	ctx := context.Background()
+	if err := manager.Move(ctx, project, "beelink", func(func(string) bool) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	// The worker removes the worktree, which main's copy of the repository takes at a barrier.
+	git(t, project, "worktree", "remove", worktree)
+	placement, _ := manager.options.Placements.Find(project)
+	placement.Unit.Worktrees = nil
+	if err := manager.options.Placements.Update(placement); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(worktree, 0700); err != nil {
+		t.Fatal(err)
+	}
+	manager.options.Destination = func(string) (string, error) { return "gripi@worker", nil }
+	stopped := errors.New("stopped")
+	move := func() error {
+		return manager.Move(ctx, worktree, "nuc", func(func(string) bool) error { return stopped })
+	}
+	wantRefused := func(err error, what string) {
+		t.Helper()
+		if !refused(err) || !strings.Contains(err.Error(), project) || !strings.Contains(err.Error(), worktree) {
+			t.Fatalf("%s = %v", what, err)
+		}
+	}
+
+	wantRefused(move(), "Move of the worktree's folder while the repository's mirrors run")
+	other := mirror.Unit{Main: filepath.Join(base, "other")}
+	if err := manager.options.Placements.Add(Placement{Worker: "nuc", Unit: other}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.allowRoot(other, false)(worktree); !refused(err) || !strings.Contains(err.Error(), project) || !strings.Contains(err.Error(), other.Main) {
+		t.Fatalf("a worktree there of another repository on a worker: %v", err)
+	}
+
+	killHelper(t, options.Connection.Unit)
+	for deadline := time.Now().Add(5 * time.Second); manager.Status("beelink").State != Unreachable; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("status of the lost worker = %+v", manager.Status("beelink"))
+		}
+	}
+	wantRefused(move(), "Move of the worktree's folder once the repository's mirrors have stopped")
+
+	// A repository took the folder anyway, such as before Gripi refused it.
+	if err := manager.options.Placements.Add(Placement{Worker: "nuc", Unit: mirror.Unit{Main: worktree}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := manager.Launch(agent.Process{Dir: project, Command: []string{"pi", "--mode", "rpc"}})
+	wantRefused(err, "Launch, whose mirror would take the folder back")
+	if err := manager.options.Placements.Remove(worktree); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := manager.Return(ctx, project, func(func(string) bool) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := move(); err != stopped {
+		t.Fatalf("Move of the worktree's folder once the repository is back = %v", err)
+	}
+}
+
 func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
 	manager := newTestManager(t, ManagerOptions{
 		Store: fakeStore{}, Pi: Pi{AgentDir: "/home/me/.pi/agent"}, StateDir: "/home/me/.pi/gripi", GatewayPaths: []string{"/home/me/.config/gripi"},

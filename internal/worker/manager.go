@@ -791,7 +791,9 @@ func shared(folders, others []string) (string, bool) {
 // claim refuses the folders that the repository whose main folder is main would take, roots such as its main folder
 // and worktrees, and Pi's session folders, when another repository on a worker, or moving to one, owns one of them: no
 // root of one may be or be in a root of the other, and they never share a session folder, which Pi names alike for
-// paths such as /work/a-b and /work/a/b.
+// paths such as /work/a-b and /work/a/b. A repository owns the session folders of its folders and sessions, and until
+// it returns to main, every one that the mirror of its sessions covers, or takes back from main's copy when it starts
+// again.
 func (manager *Manager) claim(main string, roots, sessionFolders []string) error {
 	type owner struct {
 		unit          mirror.Unit
@@ -814,6 +816,19 @@ func (manager *Manager) claim(main string, roots, sessionFolders []string) error
 			return refuse("%s and %s, which is %s, would share %s", main, owner.unit.Main, owner.where, folder)
 		}
 		owned, _ := manager.sessionFolders(owner.unit, owner.worker)
+		sessionsMain := manager.sessionsMain(owner.unit)
+		checkpoint, err := mirror.ReadCheckpoint(filepath.Join(manager.mirrorFolder(sessionsMain), "state"))
+		if err != nil {
+			return err
+		}
+		owned = append(owned, checkpoint.Roots...)
+		manager.mu.Lock()
+		for _, worker := range manager.workers {
+			if live := worker.mirrors[sessionsMain]; live != nil {
+				owned = append(owned, unitFolders(live.unit)...)
+			}
+		}
+		manager.mu.Unlock()
 		for _, folder := range sessionFolders {
 			if slices.Contains(owned, folder) {
 				return refuse("%s and %s, which is %s, would share Pi's session folder %s", main, owner.unit.Main, owner.where, folder)

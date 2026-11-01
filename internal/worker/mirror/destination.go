@@ -116,17 +116,32 @@ func NewMovedDestination(state, from, to string) (*Destination, error) {
 	if err := d.readStamps(); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(d.path("checkpoint.json"))
-	if err == nil {
-		err = json.Unmarshal(data, &d.cp)
+	cp, err := ReadCheckpoint(state)
+	if err != nil {
+		return nil, err
 	}
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("mirror checkpoint: %w", err)
-	}
+	d.cp = cp
 	if err := d.recover(); err != nil {
 		return nil, err
 	}
 	return d, nil
+}
+
+// ReadCheckpoint returns the checkpoint of the destination whose state is in the folder state without opening the
+// destination, which may be serving meanwhile. It is empty until the destination has applied a barrier.
+func ReadCheckpoint(state string) (Checkpoint, error) {
+	var cp Checkpoint
+	data, err := os.ReadFile(filepath.Join(state, "checkpoint.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return cp, nil
+	}
+	if err == nil {
+		err = json.Unmarshal(data, &cp)
+	}
+	if err != nil {
+		return cp, fmt.Errorf("mirror checkpoint: %w", err)
+	}
+	return cp, nil
 }
 
 // readStamps reads what the destination wrote, and when it was created, which it notes the first time.
