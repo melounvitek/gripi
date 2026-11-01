@@ -291,18 +291,21 @@ The worker needs:
 - Linux on the same architecture as main, which must run Linux too.
 - A systemd user manager with cgroup v2. Gripi runs its helper there with `systemd-run --user`, which lets it stop everything that a session started.
 - Git, and the tools that the projects need, on the `PATH` of the user’s login shell. Gripi brings only Node and Pi.
-- The projects and Pi’s agent folder, such as `~/.pi/agent`, at the same absolute paths as on main, because Pi’s sessions name them. Links don’t help, because tools print real paths.
+- Unprivileged user namespaces, when the worker user’s home folder has another path than the gateway user’s on main (see below). Arch, Fedora and Debian allow them. Ubuntu 23.10 and later block them with AppArmor; allow them with `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`, and put `kernel.apparmor_restrict_unprivileged_userns=0` in a file in `/etc/sysctl.d/` to keep that after a restart.
 - Logins from main’s `ssh` without a prompt: run `ssh user@host` once to accept the host key, and `ssh-copy-id user@host` to log in with a key. The gateway runs `ssh` too, so a key with a passphrase needs an agent that the gateway’s environment reaches through `SSH_AUTH_SOCK`. sshd on the worker must allow forwarding TCP ports and Unix sockets (`AllowTcpForwarding` and `AllowStreamLocalForwarding`) and at least 8 sessions per connection (`MaxSessions`), as it does by default.
 
-In practice, give Gripi a dedicated user on the worker whose home folder has the path of the gateway user’s home on main. For a gateway user whose home is `/home/alice`, run as root on the worker:
+In practice, give Gripi a dedicated user on the worker, with any name and home folder, such as one that `useradd -m gripi` makes. Everything that the sessions run, runs as that user.
 
-```sh
-useradd -m -d /home/alice gripi
-```
+Pi’s sessions name the paths of the projects and of Pi’s agent folder, so sessions on the worker use main’s paths. When the worker user’s home folder has another path than the gateway user’s on main, everything that Gripi runs there with main’s paths, such as Pi with everything it starts and the copies of main’s files, runs in a private view of the worker’s files: main’s home folder, such as `/home/alice`, shows the worker user’s home folder, such as `/home/gripi`, and the other folders next to it, such as the other users’ home folders, are hidden. A user of the worker whose home folder has main’s path is never touched. Everything else, such as `/tmp`, `/usr` or `/srv`, stays as it is, so projects outside main’s home folder need the same paths on the worker, where its user can write. The folder that holds main’s home folder, such as `/home`, must exist on the worker, and main’s home folder must not be directly in `/`, as `/root` is.
 
-To move the home folder of an existing user instead, run `usermod -m -d /home/alice gripi` while that user is logged out.
+In the view:
 
-Everything that the sessions run, runs as that user. Membership of the `docker` group makes it root on the worker in effect, and containers can leave files owned by root in the projects; rootless Docker or Podman avoids both.
+- Tools see the worker’s user as itself, with `HOME` set to main’s home folder, and the files that they write belong to it.
+- Programs that need setuid don’t work, such as `sudo`, and rootless Podman, which needs `newuidmap`.
+- Services that the worker user’s systemd starts, such as with `systemd-run --user` without `--scope`, run outside the view and don’t see main’s paths. They run as the worker’s user, so they can’t change other users’ files either.
+- Docker works: sessions get a Docker socket of Gripi’s own in `DOCKER_HOST`, which passes their requests on to the worker’s Docker, as its `DOCKER_HOST`, the current Docker context or `/var/run/docker.sock` names it. The Docker daemon runs outside the view, so the socket changes paths in main’s home folder to the worker user’s home folder where requests name host folders: in bind mounts of new containers and in local volumes bound to a folder.
+
+Membership of the `docker` group makes the worker’s user root on the worker in effect, and containers can leave files owned by root in the projects; rootless Docker avoids both.
 
 Then add the worker on main:
 
@@ -310,7 +313,7 @@ Then add the worker on main:
 gripi worker add gripi@beelink.example.ts.net
 ```
 
-`add` checks the system, Git and systemd, and fails when the worker’s user cannot create Pi’s agent folder at its path on main, or when the worker shares main’s files, as main itself or a home folder mounted on both would: the worker’s files would replace main’s, such as Pi’s logins. Main checks that again whenever it connects. When only the home folder differs, it warns and prints the `usermod` command, because projects can also be created at the same paths by hand. The worker is named after the first part of the host name, `beelink` here, unless `--name` names it. `gripi worker list` lists the workers.
+`add` checks the system, Git and systemd, and when the worker user’s home folder differs from main’s, it installs Gripi’s helper there and checks the private view, saying what to do when the system blocks it. It fails when the worker’s user cannot create Pi’s agent folder at its path on main, as the sessions there see it, or when the worker shares main’s files, as main itself as the same user or a home folder mounted on both would: the worker’s files would replace main’s, such as Pi’s logins. Main checks that again whenever it connects. A worker that is main as another user is fine, because the sessions there see that user’s home folder at main’s. The worker is named after the first part of the host name, `beelink` here, unless `--name` names it. `gripi worker list` lists the workers.
 
 ### What a worker gets
 
@@ -375,7 +378,7 @@ The helper cannot stop what others run for Pi: Docker and Podman containers, whi
 
 ### Removing a worker
 
-`gripi worker remove <worker>` forgets a worker once no repository is on it. Gripi’s files there stay: `~/.local/share/gripi/worker`, Gripi’s state folder, and the copies of Pi’s agent folder, the repositories and their sessions. Delete them on the worker when you no longer need them.
+`gripi worker remove <worker>` forgets a worker once no repository is on it. Gripi’s files there stay: `~/.local/share/gripi/worker`, Gripi’s state folder, and the copies of Pi’s agent folder, the repositories and their sessions, which are in the worker user’s home folder for those in main’s. Delete them on the worker when you no longer need them.
 
 ## Session location
 
