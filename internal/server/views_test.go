@@ -197,7 +197,12 @@ func TestMessageClassMarksToolCallsWithoutResultsPendingWhileTheRunGoesOn(t *tes
 	if got := messageClass(call, false); !strings.Contains(got, "message--tool-unknown") || strings.Contains(got, "pending") {
 		t.Fatalf("interrupted call class = %q", got)
 	}
-	call.ToolPending, call.ToolResultPersisted = false, true
+	// An earlier run ended without the call's result, and another one runs now.
+	call.ToolPending, call.ToolUnknown = false, true
+	if got := messageClass(call, true); !strings.Contains(got, "message--tool-unknown") || strings.Contains(got, "pending") {
+		t.Fatalf("earlier interrupted call class = %q", got)
+	}
+	call.ToolUnknown, call.ToolResultPersisted = false, true
 	for _, running := range []bool{true, false} {
 		if got := messageClass(call, running); strings.Contains(got, "pending") || strings.Contains(got, "unknown") {
 			t.Fatalf("completed call class = %q", got)
