@@ -69,9 +69,13 @@ func (s *server) create(request Message, inMove *move) error {
 	if s.options.Cgroup == "" {
 		return errors.New("sessions need a cgroup that systemd delegated to the helper (systemd-run --user -p Delegate=yes)")
 	}
+	var moveID string
+	if inMove != nil {
+		moveID = inMove.id
+	}
 	current := s.sessions[id]
 	if current == nil {
-		current = &session{cgroup: filepath.Join(s.options.Cgroup, "session-"+id)}
+		current = &session{cgroup: filepath.Join(s.options.Cgroup, "session-"+id), move: moveID}
 		for _, name := range []string{id + ".attach", id + ".sock"} {
 			listener, err := net.Listen("unix", filepath.Join(s.options.RuntimeDir, name))
 			if err != nil {
@@ -80,9 +84,6 @@ func (s *server) create(request Message, inMove *move) error {
 			}
 			current.listeners = append(current.listeners, listener)
 		}
-		if inMove != nil {
-			current.move = inMove.id
-		}
 		s.sessions[id] = current
 		go s.serveAttach(current, current.listeners[0])
 		go s.serveExtension(id, current.listeners[1])
@@ -90,7 +91,7 @@ func (s *server) create(request Message, inMove *move) error {
 	if current.pi != nil {
 		return fmt.Errorf("Pi already runs for session %s", id)
 	}
-	if inMove == nil && current.move != "" || inMove != nil && current.move != inMove.id {
+	if current.move != moveID {
 		return fmt.Errorf("session %s runs in another move", id)
 	}
 	current.cwd = request.Cwd
@@ -98,7 +99,7 @@ func (s *server) create(request Message, inMove *move) error {
 	environment := append(append(os.Environ(), request.Env...), "GRIPI_WORKER_SOCKET="+current.listeners[1].Addr().String())
 	switch {
 	case inMove != nil:
-		environment = append(environment, "DOCKER_HOST=unix://"+filepath.Join(s.options.RuntimeDir, inMove.id+".docker.sock"))
+		environment = append(environment, "DOCKER_HOST=unix://"+s.dockerSocket(inMove))
 	case s.docker != "":
 		environment = append(environment, "DOCKER_HOST="+s.docker)
 	}

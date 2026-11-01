@@ -305,6 +305,11 @@ func (s *server) deleteMove(id string) error {
 
 func (s *server) seeds(id string) string { return filepath.Join(s.options.DataDir, "seeds", id) }
 
+// dockerSocket is the DOCKER_HOST of a move's sessions, which its host serves.
+func (s *server) dockerSocket(m *move) string {
+	return filepath.Join(s.options.RuntimeDir, m.id+".docker.sock")
+}
+
 // createInMove starts Pi for a session of a move, in the move's view, where the session's folder must be.
 func (s *server) createInMove(request Message) error {
 	m, err := s.move(request.Move)
@@ -384,7 +389,7 @@ func (s *server) host(m *move) (*hostProcess, error) {
 	config := hostConfig{
 		Move: m.id, Instance: s.instance, RuntimeDir: s.options.RuntimeDir, Home: s.options.Home, Copy: s.copyFolder(m.id), Seeds: s.seeds(m.id),
 		Unit:   mirror.Unit{Main: m.Roots[0], Worktrees: m.Roots[1:], GitDir: m.Repository, Within: m.Private},
-		Docker: dockerproxy.Options{Listen: filepath.Join(s.options.RuntimeDir, m.id+".docker.sock"), Upstream: s.options.DockerUpstream},
+		Docker: dockerproxy.Options{Listen: s.dockerSocket(m), Upstream: s.options.DockerUpstream},
 	}
 	// Docker sees the copy and the worker user's home folder where the view shows them at main's paths.
 	for _, root := range m.Private {

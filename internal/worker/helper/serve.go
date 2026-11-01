@@ -204,8 +204,8 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 		ids = append(ids, id)
 	}
 	cgroups := s.forget(ids...)
-	for _, move := range s.moves {
-		cgroups = append(cgroups, move.cgroup(s.options.Cgroup))
+	for _, m := range s.moves {
+		cgroups = append(cgroups, m.cgroup(s.options.Cgroup))
 	}
 	s.mu.Unlock()
 	if err := killCgroups(stopTimeout, cgroups...); err != nil {
