@@ -48,6 +48,12 @@ The mirror's test with three parallel commit loops checks 8 barriers; for 100, r
 GRIPI_MIRROR_STRESS=1 go test ./internal/worker/mirror/ -run ParallelCommitLoops -v
 ```
 
+The Docker proxy, which moves a worker session's paths to the worker user's home, has a test that runs the real `docker` CLI and `docker compose` through it against this machine's Docker: bind mounts, a local volume bound to a folder, piped stdin, a terminal, `exec`, `logs -f`, `build` and `compose up --build`, with the session's paths in a folder that doesn't exist here. It pulls `alpine` if needed and removes what it created, including `alpine` if it pulled it:
+
+```sh
+GRIPI_TEST_DOCKER=1 go test ./internal/worker/dockerproxy/ -run RealDocker -v
+```
+
 An end-to-end test moves a repository with a worktree to a real worker and back, with a scripted model, so no real model is called. The gateway's home folder is `/tmp/gripi-e2e/home/vitek`, which the worker lacks, and its Pi folder, state and projects are in that home folder, so the worker's sessions see them in its user's own home folder through the private view. On the way, it checks that main's copies of the sessions follow the worker's and outlive a gateway restart, that the worker's `auth.json` follows changes to main's without its refresh tokens, that a file edited on main is saved aside, and that a worktree made on the worker runs its sessions there. It then freezes the ssh master connection: a few seconds cost nothing, while half a lease ends the running step with an unknown outcome, and the repository continues on main once the worker is gone. The next move keeps aside on the worker what main never got, and after the master is killed, the next prompt of a session whose Pi ran there connects again and starts its Pi there. It needs another machine, because the worker must not share main's files:
 
 ```sh

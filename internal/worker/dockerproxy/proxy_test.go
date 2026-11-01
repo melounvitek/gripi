@@ -1,0 +1,336 @@
+package dockerproxy_test
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/melounvitek/gripi/internal/worker/dockerproxy"
+)
+
+const (
+	from = "/home/vit"
+	to   = "/home/worker"
+)
+
+// received is what the fake Docker daemon got.
+type received struct {
+	method, path string
+	body         []byte
+}
+
+// startProxy serves a proxy in front of a fake Docker daemon on a Unix socket, and returns a client of the proxy.
+func startProxy(t *testing.T, daemon http.Handler) (*http.Client, string) {
+	t.Helper()
+	dir := t.TempDir()
+	listener, err := net.Listen("unix", filepath.Join(dir, "daemon.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := httptest.NewUnstartedServer(daemon)
+	upstream.Listener = listener
+	upstream.Start()
+	t.Cleanup(upstream.Close)
+	return serve(t, dockerproxy.Options{Listen: filepath.Join(dir, "proxy.sock"), Upstream: "unix://" + listener.Addr().String(), From: from, To: to})
+}
+
+func serve(t *testing.T, options dockerproxy.Options) (*http.Client, string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- dockerproxy.Serve(ctx, options) }()
+	for start := time.Now(); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(options.Listen); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			cancel()
+			t.Fatalf("Serve: %v", err)
+		default:
+		}
+		if time.Since(start) > 5*time.Second {
+			cancel()
+			t.Fatal("the proxy's socket didn't appear")
+		}
+	}
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != context.Canceled {
+			t.Errorf("Serve returned %v, want context.Canceled", err)
+		}
+	})
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var dialer net.Dialer
+		return dialer.DialContext(ctx, "unix", options.Listen)
+	}}}
+	return client, options.Listen
+}
+
+// recorder is a fake daemon that answers every request with status 201 and an empty object, and passes what it got to the channel.
+func recorder() (http.Handler, chan received) {
+	requests := make(chan received, 1)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests <- received{r.Method, r.URL.Path, body}
+		w.WriteHeader(http.StatusCreated)
+		io.WriteString(w, "{}")
+	}), requests
+}
+
+func post(t *testing.T, client *http.Client, path, body string) {
+	t.Helper()
+	res, err := client.Post("http://docker"+path, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("POST %s: status %d", path, res.StatusCode)
+	}
+}
+
+func decode(t *testing.T, data []byte) any {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		t.Fatalf("decode %s: %v", data, err)
+	}
+	return value
+}
+
+func TestRewritesFoldersInRequests(t *testing.T) {
+	container := `{
+		"Image": "alpine", "Cmd": ["cat", "/home/vit/file"], "Memory": 9007199254740993, "Extra": {"Nested": [1, "/home/vit/x", null]},
+		"HostConfig": {
+			"Binds": ["/home/vit/proj:/x:ro", "/home/vit:/home", "/home/vitek/proj:/y", "/srv/data:/z", "named:/home/vit/v", "/home/vit/anonymous"],
+			"Mounts": [
+				{"Type": "bind", "Source": "/home/vit/proj", "Target": "/m", "ReadOnly": true, "BindOptions": {"Propagation": "rprivate"}},
+				{"Type": "bind", "Source": "/home/vitek", "Target": "/n"},
+				{"Type": "volume", "Source": "data", "Target": "/d"},
+				{"Type": "volume", "Target": "/e", "VolumeOptions": {"DriverConfig": {"Name": "local", "Options": {"type": "none", "o": "bind", "device": "/home/vit/data"}}}},
+				{"Type": "tmpfs", "Target": "/t"}
+			],
+			"Privileged": false, "Future": {"Field": "/home/vit/z"}
+		}
+	}`
+	wantContainer := `{
+		"Image": "alpine", "Cmd": ["cat", "/home/vit/file"], "Memory": 9007199254740993, "Extra": {"Nested": [1, "/home/vit/x", null]},
+		"HostConfig": {
+			"Binds": ["/home/worker/proj:/x:ro", "/home/worker:/home", "/home/vitek/proj:/y", "/srv/data:/z", "named:/home/vit/v", "/home/vit/anonymous"],
+			"Mounts": [
+				{"Type": "bind", "Source": "/home/worker/proj", "Target": "/m", "ReadOnly": true, "BindOptions": {"Propagation": "rprivate"}},
+				{"Type": "bind", "Source": "/home/vitek", "Target": "/n"},
+				{"Type": "volume", "Source": "data", "Target": "/d"},
+				{"Type": "volume", "Target": "/e", "VolumeOptions": {"DriverConfig": {"Name": "local", "Options": {"type": "none", "o": "bind", "device": "/home/worker/data"}}}},
+				{"Type": "tmpfs", "Target": "/t"}
+			],
+			"Privileged": false, "Future": {"Field": "/home/vit/z"}
+		}
+	}`
+	volume := `{"Name": "data", "Driver": "local", "DriverOpts": {"type": "none", "o": "bind", "device": "/home/vit/data"}, "Labels": {"a": "b"}}`
+	wantVolume := `{"Name": "data", "Driver": "local", "DriverOpts": {"type": "none", "o": "bind", "device": "/home/worker/data"}, "Labels": {"a": "b"}}`
+	for _, test := range []struct{ path, body, want string }{
+		{"/v1.52/containers/create?name=app", container, wantContainer},
+		{"/containers/create", container, wantContainer},
+		{"/v1.24/volumes/create", volume, wantVolume},
+		{"/volumes/create", volume, wantVolume},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			daemon, requests := recorder()
+			client, _ := startProxy(t, daemon)
+			post(t, client, test.path, test.body)
+			got := <-requests
+			if want := strings.Split(test.path, "?")[0]; got.path != want {
+				t.Errorf("the daemon got %s, want %s", got.path, want)
+			}
+			if !reflect.DeepEqual(decode(t, got.body), decode(t, []byte(test.want))) {
+				t.Errorf("the daemon got\n%s\nwant\n%s", got.body, test.want)
+			}
+		})
+	}
+}
+
+func TestPassesOtherRequestsUnchanged(t *testing.T) {
+	for _, test := range []struct{ path, body string }{
+		{"/v1.52/containers/create", `{"Image":"alpine",  "HostConfig": {"Binds": ["/home/vitek:/x", "data:/home/vit"], "Mounts": [{"Type": "bind", "Source": "/srv/x"}]}}`},
+		{"/v1.52/containers/abc/update", `{"HostConfig": {"Binds": ["/home/vit:/x"]}}`},
+		{"/v1.52/volumes/create", `{"Name": "x", "DriverOpts": {"device": "/home/vitek"}}`},
+		{"/v1.52/containers/create", `not JSON /home/vit:/x`},
+	} {
+		daemon, requests := recorder()
+		client, _ := startProxy(t, daemon)
+		post(t, client, test.path, test.body)
+		if got := <-requests; string(got.body) != test.body {
+			t.Errorf("POST %s: the daemon got\n%s\nwant\n%s", test.path, got.body, test.body)
+		}
+	}
+}
+
+func TestMapsFoldersBackInInspections(t *testing.T) {
+	answers := map[string]string{
+		"/v1.52/containers/abc/json": `{"Id": "abc", "Unknown": 9007199254740993,
+			"HostConfig": {"Binds": ["/home/worker/proj:/x", "/home/workers:/y"], "Mounts": [{"Type": "bind", "Source": "/home/worker/m", "Target": "/m"}]},
+			"Mounts": [{"Type": "bind", "Source": "/home/worker/proj", "Destination": "/x"}, {"Type": "volume", "Name": "data", "Source": "/var/lib/docker/volumes/data/_data"}]}`,
+		"/volumes/data":     `{"Name": "data", "Mountpoint": "/var/lib/docker/volumes/data/_data", "Options": {"device": "/home/worker/data", "o": "bind"}}`,
+		"/volumes/rootless": `{"Name": "rootless", "Mountpoint": "/home/worker/.local/share/docker/volumes/rootless/_data"}`,
+	}
+	want := map[string]string{
+		"/v1.52/containers/abc/json": `{"Id": "abc", "Unknown": 9007199254740993,
+			"HostConfig": {"Binds": ["/home/vit/proj:/x", "/home/workers:/y"], "Mounts": [{"Type": "bind", "Source": "/home/vit/m", "Target": "/m"}]},
+			"Mounts": [{"Type": "bind", "Source": "/home/vit/proj", "Destination": "/x"}, {"Type": "volume", "Name": "data", "Source": "/var/lib/docker/volumes/data/_data"}]}`,
+		"/volumes/data":     `{"Name": "data", "Mountpoint": "/var/lib/docker/volumes/data/_data", "Options": {"device": "/home/vit/data", "o": "bind"}}`,
+		"/volumes/rootless": `{"Name": "rootless", "Mountpoint": "/home/vit/.local/share/docker/volumes/rootless/_data"}`,
+	}
+	client, _ := startProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, answers[r.URL.Path])
+	}))
+	for path := range answers {
+		res, err := client.Get("http://docker" + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if length := res.Header.Get("Content-Length"); length != strconv.Itoa(len(body)) {
+			t.Errorf("GET %s: Content-Length %s for %d bytes", path, length, len(body))
+		}
+		if !reflect.DeepEqual(decode(t, body), decode(t, []byte(want[path]))) {
+			t.Errorf("GET %s: got\n%s\nwant\n%s", path, body, want[path])
+		}
+	}
+}
+
+func TestStreamsWithoutBuffering(t *testing.T) {
+	release := make(chan struct{})
+	client, _ := startProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "first\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		io.WriteString(w, "second\n")
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/v1.52/events", nil)
+	res, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	reader := bufio.NewReader(res.Body)
+	if line, err := reader.ReadString('\n'); line != "first\n" {
+		t.Fatalf("got %q, %v before the stream ended", line, err)
+	}
+	close(release)
+	if rest, err := io.ReadAll(reader); string(rest) != "second\n" || err != nil {
+		t.Fatalf("got %q, %v at the end", rest, err)
+	}
+}
+
+// The daemon answers attach and exec start with 101, and then both sides send raw bytes; the client half-closes when its input ends.
+func TestPassesUpgradedConnections(t *testing.T) {
+	_, socket := startProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		conn, buffered, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		io.WriteString(conn, "HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\nready\n")
+		input, _ := io.ReadAll(buffered)
+		fmt.Fprintf(conn, "%s %s got %s", r.URL.Path, body, input)
+	}))
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	body := `{"Detach":false,"Tty":false}`
+	fmt.Fprintf(conn, "POST /v1.52/exec/abc/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	reader := bufio.NewReader(conn)
+	res, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusSwitchingProtocols || res.Header.Get("Upgrade") != "tcp" {
+		t.Fatalf("got %s with Upgrade %q", res.Status, res.Header.Get("Upgrade"))
+	}
+	if line, err := reader.ReadString('\n'); line != "ready\n" {
+		t.Fatalf("got %q, %v", line, err)
+	}
+	io.WriteString(conn, "input\x00\xff")
+	conn.(*net.UnixConn).CloseWrite()
+	rest, err := io.ReadAll(reader)
+	if want := "/v1.52/exec/abc/start " + body + " got input\x00\xff"; string(rest) != want || err != nil {
+		t.Fatalf("got %q, %v, want %q", rest, err, want)
+	}
+}
+
+func TestServesPrivateSocketForTCPEndpoints(t *testing.T) {
+	daemon, requests := recorder()
+	upstream := httptest.NewServer(daemon)
+	defer upstream.Close()
+	client, socket := serve(t, dockerproxy.Options{
+		Listen: filepath.Join(t.TempDir(), "proxy.sock"), Upstream: "tcp://" + upstream.Listener.Addr().String(), From: from, To: to,
+	})
+	if info, err := os.Stat(socket); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("socket: %v, %v", info.Mode(), err)
+	}
+	post(t, client, "/v1.52/volumes/create", `{"DriverOpts": {"device": "/home/vit/x"}}`)
+	if got := <-requests; !reflect.DeepEqual(decode(t, got.body), decode(t, []byte(`{"DriverOpts":{"device":"/home/worker/x"}}`))) {
+		t.Errorf("the daemon got %s", got.body)
+	}
+}
+
+func TestRefusesUnsupportedEndpoints(t *testing.T) {
+	for _, upstream := range []string{"ssh://user@host", "npipe:////./pipe/docker_engine", ""} {
+		err := dockerproxy.Serve(context.Background(), dockerproxy.Options{
+			Listen: filepath.Join(t.TempDir(), "proxy.sock"), Upstream: upstream, From: from, To: to,
+		})
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", upstream)) {
+			t.Errorf("Serve with %q: %v", upstream, err)
+		}
+	}
+}
+
+func TestUpstream(t *testing.T) {
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
+	if got := dockerproxy.Upstream([]string{"DOCKER_CONTEXT=remote"}); got != "unix:///var/run/docker.sock" {
+		t.Errorf("without docker: %s", got)
+	}
+	script := "#!/bin/sh\n[ \"$*\" = 'context inspect --format {{.Endpoints.docker.Host}}' ] && echo \"unix:///run/$DOCKER_CONTEXT.sock\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if got := dockerproxy.Upstream([]string{"DOCKER_CONTEXT=remote"}); got != "unix:///run/remote.sock" {
+		t.Errorf("from the context: %s", got)
+	}
+	if got := dockerproxy.Upstream([]string{"DOCKER_CONTEXT=remote", "DOCKER_HOST=tcp://docker:2375"}); got != "tcp://docker:2375" {
+		t.Errorf("from DOCKER_HOST: %s", got)
+	}
+}
