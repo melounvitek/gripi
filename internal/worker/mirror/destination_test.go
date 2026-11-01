@@ -109,6 +109,61 @@ func TestSessionFilesReachMainALineAtATime(t *testing.T) {
 	}
 }
 
+// Pi rewrites a session file in place, an entry at a time, and losing the worker in the middle must leave main with
+// the whole session it had, rather than the start of the new file.
+func TestAnUnfinishedRewriteOfASessionKeepsMainsCopy(t *testing.T) {
+	folder := t.TempDir()
+	unit := Unit{Main: folder}
+	session := filepath.Join(folder, "session.jsonl")
+	turns := "{\"type\":\"session\",\"version\":2}\n{\"id\":\"1\",\"role\":\"user\"}\n{\"id\":\"2\",\"role\":\"assistant\"}\n"
+	writeFile(t, folder, "session.jsonl", turns)
+	r := newRigWith(t, unit, func(s *Source) { s.opts.CompleteLines, s.opts.AutoBarrier = true, true })
+	onMain := func() string {
+		data, _ := os.ReadFile(r.dst + session)
+		return string(data)
+	}
+
+	// Lines added to a file that its writer keeps open still reach main.
+	f, err := os.OpenFile(session, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns += "{\"id\":\"3\",\"role\":\"user\"}\n"
+	f.WriteString("{\"id\":\"3\",\"role\":\"user\"}\n")
+	r.barrier(t)
+	if got := onMain(); got != turns {
+		t.Fatalf("main has %q", got)
+	}
+	f.Close()
+
+	// As Pi's _rewriteFile: truncate, then write the entries one by one.
+	if f, err = os.OpenFile(session, os.O_WRONLY|os.O_TRUNC, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	migrated := []string{"{\"type\":\"session\",\"version\":3}\n", "{\"id\":\"1\",\"role\":\"user\",\"v\":3}\n",
+		"{\"id\":\"2\",\"role\":\"assistant\",\"v\":3}\n", "{\"id\":\"3\",\"role\":\"user\",\"v\":3}\n"}
+	for _, entry := range migrated[:3] {
+		f.WriteString(entry)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		_, writing, err := r.src.Barrier(ctx)
+		cancel()
+		if err != nil || !slices.Equal(writing, []string{session}) {
+			t.Fatalf("barrier during the rewrite: %v, still being written: %v", err, writing)
+		}
+		if got := onMain(); got != turns {
+			t.Fatalf("main has %q during the rewrite", got)
+		}
+	}
+	f.WriteString(migrated[3])
+	f.Close()
+	r.barrier(t)
+	if got := onMain(); got != strings.Join(migrated, "") {
+		t.Fatalf("main has %q after the rewrite", got)
+	}
+	checkFiles(t, unit, r.dst)
+}
+
 func TestMainsChangesAreSavedAsideBeforeTheWorkersReplaceThem(t *testing.T) {
 	unit := newRepo(t)
 	dst := t.TempDir()

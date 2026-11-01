@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -143,7 +144,7 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) error {
 	defer closeOnDone(ctx, stream)()
 	s.sender = newSender(s.unit, s.opts, stream)
 	defer s.sender.close()
-	s.sender.watch = s.addWatch
+	s.sender.watch, s.sender.settling = s.addWatch, map[string]stamp{}
 	s.wdPath, s.pathWd, s.indexChanged = map[int32]string{}, map[string]int32{}, map[string]bool{}
 	s.qsig = make(chan struct{}, 1)
 
@@ -267,6 +268,9 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 		return err
 	}
 	s.barriered, s.unbarriered = s.marked, time.Time{}
+	if err := s.sendSettled(); err != nil {
+		return err
+	}
 	if err := s.unreadError(); err != nil {
 		s.failing.Store(true)
 		s.retryAt = time.Now().Add(time.Second)
@@ -295,6 +299,33 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 		}
 	}()
 	return nil
+}
+
+// sendSettled sends the CompleteLines files that the barrier found closed, once the events up to another sentinel
+// show that their writers left them so: what was read of a file that Pi started to rewrite meanwhile may be only its
+// start. A file that changed is left out as still being written, and its events bring another barrier.
+func (s *Source) sendSettled() error {
+	if len(s.settling) == 0 {
+		return nil
+	}
+	paths := slices.Collect(maps.Keys(s.settling))
+	if err := s.syncSentinel(); err != nil {
+		return err
+	}
+	var files []string
+	for _, p := range paths {
+		if _, ok := s.settling[p]; ok {
+			files = append(files, p)
+		}
+	}
+	err := s.sendFiles(files)
+	clear(s.settling)
+	for _, p := range paths {
+		if _, left := s.dirty[p]; left {
+			s.writing = append(s.writing, p)
+		}
+	}
+	return err
 }
 
 func (s *Source) syncSentinel() error {

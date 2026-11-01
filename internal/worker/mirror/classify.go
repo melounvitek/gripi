@@ -30,7 +30,9 @@ type Options struct {
 	AutoBarrier bool
 	// CompleteLines sends `*.jsonl` files only up to their last newline, so that the destination never gets a line
 	// that is still being written, as with Pi's session files. As with any file, the destination appends what a file
-	// gained to it, and replaces a file that was rewritten.
+	// gained to it, and replaces a file that was rewritten. A Source sends these files at barriers only, and one that
+	// doesn't start with what the destination has only once its writer has closed it, because what it reads of a
+	// rewrite in progress may be only its start; until then, barriers list the file as still being written.
 	CompleteLines bool
 }
 

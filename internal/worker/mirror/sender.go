@@ -47,6 +47,7 @@ type sender struct {
 	objDels    map[string]uint64 // object files gone before the barrier with this number
 	next       uint64            // the next barrier's number
 	writing    []string          // files left out of the current barrier
+	settling   map[string]stamp  // CompleteLines files that the barrier found closed, as they were; nil for a one-shot sync
 	unread     map[string]error  // what couldn't be read since the barrier started, which fails it
 	buf        []byte
 
@@ -206,6 +207,7 @@ func (s *sender) mark(p string, writing bool) {
 	}
 	s.dirty[p] = writing
 	s.marked++
+	delete(s.settling, p)
 }
 
 // cantRead notes that p couldn't be read. Unless it disappeared or changed type meanwhile, which later events or the
@@ -585,6 +587,17 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 				delete(s.dirty, p)
 				continue
 			}
+			if s.settling != nil && s.lineFile(p) {
+				// What is read of a rewrite in progress may be only its start, so these go at barriers only: one still
+				// being written if it only grew, and a closed one once the source has made sure that it stayed so.
+				if !barrier {
+					continue
+				}
+				if !writing {
+					s.settling[p] = stampOf(p, info)
+					continue
+				}
+			}
 			if writing {
 				if !barrier {
 					continue
@@ -594,8 +607,7 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 					continue
 				}
 			}
-			delete(s.dirty, p)
-			files = append(files, p)
+			files = append(files, p) // and it stays dirty until it is sent
 		}
 	}
 
@@ -792,12 +804,18 @@ func (s *sender) sendFile(p string, plan deltaPlan) error {
 			s.mark(p, false) // the next flush sees what it is
 			return nil
 		}
+		if s.settling != nil && s.lineFile(p) && s.held(f, info, p) {
+			f.Close()
+			s.writing = append(s.writing, p)
+			return nil
+		}
 		ok, e, err := s.stream(f, info, p, plan)
 		f.Close()
 		if err != nil || ok {
 			if ok {
 				s.sent[p] = e
 				delete(s.unread, p)
+				delete(s.dirty, p)
 			}
 			return err
 		}
@@ -811,13 +829,40 @@ func (s *sender) sendFile(p string, plan deltaPlan) error {
 	return nil
 }
 
+func (s *sender) lineFile(p string) bool {
+	return s.opts.CompleteLines && strings.HasSuffix(p, ".jsonl")
+}
+
+// held reports whether the CompleteLines file p, open as f, is held back for a later barrier as still being written:
+// a file that the barrier found closed unless it is as it was then, and one still being written unless it only grew
+// since the destination got it.
+func (s *sender) held(f *os.File, info fs.FileInfo, p string) bool {
+	if st, ok := s.settling[p]; ok {
+		return st != stampOf(p, info)
+	}
+	old, ok := s.sent[p]
+	if !ok || old.Type != 'f' {
+		return false
+	}
+	if old.linesSum == nil {
+		return true // the destination had it before this source ran
+	}
+	sum := sha256.New()
+	if _, err := io.Copy(sum, io.NewSectionReader(f, 0, old.lines)); err != nil {
+		s.cantRead(p, err)
+		return true
+	}
+	return !bytes.Equal(sum.Sum(nil), old.linesSum)
+}
+
 // stream sends p as f holds it, or with CompleteLines, its complete lines. The entry it returns is the whole file's,
 // so that the rest goes once the file changes again.
 func (s *sender) stream(f *os.File, info fs.FileInfo, p string, plan deltaPlan) (bool, entry, error) {
 	e := entryOf(p, info)
 	e.ino = inode(info)
 	size := e.Size
-	if s.opts.CompleteLines && strings.HasSuffix(p, ".jsonl") {
+	lines := s.lineFile(p)
+	if lines {
 		var err error
 		if size, err = completeLines(f, size); err != nil {
 			s.cantRead(p, err)
@@ -827,7 +872,12 @@ func (s *sender) stream(f *os.File, info fs.FileInfo, p string, plan deltaPlan) 
 	w := &putWriter{c: s.c, f: &frame{Kind: kindPut, Path: p, Mode: e.Mode, Mtime: e.Mtime, Size: size, Bases: plan.bases, First: true}}
 	counted := &countingReader{r: io.NewSectionReader(f, 0, size)}
 	var r io.Reader = counted
+	// Of what is read from the start: what the destination builds from a delta, or the lines that held checks later.
 	var sum hash.Hash
+	if plan.sigs != nil || lines && plan.appendAt == 0 {
+		sum = sha256.New()
+		r = io.TeeReader(r, sum)
+	}
 	var err error
 	switch {
 	case plan.appendAt > 0:
@@ -837,8 +887,6 @@ func (s *sender) stream(f *os.File, info fs.FileInfo, p string, plan deltaPlan) 
 			err = s.copyData(w, r)
 		}
 	case plan.sigs != nil:
-		sum = sha256.New()
-		r = io.TeeReader(r, sum)
 		err = diff(r, plan.sigs.BlockSize, plan.sigs.Sums, w.add)
 	default:
 		err = s.copyData(w, r)
@@ -857,6 +905,12 @@ func (s *sender) stream(f *os.File, info fs.FileInfo, p string, plan deltaPlan) 
 	var hashed []byte
 	if sum != nil && ok {
 		hashed = sum.Sum(nil)
+	}
+	if lines {
+		e.lines, e.linesSum = size, hashed
+	}
+	if plan.sigs == nil {
+		hashed = nil // the destination checks only what it builds from a delta
 	}
 	return ok, e, w.finish(!ok, hashed)
 }

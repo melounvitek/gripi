@@ -63,6 +63,10 @@ type entry struct {
 	Mtime  int64
 	Target string
 	ino    uint64 // the source's inode of what it sent; not on the wire
+	// With CompleteLines, the length and SHA-256 of what the source sent, the file's complete lines; nil when it
+	// doesn't know. Not on the wire.
+	lines    int64
+	linesSum []byte
 }
 
 type conn struct {
