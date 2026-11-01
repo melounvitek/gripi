@@ -45,13 +45,26 @@ func (r *reconciler) apply() error {
 	if err != nil {
 		return err
 	}
+	// Only worktrees that the return makes, or whose checkouts it takes while main's HEAD and index there are still as
+	// planned, may have a ref that it changes checked out.
+	var taking []string
+	for _, w := range p.Worktrees {
+		taking = append(taking, w.Root)
+	}
+	for _, c := range p.Checkouts {
+		i := slices.IndexFunc(mTrees, func(w worktree) bool { return w.Root == c.Root && w.GitDir == c.GitDir })
+		if i < 0 || mTrees[i].Head.Branch != c.Old.Branch {
+			continue
+		}
+		if index, err := r.main.index(ctx, mTrees[i]); err != nil {
+			return err
+		} else if index == c.OldIndex {
+			taking = append(taking, c.Root)
+		}
+	}
 	var updates []refUpdate
 	for _, u := range p.Refs {
-		// Only worktrees whose checkouts the return takes or makes may have the ref checked out, as when it was planned.
-		checkedOut := slices.ContainsFunc(mTrees, func(w worktree) bool {
-			return w.Head.Branch == u.Name && !slices.ContainsFunc(p.Checkouts, func(c checkout) bool { return c.Root == w.Root }) &&
-				!slices.ContainsFunc(p.Worktrees, func(n worktree) bool { return n.Root == w.Root })
-		})
+		checkedOut := slices.ContainsFunc(mTrees, func(w worktree) bool { return w.Head.Branch == u.Name && !slices.Contains(taking, w.Root) })
 		switch current := mRefs[u.Name].OID; {
 		case current == u.New:
 		case current == u.Old && !checkedOut:

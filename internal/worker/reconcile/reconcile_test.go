@@ -888,6 +888,48 @@ func TestABranchThatMainChecksOutAfterAStopKeepsItsCommit(t *testing.T) {
 	}
 }
 
+func TestTheBranchOfACheckoutThatMainChangesAfterAStopKeepsItsCommit(t *testing.T) {
+	for _, change := range []string{"the branch", "the index"} {
+		r := newRig(t)
+		r.git(r.main, "branch", "fast")
+		r.git(r.main, "branch", "diverged")
+		r.snapshot(r.feat)
+		worker := func(args ...string) string { return r.worker(r.feat, args...) }
+		r.commit(worker, "feat", "worker")
+		worker("branch", "-D", "fast")
+		r.commit(worker, "diverged", "worker")
+		r.commit(r.onMain, "diverged", "main") // for a recovery ref, the first change
+		stopWhen(t, func() bool { return true })
+		if _, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery); err == nil {
+			t.Fatal("the reconcile didn't stop")
+		}
+		interrupt = nil
+		branch, status := "fast", ""
+		if change == "the branch" {
+			r.git(r.feat, "switch", "-q", "fast")
+		} else {
+			branch, status = "feat", "A  staged.txt\n"
+			r.write(r.feat, "staged.txt", "s\n")
+			r.git(r.feat, "add", "staged.txt")
+		}
+		before := r.rev(r.main, branch)
+
+		result := r.reconcile()
+
+		if got := r.rev(r.main, branch); got != before {
+			t.Errorf("main changed %s: %s = %s, want main's %s", change, branch, got, before)
+		}
+		if got := r.git(r.feat, "status", "--porcelain"); got != status {
+			t.Errorf("main changed %s: git status in feat =\n%s", change, got)
+		}
+		for _, path := range []string{"refs/heads/" + branch, r.feat} {
+			if _, ok := asideOf(result, path); !ok {
+				t.Errorf("main changed %s: %s isn't kept aside: %v", change, path, result.Aside)
+			}
+		}
+	}
+}
+
 func TestAWorktreeThatMainMakesInANewOneAfterAStopKeepsTheWorkersFilesOut(t *testing.T) {
 	r := newRig(t)
 	r.snapshot(r.main)
