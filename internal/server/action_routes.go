@@ -1699,6 +1699,11 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 	if app.writeRPCError(response, err) {
 		return true
 	}
+	// The workers refuse to start a session on this machine in a session folder of a repository on a worker, for one.
+	if refused(err) {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": err.Error()})
+		return true
+	}
 	if errors.Is(err, agent.ErrStartFailed) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return true

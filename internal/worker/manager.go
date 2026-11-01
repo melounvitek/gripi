@@ -970,7 +970,9 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	defer done()
 	placement, placed := manager.options.Placements.Find(cwd)
 	if !placed {
-		return nil, nil, nil
+		// The mirror of a repository on a worker would replace what Pi here writes in one of the repository's session
+		// folders, which Pi names alike for paths such as /work/a-b and /work/a/b.
+		return nil, nil, manager.claim(cwd, nil, []string{sessionFolder(manager.options.SessionsRoot, cwd)})
 	}
 	ctx, cancel := context.WithTimeout(manager.ctx, connectTimeout)
 	defer cancel()

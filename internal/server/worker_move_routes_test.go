@@ -8,12 +8,15 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
@@ -247,6 +250,25 @@ func TestWorkerCommandsForwardPortsAndRefuseWithAConflict(t *testing.T) {
 	}
 	if response := command(local, http.MethodPost, "/workers/move", url.Values{"folder": {project}, "worker": {"nuc"}}); response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "Could not resolve hostname") {
 		t.Fatalf("failed move = %d %s", response.Code, response.Body.String())
+	}
+}
+
+// A session that the workers' launcher refuses to start, such as one that Pi would keep in a session folder of a
+// repository on a worker, is a conflict, with the reason.
+func TestASessionThatTheWorkersRefuseToStartIsAConflict(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PiCommand = []string{"false"}
+	reason := "/work/a/b and /work/a-b, which is on worker beelink, would share Pi's session folder"
+	handler, err := gateway.NewPiHandlerWithLauncher(cfg, gripi.WebFiles, func(agent.Process) (*exec.Cmd, func(), error) {
+		return nil, nil, refusal{errors.New(reason)}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": t.TempDir()}, true))
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), reason) {
+		t.Fatalf("new session = %d %s", response.Code, response.Body.String())
 	}
 }
 

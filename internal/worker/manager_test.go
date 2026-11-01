@@ -594,6 +594,30 @@ func TestAMoveRefusesASessionFolderWithSessionsOfAnotherFolder(t *testing.T) {
 	}
 }
 
+// While a repository is on a worker, a session cannot start on this machine in a folder whose sessions Pi keeps in a
+// session folder of the repository, such as /work/a/b for /work/a-b, because the mirror of the repository's sessions
+// would replace it.
+func TestASessionOnMainNeverStartsInASessionFolderOfARepositoryOnAWorker(t *testing.T) {
+	base, sessions := t.TempDir(), t.TempDir()
+	project, other := filepath.Join(base, "a-b"), filepath.Join(base, "a", "b")
+	key := filepath.Join(sessionFolder(sessions, other), "s.jsonl")
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{sessions: map[string]string{key: other}}, StateDir: t.TempDir(), SessionsRoot: sessions})
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A new session there, and one that started there before the repository moved.
+	for _, process := range []agent.Process{{Dir: other}, {Key: key}} {
+		command, _, err := manager.Launch(process)
+		if command != nil || !refused(err) || !strings.Contains(err.Error(), project) || !strings.Contains(err.Error(), "worker beelink") {
+			t.Errorf("Launch(%+v) = %v, %v", process, command, err)
+		}
+	}
+	if command, _, err := manager.Launch(agent.Process{Dir: filepath.Join(base, "a")}); command != nil || err != nil {
+		t.Fatalf("Launch of a session in a session folder of its own = %v, %v", command, err)
+	}
+}
+
 // A session that starts in a new folder of a repository on a worker needs the folder's session folder in the running
 // mirror of the repository's sessions, unless another repository on a worker has it, or this machine has sessions of
 // another folder in it, which Pi names alike.
