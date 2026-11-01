@@ -13,8 +13,6 @@ import (
 	"slices"
 	"strings"
 	"syscall"
-
-	"golang.org/x/sys/unix"
 )
 
 // entry is what a path holds. Folders compare by type alone, as Git doesn't know their modes.
@@ -30,9 +28,11 @@ func (e entry) same(o entry) bool {
 	return e.Type == o.Type && e.Mode == o.Mode && e.OID == o.OID && e.Target == o.Target && e.Type != "x"
 }
 
+// stamp tells whether the shadow's copy of a file is still the one recorded: the mirror replaces files with new
+// ones, or appends to them.
 type stamp struct {
-	Size, Mtime, Ctime int64
-	Ino                uint64
+	Size, Mtime int64
+	Ino         uint64
 }
 
 // lstat reads what p holds, except a file's blob ID.
@@ -51,25 +51,23 @@ func lstat(p string) (entry, error) {
 		target, err := os.Readlink(p)
 		return entry{Type: "l", Target: target}, err
 	case info.Mode().IsRegular():
-		st := info.Sys().(*syscall.Stat_t)
-		return entry{Type: "f", Mode: uint32(info.Mode().Perm()), Stamp: stamp{st.Size, st.Mtim.Nano(), st.Ctim.Nano(), st.Ino}}, nil
+		ino := info.Sys().(*syscall.Stat_t).Ino
+		return entry{Type: "f", Mode: uint32(info.Mode().Perm()), Stamp: stamp{info.Size(), info.ModTime().UnixNano(), uint64(ino)}}, nil
 	}
 	return entry{Type: "x"}, nil
 }
 
-// entries reads what main has at paths in the worktree at root, with the files' blob IDs. A path below anything but
-// a folder holds something that equals nothing, so that a change never goes through a link.
+// entries reads what the repository's folders have at paths in the worktree at root, with the files' blob IDs. A path
+// below anything but a folder, such as a link, holds nothing.
 func (r repo) entries(ctx context.Context, root string, paths []string) (map[string]entry, error) {
 	found := make(map[string]entry, len(paths))
 	var files []string
 	for _, p := range paths {
-		e, err := lstat(r.path(p))
-		if err != nil {
-			return nil, err
-		}
-		for dir := filepath.Dir(p); within(dir, root) && dir != root; dir = filepath.Dir(dir) {
-			if above, err := lstat(r.path(dir)); err != nil || above.Type != "d" && above.Type != "" {
-				e = entry{Type: "x"}
+		var e entry
+		if !blocked(r.path(root), r.path(p)) {
+			var err error
+			if e, err = lstat(r.path(p)); err != nil {
+				return nil, err
 			}
 		}
 		found[p] = e
@@ -133,6 +131,20 @@ func (r repo) walk(ctx context.Context, root string, others []string, base map[s
 }
 
 func within(p, dir string) bool { return p == dir || strings.HasPrefix(p, dir+"/") }
+
+// blocked reports whether something other than a folder is at root or between it and p, so that p can't hold
+// anything, and a change to it would go through a link.
+func blocked(root, p string) bool {
+	for dir := filepath.Dir(p); within(dir, root); dir = filepath.Dir(dir) {
+		if e, err := lstat(dir); err != nil || e.Type != "d" && e.Type != "" {
+			return true
+		}
+		if dir == root {
+			break
+		}
+	}
+	return false
+}
 
 // copyFile copies the file from to the new file to, with its permissions and modification time.
 func copyFile(from, to string) error {
@@ -232,8 +244,11 @@ func (r repo) keep(ctx context.Context, dst string, e entry, from string) error 
 	return os.WriteFile(dst, []byte(data), fs.FileMode(e.Mode))
 }
 
-// keepTree copies the folder from with everything in it to dst.
+// keepTree copies the folder from with everything in it to dst, in place of what dst had.
 func keepTree(from, dst string) error {
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
 	return filepath.WalkDir(from, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -310,16 +325,7 @@ func syncDir(dir string) error {
 // syncFilesystems makes everything written to the file systems of the folders durable.
 func syncFilesystems(dirs ...string) error {
 	for _, dir := range dirs {
-		d, err := os.Open(dir)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		err = unix.Syncfs(int(d.Fd()))
-		d.Close()
-		if err != nil {
+		if err := syncFilesystem(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}

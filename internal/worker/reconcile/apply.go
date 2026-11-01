@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -53,8 +54,15 @@ func (r *reconciler) apply() error {
 		}
 	}
 	if len(updates) > 0 {
+		// A ref in the way, such as main's x for the worker's x/y, fails them all.
 		if err := r.updateRefs(updates, true); err != nil {
-			return err
+			for _, u := range updates {
+				if r.updateRefs([]refUpdate{u}, true) != nil {
+					if err := r.recover(u.Name, u.New, "main has a ref in its way"); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		if err := r.step(); err != nil {
 			return err
@@ -137,32 +145,32 @@ func (r *reconciler) applyFiles() error {
 		maps.Copy(now, found)
 	}
 	for _, u := range updates {
-		switch current := now[u.Path]; {
-		case current.same(u.New):
-			r.result.Applied = append(r.result.Applied, u.Path)
-		case current.same(u.Old):
-			var err error
-			if u.New.Type == "" {
-				err = os.Remove(u.Path)
-			} else {
-				err = place(u.Path, u.New, u.From)
-			}
-			switch {
-			case err == nil:
-				r.result.Applied = append(r.result.Applied, u.Path)
-			case u.New.Type == "" && errors.Is(err, syscall.ENOTEMPTY):
-				// a folder that main keeps things in
-			case errors.Is(err, syscall.ENOTEMPTY):
-				if err := r.asideNow(u, current, "main keeps files in a folder where the worker has a file"); err != nil {
-					return err
-				}
-			default:
-				return err
+		current := now[u.Path]
+		applied, err := current.same(u.New), error(nil)
+		switch {
+		case applied:
+		case !current.same(u.Old):
+			err = r.asideNow(u, current, "changed on main meanwhile")
+		case blocked(u.Root, u.Path): // as when main kept a file or link where the worker has a folder
+			err = r.asideNow(u, current, "something on main is in its way")
+		case u.New.Type == "":
+			err = os.Remove(u.Path)
+			applied = err == nil
+			if errors.Is(err, syscall.ENOTEMPTY) {
+				err = nil // a folder that main keeps things in
 			}
 		default:
-			if err := r.asideNow(u, current, "changed on main meanwhile"); err != nil {
-				return err
+			err = place(u.Path, u.New, u.From)
+			applied = err == nil
+			if errors.Is(err, syscall.ENOTEMPTY) {
+				err = r.asideNow(u, current, "main keeps files in a folder where the worker has a file")
 			}
+		}
+		if err != nil {
+			return err
+		}
+		if applied {
+			r.result.Applied = append(r.result.Applied, u.Path)
 		}
 		if err := r.step(); err != nil {
 			return err
@@ -181,31 +189,48 @@ func (r *reconciler) asideNow(u fileUpdate, current entry, reason string) error 
 }
 
 // applyWorktree makes a worktree that the worker made, with git worktree add, and gives it the worker's files and
+// index. A worktree that main has at its path is the one it made only with its HEAD and an empty or the worker's
 // index.
-func (r *reconciler) applyWorktree(w newWorktree) error {
+func (r *reconciler) applyWorktree(w worktree) error {
 	ctx := r.ctx
-	mTrees, err := r.main.worktrees(ctx, nil)
+	mRefs, err := r.main.refs(ctx)
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root }) {
+	mTrees, err := r.main.worktrees(ctx, mRefs)
+	if err != nil {
+		return err
+	}
+	if w.Head.Branch != "" && (mRefs[w.Head.Branch].OID != w.Head.OID || slices.ContainsFunc(mTrees, func(mw worktree) bool {
+		return mw.Head.Branch == w.Head.Branch && mw.Root != w.Root
+	})) {
+		w.Head.Branch = "" // detached at the worker's commit, as main's branch differs now
+	}
+	i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root })
+	if i < 0 {
 		if e, err := lstat(w.Root); err != nil || e.Type != "" {
-			return r.keepWorktree(worktree{Root: w.Root, GitDir: w.GitDir, Head: w.Head, Index: w.Index}, "made on the worker, but main has something at its path")
+			return r.keepWorktree(w, "made on the worker, but main has something at its path")
 		}
-		args := []string{"worktree", "add", "--no-checkout"}
-		if w.Head.Branch != "" {
-			args = append(args, w.Root, strings.TrimPrefix(w.Head.Branch, "refs/heads/"))
-		} else {
-			args = append(args, "--detach", w.Root, w.Head.OID)
+		args := []string{"worktree", "add", "--no-checkout", w.Root, strings.TrimPrefix(w.Head.Branch, "refs/heads/")}
+		if w.Head.Branch == "" {
+			args = []string{"worktree", "add", "--no-checkout", "--detach", w.Root, w.Head.OID}
 		}
 		if _, err := r.main.git(ctx, nil, r.base.GitDir, "", args...); err != nil {
 			return err
 		}
-		if mTrees, err = r.main.worktrees(ctx, nil); err != nil {
+		if mTrees, err = r.main.worktrees(ctx, mRefs); err != nil {
 			return err
 		}
+		i = slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root })
 	}
-	i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root })
+	mw := mTrees[i]
+	index, err := r.main.index(ctx, mw)
+	if err != nil {
+		return err
+	}
+	if mw.Head != w.Head || index != "" && index != w.Index {
+		return r.keepWorktree(w, "made on the worker, but main has a worktree of its own there")
+	}
 	worker, err := r.shadow.walk(ctx, w.Root, nil, nil)
 	if err != nil {
 		return err
@@ -228,49 +253,63 @@ func (r *reconciler) applyWorktree(w newWorktree) error {
 			}
 		}
 	}
-	if err := r.setIndex(mTrees[i].GitDir, w.Root, w.Index); err != nil {
-		return err
+	if index != w.Index {
+		if err := r.setIndex(mw.GitDir, w.Root, w.Index); err != nil {
+			return err
+		}
 	}
 	r.result.Applied = append(r.result.Applied, w.Root)
 	return r.step()
 }
 
+// setIndex gives a worktree on main the index that Git builds from a list, in one rename, so that it's never half
+// built.
 func (r *reconciler) setIndex(gitDir, root, index string) error {
-	if _, err := r.main.git(r.ctx, nil, gitDir, root, "read-tree", "--empty"); err != nil {
+	live := filepath.Join(gitDir, "index")
+	if _, err := os.Lstat(live + ".lock"); err == nil {
+		return fmt.Errorf("git is changing %s", live)
+	}
+	building := repo{gitDir: r.base.GitDir, env: []string{"GIT_INDEX_FILE=" + live + ".gripi"}}
+	if err := os.Remove(live + ".gripi"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if _, err := r.main.git(r.ctx, strings.NewReader(index), gitDir, root, "update-index", "-z", "--index-info"); err != nil {
+	if _, err := building.git(r.ctx, strings.NewReader(index), gitDir, root, "update-index", "-z", "--index-info"); err != nil {
 		return err
 	}
-	_, err := r.main.git(r.ctx, nil, gitDir, root, "update-index", "-q", "--refresh")
-	return err
+	if _, err := building.git(r.ctx, nil, gitDir, root, "update-index", "-q", "--refresh"); err != nil {
+		return err
+	}
+	return os.Rename(live+".gripi", live)
 }
 
-// applyCheckouts gives selected worktrees the worker's HEAD and index.
+// applyCheckouts gives selected worktrees the worker's HEAD and index, while main has what the plan expects there.
 func (r *reconciler) applyCheckouts() error {
 	mRefs, err := r.main.refs(r.ctx)
 	if err != nil {
 		return err
 	}
-	sameHead := func(a, b head) bool { return a.Branch == b.Branch && (a.Branch != "" || a.OID == b.OID) }
+	mTrees, err := r.main.worktrees(r.ctx, mRefs)
+	if err != nil {
+		return err
+	}
 	for _, c := range r.plan.Checkouts {
+		i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == c.Root })
+		elsewhere := slices.ContainsFunc(mTrees, func(mw worktree) bool {
+			return c.New.Branch != "" && mw.Head.Branch == c.New.Branch && mw.Root != c.Root
+		})
 		w := worktree{Root: c.Root, GitDir: c.GitDir}
-		h, err := r.main.head(r.ctx, c.GitDir, mRefs)
-		if err != nil {
-			return err
-		}
 		index, err := r.main.index(r.ctx, w)
 		if err != nil {
 			return err
 		}
-		if !sameHead(h, c.Old) && !sameHead(h, c.New) || index != c.OldIndex && index != c.NewIndex {
+		if i < 0 || mTrees[i].Head != c.Old && mTrees[i].Head != c.New || index != c.OldIndex && index != c.NewIndex || elsewhere {
 			w.Head, w.Index = c.New, c.NewIndex
 			if err := r.keepCheckout(w, "main's checkout there changed meanwhile, so it keeps its own HEAD and index"); err != nil {
 				return err
 			}
 			continue
 		}
-		if !sameHead(h, c.New) {
+		if mTrees[i].Head != c.New {
 			if c.New.Branch != "" {
 				_, err = r.main.git(r.ctx, nil, c.GitDir, "", "symbolic-ref", "HEAD", c.New.Branch)
 			} else {

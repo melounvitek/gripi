@@ -277,6 +277,50 @@ func TestWorkerOnlyChangesAreApplied(t *testing.T) {
 	}
 }
 
+func TestTypeChangesOnTheWorkerAreApplied(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	w := r.shadow + r.main
+	os.Remove(w + "/a.txt")
+	r.write(w, "a.txt/inner", "was a file\n")
+	os.Remove(w + "/link")
+	r.write(w, "link/inner", "was a link\n")
+	os.RemoveAll(w + "/dir")
+	r.write(w, "dir", "was a folder\n")
+
+	result := r.reconcile()
+
+	r.expectFile(r.main+"/a.txt/inner", "was a file\n")
+	r.expectFile(r.main+"/link/inner", "was a link\n")
+	r.expectFile(r.main+"/dir", "was a folder\n")
+	if len(result.Aside) > 0 {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
+func TestAWorktreeThatMainReplacedWithALinkIsntWrittenThrough(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.feat)
+	r.write(r.shadow+r.feat, "a.txt", replace("two", "worker"))
+	r.write(r.shadow+r.feat, "new.txt", "n\n")
+	if err := os.Rename(r.feat, r.feat+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(r.other, r.feat); err != nil {
+		t.Fatal(err)
+	}
+
+	result := r.reconcile()
+
+	r.expectFile(r.other+"/a.txt", lines)
+	r.expectMissing(r.other + "/new.txt")
+	for _, name := range []string{"a.txt", "new.txt"} {
+		if _, ok := asideOf(result, filepath.Join(r.feat, name)); !ok {
+			t.Errorf("%s isn't kept aside: %v", name, result.Aside)
+		}
+	}
+}
+
 func TestMainOnlyChangesAreKept(t *testing.T) {
 	r := newRig(t)
 	r.snapshot(r.main)
@@ -364,7 +408,7 @@ func TestClashesKeepMainsVersionAndTheWorkersAside(t *testing.T) {
 
 func TestRefs(t *testing.T) {
 	r := newRig(t)
-	for _, branch := range []string{"fast", "diverged", "deleted", "kept"} {
+	for _, branch := range []string{"fast", "diverged", "deleted", "kept", "in-the-way"} {
 		r.git(r.main, "branch", branch)
 	}
 	r.snapshot(r.main)
@@ -377,6 +421,9 @@ func TestRefs(t *testing.T) {
 	worker("branch", "-D", "deleted")
 	worker("branch", "-D", "kept")
 	mainKept := r.commit(r.onMain, "kept", "main")
+	worker("branch", "-D", "in-the-way")
+	worker("update-ref", "refs/heads/in-the-way/below", fast)
+	r.commit(r.onMain, "in-the-way", "main")
 
 	result := r.reconcile()
 
@@ -408,11 +455,15 @@ func TestRefs(t *testing.T) {
 	if _, ok := asideOf(result, "refs/heads/kept"); !ok {
 		t.Errorf("the worker's deletion of a branch that main changed isn't reported: %v", result.Aside)
 	}
+	below := "refs/gripi/returns/" + move + "/refs/heads/in-the-way/below"
+	if got := r.rev(r.main, below); got != fast {
+		t.Errorf("%s = %s, want the worker's %s, which main's in-the-way blocks", below, got, fast)
+	}
 	run(t, r.main, nil, "git", "fsck", "--no-progress")
 }
 
-func TestACheckedOutBranchFollowsTheWorkerOnlyWhileMainIsClean(t *testing.T) {
-	for _, dirty := range []bool{false, true} {
+func TestACheckedOutBranchFollowsTheWorkerOnlyWhileMainsCheckoutIsTheBase(t *testing.T) {
+	for _, change := range []string{"nothing", "an untracked file", "the branch"} {
 		r := newRig(t)
 		r.write(r.feat, "staged.txt", "s\n")
 		r.git(r.feat, "add", "staged.txt")
@@ -425,8 +476,11 @@ func TestACheckedOutBranchFollowsTheWorkerOnlyWhileMainIsClean(t *testing.T) {
 		r.write(w, "untracked.txt", "u\n")
 		tip := strings.TrimSpace(r.worker(r.feat, "rev-parse", "HEAD"))
 		before := r.rev(r.feat, "HEAD")
-		if dirty {
+		switch change {
+		case "an untracked file":
 			r.write(r.feat, "main.txt", "m\n")
+		case "the branch":
+			r.git(r.feat, "switch", "-q", "-c", "switched")
 		}
 
 		result := r.reconcile()
@@ -435,34 +489,39 @@ func TestACheckedOutBranchFollowsTheWorkerOnlyWhileMainIsClean(t *testing.T) {
 		r.expectFile(r.feat+"/dir/b.txt", "staged on the worker\n")
 		r.expectFile(r.feat+"/untracked.txt", "u\n")
 		status := r.git(r.feat, "status", "--porcelain", "--untracked-files=all")
-		if !dirty {
+		if change == "nothing" {
 			if got := r.rev(r.feat, "HEAD"); got != tip {
-				t.Errorf("clean: HEAD = %s, want the worker's %s", got, tip)
+				t.Errorf("main changed nothing: HEAD = %s, want the worker's %s", got, tip)
 			}
 			if want := "M  dir/b.txt\n?? untracked.txt\n"; status != want {
-				t.Errorf("clean: git status =\n%s\nwant\n%s", status, want)
+				t.Errorf("main changed nothing: git status =\n%s\nwant\n%s", status, want)
 			}
 			if len(result.Aside) > 0 {
-				t.Errorf("clean: kept aside %v", result.Aside)
+				t.Errorf("main changed nothing: kept aside %v", result.Aside)
 			}
 			r.git(r.main, "fsck", "--no-progress")
 			continue
 		}
 		if got := r.rev(r.feat, "HEAD"); got != before {
-			t.Errorf("dirty: HEAD = %s, want main's %s", got, before)
+			t.Errorf("main changed %s: HEAD = %s, want main's %s", change, got, before)
 		}
-		if got := r.rev(r.main, "feat"); got != before {
-			t.Errorf("dirty: feat = %s, want main's %s", got, before)
+		want := " M a.txt\n M dir/b.txt\nA  staged.txt\n?? untracked.txt\n"
+		if change == "an untracked file" {
+			want = " M a.txt\n M dir/b.txt\nA  staged.txt\n?? main.txt\n?? untracked.txt\n"
 		}
-		if want := " M a.txt\n M dir/b.txt\nA  staged.txt\n?? main.txt\n?? untracked.txt\n"; status != want {
-			t.Errorf("dirty: git status =\n%s\nwant\n%s", status, want)
+		if status != want {
+			t.Errorf("main changed %s: git status =\n%s\nwant\n%s", change, status, want)
 		}
-		ref := "refs/gripi/returns/" + move + "/refs/heads/feat"
+		// The worker's commit is feat's, unless main has feat checked out still.
+		ref := "feat"
+		if change == "an untracked file" {
+			ref = "refs/gripi/returns/" + move + "/refs/heads/feat"
+		}
 		if got := r.rev(r.main, ref); got != tip {
-			t.Errorf("dirty: %s = %s, want the worker's %s", ref, got, tip)
+			t.Errorf("main changed %s: %s = %s, want the worker's %s", change, ref, got, tip)
 		}
 		if _, ok := asideOf(result, r.feat); !ok || !strings.Contains(result.Notice, r.feat) {
-			t.Errorf("dirty: the worker's HEAD and index aren't reported: %v\n%s", result.Aside, result.Notice)
+			t.Errorf("main changed %s: the worker's HEAD and index aren't reported: %v\n%s", change, result.Aside, result.Notice)
 		}
 	}
 }
@@ -606,6 +665,93 @@ func TestAnInterruptedReconcileFinishesWhenRunAgain(t *testing.T) {
 	}
 }
 
+// Whichever change to main a reconcile stops after, as in a crash, running it again finishes it as if it hadn't
+// stopped.
+func TestAReconcileStoppedAfterAnyChangeFinishesWhenRunAgain(t *testing.T) {
+	for stop := 1; ; stop++ {
+		r := newRig(t)
+		r.git(r.main, "branch", "fast")
+		r.snapshot(r.main, r.feat)
+		w := r.shadow + r.main
+		r.write(w, "run.sh", "#!/bin/sh\nstashed\n")
+		r.worker(r.main, "stash", "push", "-q", "-m", "on the worker")
+		r.write(w, "c.txt", "c\n")
+		os.Remove(w + "/dir/b.txt")
+		r.write(r.main, "a.txt", replace("two", "main"))
+		r.write(w, "a.txt", replace("nine", "worker"))
+		r.write(w, "bin.dat", "\x00worker\n")
+		r.write(r.main, "bin.dat", "\x00main\n")
+		fast := r.commit(func(args ...string) string { return r.worker(r.main, args...) }, "fast", "worker")
+		r.write(r.shadow+r.feat, "a.txt", replace("two", "feat"))
+		r.worker(r.feat, "commit", "-qam", "feat")
+		made := filepath.Join(filepath.Dir(r.feat), "made")
+		r.workerWorktree(made, "made")
+		r.write(r.shadow+made, "untracked.txt", "u\n")
+
+		changes := 0
+		interrupt = func() error {
+			if changes++; changes == stop {
+				return errors.New("stopped")
+			}
+			return nil
+		}
+		_, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery)
+		interrupt = nil
+		result := r.reconcile()
+
+		r.expectFile(r.main+"/c.txt", "c\n")
+		r.expectMissing(r.main + "/dir/b.txt")
+		r.expectFile(r.main+"/a.txt", strings.Replace(replace("two", "main"), "nine\n", "worker\n", 1))
+		r.expectFile(r.main+"/bin.dat", "\x00main\n")
+		r.expectFile(r.feat+"/a.txt", replace("two", "feat"))
+		r.expectFile(made+"/untracked.txt", "u\n")
+		if got := r.rev(r.main, "fast"); got != fast {
+			t.Errorf("stopped after %d: fast = %s, want %s", stop, got, fast)
+		}
+		if got := r.git(r.feat, "status", "--porcelain"); got != "" {
+			t.Errorf("stopped after %d: git status in feat =\n%s", stop, got)
+		}
+		if got := r.git(made, "status", "--porcelain"); got != "?? untracked.txt\n" {
+			t.Errorf("stopped after %d: git status in made =\n%s", stop, got)
+		}
+		if got := r.git(r.main, "stash", "list", "--format=%gs"); got != "On main: on the worker\n" {
+			t.Errorf("stopped after %d: stash list =\n%s", stop, got)
+		}
+		if _, ok := asideOf(result, r.main+"/bin.dat"); !ok || len(result.Aside) != 1 {
+			t.Errorf("stopped after %d: kept aside %v", stop, result.Aside)
+		}
+		if err == nil {
+			if stop < 5 {
+				t.Errorf("only %d changes", stop-1)
+			}
+			return
+		}
+	}
+}
+
+func TestAFileThatMainChangesBeforeAStoppedReconcileRunsAgainIsKept(t *testing.T) {
+	r := newRig(t)
+	r.git(r.main, "branch", "fast")
+	r.snapshot(r.main)
+	r.write(r.shadow+r.main, "c.txt", "worker\n")
+	r.commit(func(args ...string) string { return r.worker(r.main, args...) }, "fast", "worker")
+	interrupt = func() error { return errors.New("stopped") }
+	_, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery)
+	interrupt = nil
+	if err == nil {
+		t.Fatal("the reconcile didn't stop")
+	}
+	r.write(r.main, "c.txt", "main\n")
+
+	result := r.reconcile()
+
+	r.expectFile(r.main+"/c.txt", "main\n")
+	r.expectFile(r.recovery+"/worker"+r.main+"/c.txt", "worker\n")
+	if _, ok := asideOf(result, r.main+"/c.txt"); !ok {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
 func TestUnselectedWorktreesAreUntouched(t *testing.T) {
 	r := newRig(t)
 	r.snapshot(r.main)
@@ -689,7 +835,7 @@ func TestSnapshotRefusesWhatAMoveCantBringBack(t *testing.T) {
 	}
 }
 
-func TestAnUnselectedWorktreeInASelectedOneStaysOut(t *testing.T) {
+func TestUnselectedWorktreesInASelectedOneStayOut(t *testing.T) {
 	r := newRig(t)
 	nested := filepath.Join(r.main, "nested")
 	r.git(r.main, "worktree", "add", "-q", "-b", "nested", nested)
@@ -697,14 +843,53 @@ func TestAnUnselectedWorktreeInASelectedOneStaysOut(t *testing.T) {
 	r.snapshot(r.main)
 	r.expectMissing(r.shadow + nested)
 	r.write(r.shadow+r.main, "a.txt", replace("two", "worker"))
+	// Main makes a worktree where the worker makes a folder.
+	made := filepath.Join(r.main, "made")
+	r.git(r.main, "worktree", "add", "-q", "-b", "made", made)
+	r.write(r.shadow+made, "worker.txt", "w\n")
 
 	result := r.reconcile()
 
 	r.expectFile(r.main+"/a.txt", replace("two", "worker"))
 	r.expectFile(nested+"/mine.txt", "m\n")
 	r.expectFile(nested+"/a.txt", lines)
-	if len(result.Aside) > 0 {
+	r.expectMissing(made + "/worker.txt")
+	if _, ok := asideOf(result, made+"/worker.txt"); !ok || len(result.Aside) != 1 {
 		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
+func TestNestedSelectedWorktreesComeBackEach(t *testing.T) {
+	r := newRig(t)
+	nested := filepath.Join(r.main, "nested")
+	r.git(r.main, "worktree", "add", "-q", "-b", "nested", nested)
+	r.snapshot(r.main, nested)
+	r.write(r.shadow+nested, "a.txt", replace("two", "nested"))
+	r.write(r.shadow+r.main, "a.txt", replace("two", "main checkout"))
+
+	r.reconcile()
+
+	r.expectFile(nested+"/a.txt", replace("two", "nested"))
+	r.expectFile(r.main+"/a.txt", replace("two", "main checkout"))
+}
+
+func TestTheFirstCommitOfANewRepositoryComesBack(t *testing.T) {
+	r := &rig{t: t, main: filepath.Join(t.TempDir(), "proj")}
+	r.gitDir = filepath.Join(r.main, ".git")
+	r.base, r.shadow, r.recovery = filepath.Join(r.main, "../base"), filepath.Join(r.main, "../shadow"), filepath.Join(r.main, "../recovery")
+	run(t, "/", nil, "git", "init", "-q", "-b", "main", r.main)
+	r.write(r.main, "a.txt", lines)
+	r.snapshot(r.main)
+	r.worker(r.main, "add", "a.txt")
+	r.worker(r.main, "commit", "-qm", "first")
+
+	r.reconcile()
+
+	if got, want := r.rev(r.main, "HEAD"), strings.TrimSpace(r.worker(r.main, "rev-parse", "HEAD")); got != want {
+		t.Errorf("HEAD = %q, want %q", got, want)
+	}
+	if got := r.git(r.main, "status", "--porcelain"); got != "" {
+		t.Errorf("git status =\n%s", got)
 	}
 }
 

@@ -9,15 +9,32 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 )
 
-// git runs git and returns its output.
-func git(ctx context.Context, stdin io.Reader, args ...string) (string, error) {
+// repo is a repository on main, or its copy in the shadow at the same paths under at.
+type repo struct {
+	gitDir string   // its common Git folder, as main names it
+	at     string   // "" on main
+	env    []string // for git, besides the gateway's
+}
+
+func (r repo) path(p string) string { return r.at + p }
+
+// git runs git with the Git folder dir, as main names it, and the work tree root, if any, and returns its output.
+func (r repo) git(ctx context.Context, stdin io.Reader, dir, root string, args ...string) (string, error) {
+	args = append([]string{"--git-dir=" + r.path(dir)}, args...)
+	if root != "" {
+		args = append([]string{"--work-tree=" + r.path(root)}, args...)
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Stdin = stdin
+	if r.env != nil {
+		cmd.Env = append(os.Environ(), r.env...)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -25,23 +42,6 @@ func git(ctx context.Context, stdin io.Reader, args ...string) (string, error) {
 		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, bytes.TrimSpace(stderr.Bytes()))
 	}
 	return string(out), nil
-}
-
-// repo is a repository on main, or its copy in the shadow at the same paths under at.
-type repo struct {
-	gitDir string // its common Git folder, as main names it
-	at     string // "" on main
-}
-
-func (r repo) path(p string) string { return r.at + p }
-
-// git runs git with the Git folder dir, as main names it, and the work tree root, if any.
-func (r repo) git(ctx context.Context, stdin io.Reader, dir, root string, args ...string) (string, error) {
-	args = append([]string{"--git-dir=" + r.path(dir)}, args...)
-	if root != "" {
-		args = append([]string{"--work-tree=" + r.path(root)}, args...)
-	}
-	return git(ctx, stdin, args...)
 }
 
 // hash returns the blob IDs of the files at paths, by their bytes as they are; with write, it also stores them.
@@ -71,7 +71,7 @@ func (r repo) hash(ctx context.Context, paths []string, write bool) ([]string, e
 	return ids, nil
 }
 
-// ref is a ref's object, and the commit it leads to, if any.
+// ref is a ref's object, and the commit that it leads to, if any.
 type ref struct {
 	OID    string `json:"oid"`
 	Commit string `json:"commit,omitempty"`
@@ -106,7 +106,6 @@ func reconciled(name string) bool {
 	})
 }
 
-// stash is a stash entry.
 type stash struct {
 	OID     string `json:"oid"`
 	Message string `json:"message"`
@@ -129,12 +128,11 @@ func (r repo) stashes(ctx context.Context) ([]stash, error) {
 	return list, nil
 }
 
-// worktree is a worktree as the repository registers it.
 type worktree struct {
 	Root   string   `json:"root"`
 	GitDir string   `json:"git_dir"` // its own Git folder: the common one for the main checkout
 	Head   head     `json:"head"`
-	Index  string   `json:"index,omitempty"` // git ls-files -s -z
+	Index  string   `json:"index,omitempty"` // as git ls-files -s -z lists it
 	Dirty  []string `json:"dirty,omitempty"` // what git status lists, relative to Root
 }
 
@@ -179,7 +177,6 @@ func (r repo) head(ctx context.Context, dir string, refs map[string]ref) (head, 
 	return head{OID: strings.TrimSpace(out)}, err
 }
 
-// index reads the worktree's index as Git lists it.
 func (r repo) index(ctx context.Context, w worktree) (string, error) {
 	return r.git(ctx, nil, w.GitDir, w.Root, "ls-files", "-s", "-z")
 }
@@ -212,6 +209,7 @@ func blobs(index string) []string {
 
 // missing returns those of ids that the repository lacks.
 func (r repo) missing(ctx context.Context, ids []string) ([]string, error) {
+	ids = slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return id == "" })
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -221,7 +219,7 @@ func (r repo) missing(ctx context.Context, ids []string) ([]string, error) {
 	}
 	var lacking []string
 	for line := range strings.Lines(out) {
-		if id, ok := strings.CutSuffix(strings.TrimSpace(line), " missing"); ok {
+		if id, ok := strings.CutSuffix(strings.TrimSuffix(line, "\n"), " missing"); ok {
 			lacking = append(lacking, id)
 		}
 	}
@@ -244,7 +242,7 @@ func fetch(ctx context.Context, main, shadow repo, wants, haves []string) error 
 		input.WriteString(id + "\n")
 	}
 	for _, id := range haves {
-		if !slices.Contains(lacking, id) {
+		if id != "" && !slices.Contains(lacking, id) {
 			input.WriteString("^" + id + "\n")
 		}
 	}
@@ -266,8 +264,9 @@ func fetch(ctx context.Context, main, shadow repo, wants, haves []string) error 
 	return indexErr
 }
 
-// pin points name at a commit that keeps the blobs and commits from git gc.
-func (r repo) pin(ctx context.Context, name string, blobIDs, commits []string) error {
+// pin keeps objects from git gc with the ref name: a commit whose tree lists the blobs and whose parents are the
+// commits, and refs next to it for the rest, such as annotated tags.
+func (r repo) pin(ctx context.Context, name string, blobIDs, commits, others []string) error {
 	var tree strings.Builder
 	slices.Sort(blobIDs)
 	for _, id := range slices.Compact(blobIDs) {
@@ -289,6 +288,10 @@ func (r repo) pin(ctx context.Context, name string, blobIDs, commits []string) e
 	if err != nil {
 		return err
 	}
-	_, err = r.git(ctx, nil, r.gitDir, "", "update-ref", name, strings.TrimSpace(id))
+	updates := "update " + name + " " + strings.TrimSpace(id) + "\n"
+	for _, other := range others {
+		updates += "update " + path.Join(path.Dir(name), "objects", other) + " " + other + "\n"
+	}
+	_, err = r.git(ctx, strings.NewReader(updates), r.gitDir, "", "update-ref", "--stdin")
 	return err
 }

@@ -30,13 +30,13 @@ type Result struct {
 // plan is a return's journal: every change to main, decided before the first, which happens only while main still
 // holds what the plan expects, so that running the plan again finishes it.
 type plan struct {
-	Recover   []refUpdate   `json:"recover,omitempty"`
-	Refs      []refUpdate   `json:"refs,omitempty"`
-	Stashes   []stash       `json:"stashes,omitempty"` // oldest first
-	Files     []fileUpdate  `json:"files,omitempty"`
-	Worktrees []newWorktree `json:"worktrees,omitempty"`
-	Checkouts []checkout    `json:"checkouts,omitempty"`
-	Aside     []Item        `json:"aside,omitempty"`
+	Recover   []refUpdate  `json:"recover,omitempty"`
+	Refs      []refUpdate  `json:"refs,omitempty"`
+	Stashes   []stash      `json:"stashes,omitempty"` // oldest first
+	Files     []fileUpdate `json:"files,omitempty"`
+	Worktrees []worktree   `json:"worktrees,omitempty"` // made on the worker
+	Checkouts []checkout   `json:"checkouts,omitempty"`
+	Aside     []Item       `json:"aside,omitempty"`
 }
 
 type refUpdate struct {
@@ -54,17 +54,10 @@ type fileUpdate struct {
 	From string `json:"from,omitempty"` // a file with New's contents
 }
 
-type newWorktree struct {
-	Root   string `json:"root"`
-	GitDir string `json:"git_dir"` // its Git folder on the worker
-	Head   head   `json:"head"`    // detached without a branch
-	Index  string `json:"index"`
-}
-
 type checkout struct {
 	Root     string `json:"root"`
 	GitDir   string `json:"git_dir"`
-	Old      head   `json:"old"`
+	Old      head   `json:"old"` // once the plan's refs are applied
 	New      head   `json:"new"`
 	OldIndex string `json:"old_index"`
 	NewIndex string `json:"new_index"`
@@ -199,9 +192,12 @@ func (r *reconciler) makePlan() error {
 	}
 
 	// The worker's objects go to main first, kept from git gc until Discard.
-	var wants, haves, indexBlobs, commits []string
+	var wants, haves, indexBlobs, commits, others []string
 	for _, rf := range wRefs {
 		wants, commits = append(wants, rf.OID), append(commits, rf.Commit)
+		if rf.OID != rf.Commit {
+			others = append(others, rf.OID)
+		}
 	}
 	for _, w := range back {
 		wants, commits, indexBlobs = append(wants, w.Head.OID), append(commits, w.Head.OID), append(indexBlobs, blobs(w.Index)...)
@@ -221,8 +217,16 @@ func (r *reconciler) makePlan() error {
 	if err := fetch(ctx, r.main, r.shadow, append(wants, indexBlobs...), haves); err != nil {
 		return err
 	}
-	if err := r.main.pin(ctx, r.returnsRef("worker"), indexBlobs, commits); err != nil {
+	if err := r.main.pin(ctx, r.returnsRef("worker"), indexBlobs, commits, others); err != nil {
 		return err
+	}
+	// Main keeps its reflogs; the worker's are only recorded.
+	for _, dir := range append([]string{b.GitDir}, gitDirs(back)...) {
+		if _, err := os.Lstat(r.shadow.path(dir + "/logs")); err == nil {
+			if err := keepTree(r.shadow.path(dir+"/logs"), r.in("worker", dir, "logs")); err != nil {
+				return err
+			}
+		}
 	}
 
 	mRefs, err := r.main.refs(ctx)
@@ -245,7 +249,7 @@ func (r *reconciler) makePlan() error {
 	}
 	onMain := func(root string) (worktree, bool) {
 		i := slices.IndexFunc(mTrees, func(w worktree) bool { return w.Root == root })
-		if _, err := os.Lstat(root); i < 0 || err != nil {
+		if e, err := lstat(root); i < 0 || err != nil || e.Type != "d" {
 			return worktree{}, false
 		}
 		return mTrees[i], true
@@ -264,7 +268,7 @@ func (r *reconciler) makePlan() error {
 			continue
 		}
 		mw, ok := onMain(bw.Root)
-		if ok && mw.Head == bw.Head {
+		if ok = ok && mw.Head == bw.Head; ok {
 			if mw.Index, err = r.main.index(ctx, mw); err != nil {
 				return err
 			}
@@ -308,6 +312,11 @@ func (r *reconciler) makePlan() error {
 			return err
 		}
 	}
+	for i, c := range p.Checkouts {
+		if c.Old.Branch != "" {
+			p.Checkouts[i].Old.OID = r.refAfter(mRefs, c.Old.Branch)
+		}
+	}
 
 	for i := len(wStash) - 1; i >= 0; i-- {
 		if !slices.ContainsFunc(b.Stash, func(s stash) bool { return s.OID == wStash[i].OID }) {
@@ -337,18 +346,33 @@ func (r *reconciler) makePlan() error {
 		} else {
 			checkedOut[h.Branch] = w.Root
 		}
-		p.Worktrees = append(p.Worktrees, newWorktree{Root: w.Root, GitDir: w.GitDir, Head: h, Index: w.Index})
+		w.Head = h
+		p.Worktrees = append(p.Worktrees, w)
 	}
 
+	var made []string // worktrees made on main meanwhile, which the worker's files stay out of
+	for _, mw := range mTrees {
+		if !slices.Contains(b.Registered, mw.Root) {
+			made = append(made, mw.Root)
+		}
+	}
 	for _, bw := range b.Worktrees {
 		if slices.ContainsFunc(back, func(w worktree) bool { return w.Root == bw.Root }) {
 			_, ok := onMain(bw.Root)
-			if err := r.planFiles(bw.Root, allRoots, ok); err != nil {
+			if err := r.planFiles(bw.Root, allRoots, made, ok); err != nil {
 				return err
 			}
 		}
 	}
 	return r.planGitFiles()
+}
+
+func gitDirs(worktrees []worktree) []string {
+	var dirs []string
+	for _, w := range worktrees {
+		dirs = append(dirs, w.GitDir)
+	}
+	return dirs
 }
 
 func mergeKeys[V any](a, b map[string]V) map[string]bool {
@@ -451,7 +475,7 @@ func (r *reconciler) keepWorktree(w worktree, reason string) error {
 }
 
 // planFiles plans the files of a selected worktree that the worker changed.
-func (r *reconciler) planFiles(root string, allRoots []string, onMain bool) error {
+func (r *reconciler) planFiles(root string, allRoots, made []string, onMain bool) error {
 	others := slices.DeleteFunc(slices.Clone(allRoots), func(other string) bool { return other == root })
 	owned := func(p string) bool {
 		return within(p, root) && !slices.ContainsFunc(others, func(other string) bool { return within(p, other) && len(other) > len(root) })
@@ -491,17 +515,24 @@ func (r *reconciler) planFiles(root string, allRoots []string, onMain bool) erro
 			continue
 		}
 		u := fileUpdate{Root: root, Path: p, Base: b, Old: m, New: w, From: r.shadow.path(p)}
-		if !m.same(b) {
-			u.From = "" // a clash, unless text merges
-			if b.Type == "f" && m.Type == "f" && w.Type == "f" {
-				if u.New, u.From, err = r.merge(p, b, m, w); err != nil {
-					return err
-				}
+		reason := ""
+		switch {
+		case slices.ContainsFunc(made, func(other string) bool { return within(p, other) }):
+			reason = "in a worktree that main made there meanwhile"
+		case m.same(b):
+		case b.Type == "f" && m.Type == "f" && w.Type == "f":
+			if u.New, u.From, err = r.merge(p, b, m, w); err != nil {
+				return err
 			}
+			if u.From == "" {
+				reason = clash(b, m, w)
+			}
+		default:
+			reason = clash(b, m, w)
 		}
-		if u.From != "" {
+		if reason == "" {
 			r.plan.Files = append(r.plan.Files, u)
-		} else if err := r.aside(p, b, m, w, clash(b, m, w)); err != nil {
+		} else if err := r.aside(p, b, m, w, reason); err != nil {
 			return err
 		}
 	}

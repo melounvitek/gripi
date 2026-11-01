@@ -133,7 +133,7 @@ func Snapshot(ctx context.Context, move string, sel Selection, base, shadow stri
 		return nil, err
 	}
 	pinned := slices.Clone(ids)
-	var commits []string
+	var commits, others []string
 	for _, w := range all {
 		m.Registered = append(m.Registered, w.Root)
 		if !slices.Contains(sel.Roots, w.Root) {
@@ -157,17 +157,21 @@ func Snapshot(ctx context.Context, move string, sel Selection, base, shadow stri
 	}
 	for _, r := range m.Refs {
 		commits = append(commits, r.Commit)
+		if r.OID != r.Commit {
+			others = append(others, r.OID)
+		}
 	}
-	if err := main.pin(ctx, baseRef(move), pinned, commits); err != nil {
+	if err := main.pin(ctx, "refs/gripi/moves/"+move+"/base", pinned, commits, others); err != nil {
 		return nil, err
 	}
-	if err := syncFilesystems(shadow, sel.GitDir); err != nil {
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return nil, err
+	}
+	if err := syncFilesystems(shadow, base, sel.GitDir); err != nil {
 		return nil, err
 	}
 	return captured, writeJSON(filepath.Join(base, "manifest.json"), m)
 }
-
-func baseRef(move string) string { return "refs/gripi/moves/" + move + "/base" }
 
 var globEscape = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`)
 
@@ -204,7 +208,7 @@ func check(ctx context.Context, sel Selection, registered []worktree) error {
 	return nil
 }
 
-// copyPath copies the file, link or folder at from to the new path to.
+// copyPath copies the file, link or folder at from to the new path to; a folder may be there already.
 func copyPath(from, to string) error {
 	info, err := os.Lstat(from)
 	if err != nil {
@@ -212,7 +216,10 @@ func copyPath(from, to string) error {
 	}
 	switch {
 	case info.IsDir():
-		return os.Mkdir(to, info.Mode().Perm()|0o700)
+		if err := os.Mkdir(to, info.Mode().Perm()|0o700); !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		return os.Chmod(to, info.Mode().Perm()|0o700)
 	case info.Mode()&fs.ModeSymlink != 0:
 		target, err := os.Readlink(from)
 		if err != nil {
