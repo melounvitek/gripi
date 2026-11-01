@@ -13,12 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/worker/auth"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
@@ -126,7 +126,7 @@ PATH=$PWD/bin:$PATH bin/pi --version
 // Command returns the command that runs Pi on the worker, given the command that runs it here, which starts with
 // Gripi's Pi command: the worker's pi, followed by the same options and arguments.
 func (installation *Installation) Command(command []string) []string {
-	return append([]string{installation.dir + "/bin/pi"}, command[piWords(command):]...)
+	return append([]string{installation.dir + "/bin/pi"}, command[len(auth.PiCommand(command)):]...)
 }
 
 // copyFolder makes the worker's folder to match main's folder from, sending only what differs. What exclude names,
@@ -184,7 +184,7 @@ func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to, aside string, 
 
 // findPi finds what Gripi's Pi command runs here: Node, and Pi's script in its package folder.
 func findPi(ctx context.Context, command []string) (node, pkg, script string, err error) {
-	switch words := command[:piWords(command)]; len(words) {
+	switch words := auth.PiCommand(command); len(words) {
 	case 1:
 		if script, err = exec.LookPath(words[0]); err != nil {
 			return "", "", "", err
@@ -246,16 +246,8 @@ func interpreter(script string) (string, error) {
 	return "", fmt.Errorf("the #! line of %s names no program", script)
 }
 
-// piWords counts the words that start Gripi's Pi command, before its options: pi, or Node and Pi's script.
-func piWords(command []string) int {
-	if option := slices.IndexFunc(command[1:], func(word string) bool { return strings.HasPrefix(word, "-") }); option >= 0 {
-		return option + 1
-	}
-	return len(command)
-}
-
 func piVersion(ctx context.Context, command []string) (string, error) {
-	words := command[:piWords(command)]
+	words := auth.PiCommand(command)
 	process := exec.CommandContext(ctx, words[0], append(slices.Clone(words[1:]), "--version")...)
 	process.Env = agent.ScrubbedEnvironment(os.Environ())
 	output, err := process.Output()
@@ -282,7 +274,7 @@ func localPorts(agentDir string) ([]int, error) {
 			return nil, err
 		}
 		var configuration any
-		if err := json.Unmarshal(withoutComments(data), &configuration); err != nil {
+		if err := json.Unmarshal(auth.PlainJSON(data), &configuration); err != nil {
 			return nil, fmt.Errorf("%s: %w", filepath.Join(agentDir, file.name), err)
 		}
 		for _, address := range valuesOf(configuration, file.key) {
@@ -318,26 +310,4 @@ func valuesOf(value any, key string) []string {
 		}
 	}
 	return found
-}
-
-var (
-	jsonComment   = regexp.MustCompile(`"(?:\\.|[^"\\])*"|//[^\n]*`)
-	trailingComma = regexp.MustCompile(`"(?:\\.|[^"\\])*"|,\s*[}\]]`)
-)
-
-// withoutComments removes what Pi allows in models.json beyond JSON: a byte order mark, // comments and trailing
-// commas.
-func withoutComments(data []byte) []byte {
-	data = jsonComment.ReplaceAllFunc(bytes.TrimPrefix(data, []byte("\ufeff")), func(match []byte) []byte {
-		if match[0] == '"' {
-			return match
-		}
-		return nil
-	})
-	return trailingComma.ReplaceAllFunc(data, func(match []byte) []byte {
-		if match[0] == '"' {
-			return match
-		}
-		return match[1:]
-	})
 }

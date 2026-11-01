@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -152,10 +151,7 @@ func (pi Pi) Refresh(provider string, seen, expires time.Time) error {
 }
 
 func (pi Pi) run(ctx context.Context, stdout io.Writer, args ...string) error {
-	command := pi.Command
-	if option := slices.IndexFunc(command[1:], func(arg string) bool { return strings.HasPrefix(arg, "-") }); option >= 0 {
-		command = command[:option+1]
-	}
+	command := PiCommand(pi.Command)
 	process := exec.CommandContext(ctx, command[0], slices.Concat(command[1:], args)...)
 	process.Env = append(agent.ScrubbedEnvironment(os.Environ()), "PI_CODING_AGENT_DIR="+pi.AgentDir)
 	process.Stdout = stdout
@@ -207,12 +203,6 @@ type modelsFile struct {
 	}
 }
 
-// Like Pi, models.json may have // comments and trailing commas.
-var (
-	jsonComment   = regexp.MustCompile(`"(?:\\.|[^"\\])*"|//[^\n]*`)
-	trailingComma = regexp.MustCompile(`"(?:\\.|[^"\\])*"|,\s*[}\]]`)
-)
-
 func readModels(path string) (modelsFile, error) {
 	var models modelsFile
 	data, err := os.ReadFile(path)
@@ -222,19 +212,7 @@ func readModels(path string) (modelsFile, error) {
 	if err != nil {
 		return models, err
 	}
-	text := jsonComment.ReplaceAllStringFunc(string(bytes.TrimPrefix(data, byteOrderMark)), func(match string) string {
-		if match[0] == '"' {
-			return match
-		}
-		return ""
-	})
-	text = trailingComma.ReplaceAllStringFunc(text, func(match string) string {
-		if match[0] == '"' {
-			return match
-		}
-		return match[1:]
-	})
-	if err := json.Unmarshal([]byte(text), &models); err != nil {
+	if err := json.Unmarshal(PlainJSON(data), &models); err != nil {
 		return models, fmt.Errorf("%s: %w", path, err)
 	}
 	return models, nil
