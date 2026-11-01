@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -67,25 +68,43 @@ func startInCgroup(command *exec.Cmd, cgroup string) error {
 	return command.Start()
 }
 
-// killCgroup kills every process in cgroup, including those in sessions of their own, and removes it.
-func killCgroup(cgroup string) error {
-	err := os.WriteFile(filepath.Join(cgroup, "cgroup.kill"), []byte("1"), 0)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		events, err := os.ReadFile(filepath.Join(cgroup, "cgroup.events"))
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(events), "populated 0") {
-			return os.Remove(cgroup)
+// killCgroups kills every process in the cgroups, including those in sessions of their own, and removes the cgroups.
+// It kills them all before it waits for any, and waits at most timeout for their processes to die.
+func killCgroups(timeout time.Duration, cgroups ...string) error {
+	var errs []error
+	var dying []string
+	for _, cgroup := range cgroups {
+		err := os.WriteFile(filepath.Join(cgroup, "cgroup.kill"), []byte("1"), 0)
+		if err == nil {
+			dying = append(dying, cgroup)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
 		}
 	}
-	return fmt.Errorf("%s still has processes after cgroup.kill", cgroup)
+	deadline := time.Now().Add(timeout)
+	for {
+		dying = slices.DeleteFunc(dying, func(cgroup string) bool {
+			events, err := os.ReadFile(filepath.Join(cgroup, "cgroup.events"))
+			if err == nil && !strings.Contains(string(events), "populated 0") {
+				return false
+			}
+			if err == nil {
+				err = os.Remove(cgroup)
+			}
+			if err != nil {
+				errs = append(errs, err)
+			}
+			return true
+		})
+		if len(dying) == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, cgroup := range dying {
+		errs = append(errs, fmt.Errorf("%s still has processes after cgroup.kill", cgroup))
+	}
+	return errors.Join(errs...)
 }
 
 // bootTime is CLOCK_BOOTTIME, which keeps counting while the machine is suspended, unlike Go's monotonic clock.

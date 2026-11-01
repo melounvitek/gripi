@@ -15,7 +15,8 @@ import (
 )
 
 // GoneMargin is how much longer than the lease main waits before it treats a worker as gone, for clocks that run at
-// slightly different speeds.
+// slightly different speeds, and for the helper to stop: it kills every session at once when the lease ends, and exits
+// within about a second.
 const GoneMargin = 2 * time.Second
 
 // ErrControlClosed is the error of requests to a helper whose control channel has ended.

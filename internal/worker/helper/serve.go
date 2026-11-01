@@ -61,6 +61,10 @@ const (
 	DefaultLease = 30 * time.Second
 	// PingInterval is how often the helper pings main.
 	PingInterval = time.Second
+	// stopTimeout is how long the helper waits on its way out for the sessions' processes to die, once it has killed
+	// them all. With it, the helper exits about a second after the lease ends, before main takes the sessions over
+	// (worker.GoneMargin).
+	stopTimeout = time.Second
 )
 
 // ErrLeaseExpired is why the helper stops when main has not answered a ping for a whole lease.
@@ -96,6 +100,7 @@ type server struct {
 	pings    map[uint64]time.Duration // send times of the pings main has not answered yet
 	renewed  time.Duration            // the lease runs from here
 	answered bool
+	stopping bool // no session starts once Serve has started to kill them
 	sessions map[string]*session
 	mirrors  map[string]*mirroredUnit // by the unit's main folder
 }
@@ -137,15 +142,14 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	err = s.keepLease(ctx, closed)
 	s.stopMirrors()
 	s.mu.Lock()
+	s.stopping = true
 	ids := make([]string, 0, len(s.sessions))
 	for id := range s.sessions {
 		ids = append(ids, id)
 	}
 	s.mu.Unlock()
-	for _, id := range ids {
-		if err := s.release(id); err != nil {
-			log.Printf("release session %s: %v", id, err)
-		}
+	if err := s.release(stopTimeout, ids...); err != nil {
+		log.Printf("stop the sessions: %v", err)
 	}
 	return err
 }
@@ -260,7 +264,7 @@ func (s *server) handle(request Message) {
 	case "session.close":
 		err = s.close(request.Session)
 	case "session.release":
-		err = s.release(request.Session)
+		err = s.release(releaseTimeout, request.Session)
 	case "mirror.start":
 		err = s.startMirror(request.Unit, request.Sessions)
 	case "mirror.stop":
