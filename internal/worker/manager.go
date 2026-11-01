@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/state"
 	"github.com/melounvitek/gripi/internal/worker/auth"
 	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
@@ -69,6 +71,10 @@ const connectTimeout = 5 * time.Minute
 // another.
 const reconnectInterval = 2 * time.Second
 
+// firstBarrierTimeout bounds waiting until main's copies of a repository on a worker and of its sessions have the
+// first barriers of their mirrors, which a session's Pi waits for.
+var firstBarrierTimeout = time.Minute
+
 // closeSessionTimeout bounds closing a session's Pi on a worker, which the helper kills when it hasn't stopped 5
 // seconds after SIGTERM.
 const closeSessionTimeout = 10 * time.Second
@@ -88,9 +94,10 @@ type ManagerOptions struct {
 	WorkerExtension string
 	// SessionsRoot holds Pi's session folders, one for each folder that sessions started in.
 	SessionsRoot string
-	// ConfigDir is Gripi's configuration folder. Like Pi's agent folder, the sessions' root and Gripi's state folder,
-	// it never moves to a worker.
-	ConfigDir string
+	// GatewayPaths are Gripi's other own files and folders, wherever its settings put them, such as its configuration
+	// folder and state files. Like Pi's agent folder, the sessions' root and Gripi's state folder, they never move to a
+	// worker.
+	GatewayPaths []string
 	// SocketPath is the path of the gripi socket, where gripi commands on a worker reach the worker's own socket.
 	SocketPath string
 	// Store finds the folders of saved sessions.
@@ -128,6 +135,8 @@ type Manager struct {
 
 	// closing has the sessions whose Pi the helper is closing, by their ID on the worker, which their next Pi waits for.
 	closing map[string]chan struct{}
+
+	copiesMu sync.Mutex // held while changing a repository's record of what workers keep of it
 }
 
 // Notice says that files of a repository on a worker, or of its sessions, changed on this machine, which keeps a
@@ -173,8 +182,10 @@ type launched struct {
 type liveMirror struct {
 	unit        mirror.Unit
 	destination *mirror.Destination
+	started     time.Time // before the mirror's first barrier
 	cancel      context.CancelFunc
 	done        chan struct{}
+	err         error // why the mirror stopped, once done is closed
 }
 
 func (live *liveMirror) running() bool {
@@ -359,7 +370,7 @@ func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mir
 		}
 	}
 	if sessions != nil && sessions.running() {
-		if !slices.ContainsFunc(manager.sessionFolders(unit), func(folder string) bool { return !sessions.unit.Contains(folder) }) {
+		if !slices.ContainsFunc(manager.sessionFolders(unit, worker.name), func(folder string) bool { return !sessions.unit.Contains(folder) }) {
 			return nil
 		}
 		// The worker's helper watches only the folders that its mirror started with.
@@ -567,7 +578,7 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 	}
 	unit := repository
 	if sessions {
-		folders := manager.sessionFolders(repository)
+		folders := manager.sessionFolders(repository, worker.name)
 		unit = mirror.Unit{Main: folders[0], Worktrees: folders[1:]}
 	}
 	folder := manager.mirrorFolder(unit.Main)
@@ -581,6 +592,9 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 			if !unit.Contains(root) {
 				unit.Worktrees = append(unit.Worktrees, root)
 			}
+		}
+		if err := manager.updateWorkerCopy(repository.Main, worker.name, func(kept *workerCopy) { kept.Sessions = unitFolders(unit) }); err != nil {
+			return err
 		}
 	}
 	destination.Applied = manager.applied(repository, sessions)
@@ -613,21 +627,21 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 		return err
 	}
 	mirrorCtx, cancel := context.WithCancel(manager.ctx)
-	live := &liveMirror{unit: unit, destination: destination, cancel: cancel, done: make(chan struct{})}
+	live := &liveMirror{unit: unit, destination: destination, started: time.Now(), cancel: cancel, done: make(chan struct{})}
 	manager.mu.Lock()
 	worker.mirrors[unit.Main] = live
 	manager.mu.Unlock()
 	go func() {
 		defer close(live.done)
 		aside := filepath.Join(folder, "aside", time.Now().UTC().Format("20060102T150405.000000000Z"))
-		err := destination.Serve(mirrorCtx, struct {
+		live.err = destination.Serve(mirrorCtx, struct {
 			io.Reader
 			io.WriteCloser
 		}{output, input}, aside)
 		command.Wait()
 		release()
-		if err != nil {
-			log.Printf("mirror of %s from worker %s: %v %s", unit.Main, worker.name, err, stderr)
+		if live.err != nil {
+			log.Printf("mirror of %s from worker %s: %v %s", unit.Main, worker.name, live.err, stderr)
 		}
 	}()
 	return nil
@@ -678,8 +692,9 @@ func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirr
 }
 
 // allowRoot is the AllowRoot of main's copy of a unit: a placed unit's copy writes in the unit's folders and in
-// worktrees that the worker made, but never in Pi's or Gripi's own folders or in another unit on a worker; the copy of
-// the folders of a unit's sessions, which are its unit, writes only in those.
+// worktrees that the worker made, but never in Pi's or Gripi's own folders, in another unit on a worker, or in a
+// folder of this machine's own files, which the worker's would replace without saving them aside; the copy of the
+// folders of a unit's sessions, which are its unit, writes only in those.
 func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root string) error {
 	return func(root string) error {
 		if sessions {
@@ -704,12 +719,24 @@ func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root str
 				return fmt.Errorf("it holds or is in %s, which is on worker %s", other.Unit.Main, other.Worker)
 			}
 		}
-		return nil
+		info, err := os.Lstat(root)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if entries, err := os.ReadDir(root); err != nil || len(entries) == 0 {
+				return err
+			}
+		}
+		return errors.New("this machine has files there that are not the repository's")
 	}
 }
 
-// ownFolder returns Pi's or Gripi's own folder that holds folder or is in it, if any: Pi's agent folder, with its
-// logins, the sessions' root, and Gripi's state and configuration folders, which stay on this machine.
+// ownFolder returns Pi's or Gripi's own file or folder that folder holds or is in, if any: Pi's agent folder, with
+// its logins, the sessions' root, Gripi's state folder and its other own paths, which stay on this machine.
 func (manager *Manager) ownFolder(folder string) string {
 	paths := func(path string) []string {
 		if real, err := filepath.EvalSymlinks(path); err == nil && real != path {
@@ -717,7 +744,7 @@ func (manager *Manager) ownFolder(folder string) string {
 		}
 		return []string{path}
 	}
-	for _, own := range []string{manager.options.Pi.AgentDir, manager.options.SessionsRoot, manager.options.StateDir, manager.options.ConfigDir} {
+	for _, own := range append([]string{manager.options.Pi.AgentDir, manager.options.SessionsRoot, manager.options.StateDir}, manager.options.GatewayPaths...) {
 		if own == "" {
 			continue
 		}
@@ -746,16 +773,36 @@ func unitFolders(unit mirror.Unit) []string {
 	return folders
 }
 
-// waitForMirror returns once main's copy of a unit has taken a barrier that started after since.
-func waitForMirror(ctx context.Context, live *liveMirror, since time.Time) error {
+// waitForMirrors returns once main's copies of a placed unit and of its sessions' folders have the first barriers of
+// their running mirrors, which a failed apply, a file that the worker cannot read or a stalled channel hold up.
+func (manager *Manager) waitForMirrors(ctx context.Context, worker *remote, unit mirror.Unit) error {
+	ctx, cancel := context.WithTimeoutCause(ctx, firstBarrierTimeout,
+		fmt.Errorf("main got no barrier from it within %s; the worker may be unable to read some of its files", firstBarrierTimeout))
+	defer cancel()
+	for _, main := range []string{unit.Main, manager.sessionsMain(unit)} {
+		manager.mu.Lock()
+		live := worker.mirrors[main]
+		manager.mu.Unlock()
+		if live == nil {
+			return fmt.Errorf("%s is not mirrored from worker %s", main, worker.name)
+		}
+		if err := waitForMirror(ctx, live); err != nil {
+			return fmt.Errorf("mirror %s from worker %s: %w", main, worker.name, err)
+		}
+	}
+	return nil
+}
+
+// waitForMirror returns once main's copy of a unit has applied the first barrier of its running mirror.
+func waitForMirror(ctx context.Context, live *liveMirror) error {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
-	for !live.destination.Checkpoint().Time.After(since) {
+	for !live.destination.Checkpoint().Time.After(live.started) {
 		select {
 		case <-live.done:
-			return errors.New("the mirror stopped before main had the repository")
+			return fmt.Errorf("the mirror stopped before its first barrier: %v", live.err)
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case <-ticker.C:
 		}
 	}
@@ -816,6 +863,9 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	// The session's barriers need both mirrors of its repository.
 	worker, err := manager.connect(ctx, placement.Worker, placement.Unit.Main)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := manager.waitForMirrors(ctx, worker, placement.Unit); err != nil {
 		return nil, nil, err
 	}
 	conn, err := manager.connection(worker)
@@ -1005,11 +1055,11 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 	if err != nil {
 		return err
 	}
-	// The worker's copies of a repository that continued on main without the worker, and of its sessions, may have
-	// changes that main never got.
-	stale := filepath.Join(manager.mirrorFolder(unit.Main), "stale")
-	name, _ := os.ReadFile(stale)
-	isStale := string(name) == worker.name
+	copies, err := manager.workerCopies(unit.Main)
+	if err != nil {
+		return err
+	}
+	isStale := copies[worker.name].Stale
 	now := time.Now().UTC().Format("20060102T150405Z")
 	copyFolders := func(folders mirror.Unit) error {
 		aside := ""
@@ -1027,20 +1077,20 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 	if err := copyFolders(unit); err != nil {
 		return err
 	}
-	for _, folder := range manager.sessionFolders(unit) {
-		if _, err := os.Stat(folder); err != nil {
-			continue
+	for _, folder := range manager.sessionFolders(unit, worker.name) {
+		// The worker's copy of a folder that main no longer has may hold sessions that were deleted here.
+		if err := os.MkdirAll(folder, 0700); err != nil {
+			return err
 		}
 		if err := copyFolders(mirror.Unit{Main: folder}); err != nil {
 			return err
 		}
 	}
 	if isStale {
-		if err := os.Remove(stale); err != nil {
+		if err := manager.updateWorkerCopy(unit.Main, worker.name, func(kept *workerCopy) { kept.Stale = false }); err != nil {
 			return err
 		}
 	}
-	started := time.Now()
 	for _, sessions := range []bool{false, true} {
 		main := unit.Main
 		if sessions {
@@ -1053,14 +1103,8 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 		if err := manager.startMirror(ctx, worker, unit, sessions); err != nil {
 			return err
 		}
-		manager.mu.Lock()
-		live := worker.mirrors[main]
-		manager.mu.Unlock()
-		if err := waitForMirror(ctx, live, started); err != nil {
-			return err
-		}
 	}
-	return nil
+	return manager.waitForMirrors(ctx, worker, unit)
 }
 
 // Return brings the repository that holds folder back from its worker: it stops everything that the repository's
@@ -1151,7 +1195,7 @@ func (manager *Manager) continueOnMain(ctx context.Context, placement Placement,
 			return err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(manager.mirrorFolder(unit.Main), "stale"), []byte(placement.Worker), 0600); err != nil {
+	if err := manager.updateWorkerCopy(unit.Main, placement.Worker, func(kept *workerCopy) { kept.Stale = true }); err != nil {
 		return err
 	}
 	if err := manager.options.Placements.Remove(unit.Main); err != nil {
@@ -1166,6 +1210,44 @@ func (manager *Manager) continueOnMain(ctx context.Context, placement Placement,
 	return nil
 }
 
+// workerCopy is what a worker keeps of a repository that was on it.
+type workerCopy struct {
+	// Stale is set when the repository continued on main without the worker, whose copies of the repository and of its
+	// sessions may have changes that main never got.
+	Stale bool `json:"stale,omitempty"`
+	// Sessions are the folders of the repository's sessions that the worker has, which the next move there brings up
+	// to date, also those whose sessions were deleted here meanwhile.
+	Sessions []string `json:"sessions,omitempty"`
+}
+
+// workerCopies returns what workers keep of the repository whose main folder is main, by the workers' names.
+func (manager *Manager) workerCopies(main string) (map[string]workerCopy, error) {
+	copies := map[string]workerCopy{}
+	contents, found, err := state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Read()
+	if err == nil && found {
+		err = json.Unmarshal(contents, &copies)
+	}
+	return copies, err
+}
+
+// updateWorkerCopy changes what the worker of a name keeps of the repository whose main folder is main.
+func (manager *Manager) updateWorkerCopy(main, name string, update func(kept *workerCopy)) error {
+	manager.copiesMu.Lock()
+	defer manager.copiesMu.Unlock()
+	copies, err := manager.workerCopies(main)
+	if err != nil {
+		return err
+	}
+	kept := copies[name]
+	update(&kept)
+	copies[name] = kept
+	contents, err := json.Marshal(copies)
+	if err != nil {
+		return err
+	}
+	return state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Write(contents)
+}
+
 // goneAt is when the worker of a name must have stopped the sessions of every connection that main lost, including
 // those of a gateway before this one, which stopped answering before this one started.
 func (manager *Manager) goneAt(name string) time.Time {
@@ -1178,9 +1260,10 @@ func (manager *Manager) goneAt(name string) time.Time {
 	return goneAt
 }
 
-// sessionFolders are Pi's folders of the sessions in a unit, the main folder's first: one for each of its worktrees,
-// and one for each other folder in it that a session started in or is starting in.
-func (manager *Manager) sessionFolders(unit mirror.Unit) []string {
+// sessionFolders are Pi's folders of the sessions in a unit on the worker of a name, the main folder's first: one for
+// each of its worktrees, one for each other folder in it that a session started in or is starting in, and those that
+// the worker has from earlier.
+func (manager *Manager) sessionFolders(unit mirror.Unit, worker string) []string {
 	var folders []string
 	add := func(cwd string) {
 		if folder := sessionFolder(manager.options.SessionsRoot, cwd); !slices.Contains(folders, folder) {
@@ -1194,6 +1277,13 @@ func (manager *Manager) sessionFolders(unit mirror.Unit) []string {
 		for _, session := range sessions {
 			if unit.Contains(session.CWD) {
 				add(session.CWD)
+			}
+		}
+	}
+	if copies, err := manager.workerCopies(unit.Main); err == nil {
+		for _, folder := range copies[worker].Sessions {
+			if !slices.Contains(folders, folder) {
+				folders = append(folders, folder)
 			}
 		}
 	}

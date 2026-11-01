@@ -37,7 +37,12 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, 
 			}
 			return "", fmt.Errorf("no worker is named %q; 'gripi worker list' shows the workers", name)
 		},
-		Placements: placements, StateDir: stateDir(cfg), ConfigDir: filepath.Dir(cfg.EnvPath),
+		Placements: placements, StateDir: stateDir(cfg),
+		GatewayPaths: []string{
+			filepath.Dir(cfg.EnvPath), cfg.SessionCwdsPath, cfg.AttachmentsRoot, cfg.WebPushVAPIDPath, cfg.PushSubscriptionsPath, cfg.ReadStatePath,
+			cfg.PinnedSessionsPath, cfg.SessionTagsPath, cfg.EnvironmentPath, cfg.BrowserAccessPath, cfg.WorkspaceSecretPath, cfg.WorkspaceAccessPath,
+			cfg.WorkspaceOwnershipPath, cfg.WorkersPath, cfg.WorkerPlacementsPath, cfg.RestartPath, cfg.SocketPath,
+		},
 		Pi:              remote.Pi{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, ExtensionDir: filepath.Dir(tree)},
 		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, SocketPath: cfg.SocketPath, Store: piAdapter.Store(),
 		Rewritten: handler.(interface{ Guard() agent.Guard }).Guard().Rewritten,
