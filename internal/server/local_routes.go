@@ -181,7 +181,7 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 	only := request.URL.Query().Get("session")
 	result := []LocalSession{}
 	for _, session := range view.Sessions {
-		if only != "" && session.Path != only || !reachesSession(request, session.Path) {
+		if only != "" && session.Path != only || !reachesFolder(request, session.CWD) {
 			continue
 		}
 		tags := view.SessionTags[session.Path]

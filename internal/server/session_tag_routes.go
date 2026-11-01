@@ -118,12 +118,13 @@ func (app *application) visibleTagCounts(request *http.Request, tags map[string]
 	if err != nil {
 		return nil, err
 	}
-	paths := make(map[string]bool, len(all))
+	// The folders of the sessions, by their keys.
+	folders := make(map[string]string, len(all))
 	for _, session := range all {
-		paths[session.Path] = true
+		folders[session.Path] = session.CWD
 	}
 	for _, pending := range app.pendingSessions.Entries() {
-		paths[pending.Path] = true
+		folders[pending.Path] = pending.CWD
 	}
 	var ownedPaths map[string]bool
 	if app.ownsSession != nil && app.ownershipStore != nil {
@@ -133,8 +134,8 @@ func (app *application) visibleTagCounts(request *http.Request, tags map[string]
 		}
 	}
 	counts := make(map[string]int)
-	for path := range paths {
-		if !reachesSession(request, path) {
+	for path, folder := range folders {
+		if !reachesFolder(request, folder) {
 			continue
 		}
 		if app.ownsSession != nil {

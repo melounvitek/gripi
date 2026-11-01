@@ -429,11 +429,23 @@ func (store Store) Session(path string) (*agent.Session, bool) {
 	if err != nil || !within || filepath.Ext(realPath) != ".jsonl" {
 		return nil, false
 	}
-	indexed, err := store.Cache.Index(realPath)
-	if err != nil || indexed.session == nil || !filepath.IsAbs(indexed.session.CWD) {
+	stat, err := os.Stat(realPath)
+	if err != nil {
 		return nil, false
 	}
-	copy := *indexed.session
+	// The cache keeps the metadata of far more sessions than their indexes, such as of those that a listing read.
+	session, found := store.Cache.sessionMetadata(realPath, stat, false)
+	if !found {
+		indexed, err := store.Cache.Index(realPath)
+		if err != nil {
+			return nil, false
+		}
+		session = indexed.session
+	}
+	if session == nil || !filepath.IsAbs(session.CWD) {
+		return nil, false
+	}
+	copy := *session
 	copy.Path = configuredPath
 	copy.FolderMissing = folderMissing(copy.CWD)
 	if copy.ParentSessionPath != "" {

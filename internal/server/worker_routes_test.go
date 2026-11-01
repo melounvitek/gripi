@@ -7,17 +7,26 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
-// workerPlacement stands in for the gateway's record of what is on a worker.
-type workerPlacement struct{ sessions, folders []string }
+// workerPlacement stands in for the gateway's record of what is on a worker. Like the gateway's, it reads a session
+// to look it up by its key, which lookups counts.
+type workerPlacement struct {
+	sessions, folders []string
+	lookups           *atomic.Int32
+}
 
 func (placement workerPlacement) Session(key string) bool {
+	if placement.lookups != nil {
+		placement.lookups.Add(1)
+	}
 	return slices.Contains(placement.sessions, key)
 }
 
@@ -51,9 +60,13 @@ func command(target http.Handler, method, route string, fields url.Values, heade
 }
 
 func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
-	handler, alpha, beta, project := fakePiGateway(t)
+	cfg, alpha, beta, project := fakePiConfig(t)
+	// Beta started in a folder on main.
+	writeLocalSession(t, beta, "beta-0002", t.TempDir(), "2026-01-02T00:00:0")
+	handler := startGateway(t, cfg)
 	local := localHandler(t, handler)
-	worker := workerHandler(handler, workerPlacement{sessions: []string{alpha}, folders: []string{project}})
+	var lookups atomic.Int32
+	worker := workerHandler(handler, workerPlacement{sessions: []string{alpha}, folders: []string{project}, lookups: &lookups})
 	if response := command(local, http.MethodPost, "/sessions/tags", url.Values{"session": {beta}, "tag": {"main-only"}, "assigned": {"true"}}); response.Code != http.StatusOK {
 		t.Fatalf("tag on main = %d %s", response.Code, response.Body.String())
 	}
@@ -66,6 +79,10 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 	}
 	if tags := command(worker, http.MethodGet, "/tags", nil); tags.Code != http.StatusOK || strings.Contains(tags.Body.String(), "main-only") {
 		t.Fatalf("worker's tags = %d %s", tags.Code, tags.Body.String())
+	}
+	// Lists have the sessions' folders, which decide, so that a list of many sessions doesn't read each again.
+	if lookups.Load() != 0 {
+		t.Fatalf("the worker's lists looked %d sessions up by their keys", lookups.Load())
 	}
 
 	for _, request := range []struct {
@@ -141,7 +158,8 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 
 func TestWorkerCommandsInMultiUserModeStillNeedTheUsersToken(t *testing.T) {
 	handler, alpha, beta, _ := multiUserFakePiGateway(t)
-	worker := workerHandler(handler, workerPlacement{sessions: []string{alpha, beta}})
+	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
+	worker := workerHandler(handler, workerPlacement{sessions: []string{alpha, beta}, folders: []string{project}})
 
 	if refused := command(worker, http.MethodGet, "/sessions", nil); refused.Code != http.StatusForbidden || !strings.Contains(refused.Body.String(), "GRIPI_USER_TOKEN") {
 		t.Fatalf("worker's request without a token = %d %s", refused.Code, refused.Body.String())

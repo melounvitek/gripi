@@ -15,13 +15,15 @@ import (
 )
 
 // fakePlacement stands in for the gateway's record of what is on a worker.
-type fakePlacement struct{ sessions []string }
+type fakePlacement struct{ sessions, folders []string }
 
 func (placement fakePlacement) Session(key string) bool {
 	return slices.Contains(placement.sessions, key)
 }
 
-func (fakePlacement) Folder(string) bool { return false }
+func (placement fakePlacement) Folder(path string) bool {
+	return slices.Contains(placement.folders, path)
+}
 
 // Settings can put each of the gateway's files and folders anywhere, and none may move to a worker, whose copy would
 // replace it.
@@ -86,10 +88,19 @@ func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 		configured.ReadStatePath = filepath.Join(state, "read.json")
 		cfg = *configured
 	})
+	// Beta started in a folder on main.
+	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
+	contents, err := os.ReadFile(beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beta, []byte(strings.ReplaceAll(string(contents), `"cwd":"`+project+`"`, `"cwd":"`+t.TempDir()+`"`)), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if code, _, stderr := runCLI("tag", "0a1-beta", "main-only"); code != 0 {
 		t.Fatalf("gripi tag on main = %d, stderr %q", code, stderr)
 	}
-	socket, stop, err := startWorkerSocket(cfg, browser, "beelink", fakePlacement{sessions: []string{alpha}})
+	socket, stop, err := startWorkerSocket(cfg, browser, "beelink", fakePlacement{sessions: []string{alpha}, folders: []string{project}})
 	if err != nil {
 		t.Fatal(err)
 	}

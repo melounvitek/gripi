@@ -40,12 +40,14 @@ func (handler *Handler) Worker(placement WorkerPlacement) http.Handler {
 }
 
 // reachesSession reports whether a request may touch a session: a worker's reaches only the sessions on that worker.
+// A list of sessions has their folders, which reachesFolder checks without reading each session again.
 func reachesSession(request *http.Request, key string) bool {
 	placement, fromWorker := request.Context().Value(workerKey{}).(WorkerPlacement)
 	return !fromWorker || placement.Session(key)
 }
 
-// reachesFolder reports whether a request may start a session in a folder: a worker's only where it would run there.
+// reachesFolder reports whether a request may start a session in a folder, or reach one that started there: a worker's
+// only where it would run there.
 func reachesFolder(request *http.Request, path string) bool {
 	placement, fromWorker := request.Context().Value(workerKey{}).(WorkerPlacement)
 	return !fromWorker || placement.Folder(path)
