@@ -34,9 +34,12 @@ type Destination struct {
 	// Applied, if set before Serve, is called after each barrier that Serve
 	// applies, before the source learns of it, with the new checkpoint and the
 	// files that changed here, which are in the folder aside at their paths.
+	// A barrier that was finished after a crash, as the destination opened,
+	// is reported when Serve starts.
 	Applied func(checkpoint Checkpoint, aside string, saved []string)
 
-	state string
+	state     string
+	recovered replayed // what finishing an interrupted barrier saved aside, which Serve reports
 	// The source's paths under from are kept under to: both are "/" unless the unit lives elsewhere here, as in
 	// tests that run both sides on one machine.
 	from, to string
@@ -87,6 +90,7 @@ type journal struct {
 	Barrier uint64   `json:"barrier"`
 	Roots   []string `json:"roots"`
 	Ops     []op     `json:"ops"`
+	Aside   string   `json:"aside,omitempty"` // where what changed here goes; empty when that isn't checked
 }
 
 // NewDestination opens the destination whose state lives in the folder
@@ -216,6 +220,10 @@ func (d *Destination) Serve(ctx context.Context, stream io.ReadWriter, aside str
 	if err := d.recover(); err != nil {
 		return err
 	}
+	if len(d.recovered.saved) > 0 && d.Applied != nil {
+		d.Applied(d.Checkpoint(), d.recovered.aside, d.recovered.saved)
+	}
+	d.recovered = replayed{}
 	if err := os.RemoveAll(d.path("staging")); err != nil {
 		return err
 	}
@@ -253,39 +261,47 @@ func (d *Destination) recover() error {
 	if err := json.Unmarshal(data, &j); err != nil {
 		return fmt.Errorf("mirror journal: %w", err)
 	}
-	// What changed here meanwhile can't be told from what an interrupted replay wrote.
-	_, err = d.replay(j, "")
+	// The changes that the interrupted replay applied count as the destination's again before the rest is applied.
+	done, err := d.replay(j)
+	d.recovered.aside = done.aside
+	d.recovered.saved = append(d.recovered.saved, done.saved...)
 	return err
 }
 
 // commit applies a barrier's changes, and returns the files that changed here,
 // which it moved to aside first. The journal, written durably first, and a
 // marker per finished change let a restart finish the work after a crash.
-func (d *Destination) commit(j journal, aside string) ([]string, error) {
+func (d *Destination) commit(j journal) (replayed, error) {
 	if len(j.Ops) > 0 {
 		data, err := json.Marshal(j)
 		if err != nil {
-			return nil, err
+			return replayed{}, err
 		}
 		if err := writeFileAtomic(d.path("journal.json"), data); err != nil {
-			return nil, err
+			return replayed{}, err
 		}
 		if err := syncFilesystem(d.state); err != nil {
-			return nil, err
+			return replayed{}, err
 		}
 	}
-	return d.replay(j, aside)
+	return d.replay(j)
 }
 
-// replay applies a journal. With aside, it first moves there what changed here.
-func (d *Destination) replay(j journal, aside string) ([]string, error) {
-	a := &applier{d: d, roots: j.Roots, opened: map[string]*os.Root{}, dirs: map[string]bool{}, aside: aside, touched: map[string]bool{}}
+// replayed is what a replay did besides applying the changes.
+type replayed struct {
+	aside string   // where files that changed here go; empty when that isn't checked
+	saved []string // the files moved or copied there
+}
+
+// replay applies a journal. With an aside folder, it first moves there what changed here.
+func (d *Destination) replay(j journal) (replayed, error) {
+	a := &applier{d: d, roots: j.Roots, opened: map[string]*os.Root{}, dirs: map[string]bool{}, replayed: replayed{aside: j.Aside}, touched: map[string]bool{}}
 	defer a.close()
 	barrier := strconv.FormatUint(j.Barrier, 10)
 	done := d.path("done", barrier)
 	if len(j.Ops) > 0 {
 		if err := os.MkdirAll(done, 0o700); err != nil {
-			return nil, err
+			return a.replayed, err
 		}
 	}
 	for i, o := range j.Ops {
@@ -299,19 +315,19 @@ func (d *Destination) replay(j journal, aside string) ([]string, error) {
 		}
 		info, err := os.Lstat(d.local(o.Path))
 		if err := a.apply(o); err != nil {
-			return a.saved, fmt.Errorf("mirror: %s %s: %w", o.Kind, o.Path, err)
+			return a.replayed, fmt.Errorf("mirror: %s %s: %w", o.Kind, o.Path, err)
 		}
 		a.record(o, err == nil && info.IsDir())
 		if o.Kind != "put" {
 			if err := os.Mkdir(marker, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-				return a.saved, err
+				return a.replayed, err
 			}
 		}
 	}
 	if err := d.writeStamps(a.touched); err != nil {
-		return a.saved, err
+		return a.replayed, err
 	}
-	return a.saved, d.checkpoint(j)
+	return a.replayed, d.checkpoint(j)
 }
 
 // checkpoint notes that the journal is applied, durably.
@@ -396,8 +412,7 @@ type applier struct {
 	opened  map[string]*os.Root
 	staging *os.File
 	dirs    map[string]bool // parent folders known to be real folders
-	aside   string          // where files that changed here go; empty when that isn't checked
-	saved   []string        // the files moved or copied there
+	replayed
 	touched map[string]bool // paths whose stamps changed
 }
 
@@ -1183,14 +1198,14 @@ func (in *incoming) write(o deltaOp) error {
 
 func (r *receiver) barrier(n uint64) error {
 	aside := filepath.Join(r.aside, "main", strconv.FormatUint(n, 10))
-	saved, err := r.d.commit(journal{Barrier: n, Roots: r.roots, Ops: r.live()}, aside)
+	done, err := r.d.commit(journal{Barrier: n, Roots: r.roots, Ops: r.live(), Aside: aside})
 	if _, jerr := os.Lstat(r.d.path("journal.json")); err == nil || jerr == nil {
 		r.pending = nil // applied, or left to the journal for a restart
 		clear(r.lastPut)
 	}
 	// Before the source hears of it, so that what follows the barrier there finds what Applied changed.
 	if err == nil && r.d.Applied != nil {
-		r.d.Applied(r.d.Checkpoint(), aside, saved)
+		r.d.Applied(r.d.Checkpoint(), aside, done.saved)
 	}
 	ack := &frame{Kind: kindAck, N: n}
 	if err != nil {

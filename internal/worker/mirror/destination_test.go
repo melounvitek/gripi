@@ -4,13 +4,16 @@ package mirror
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // Pi appends entries to a session file, and Gripi's guard of the file on main takes another file in its place for
@@ -146,6 +149,53 @@ func TestTheDestinationRemembersWhatItWroteAcrossRestarts(t *testing.T) {
 	r.barrier(t)
 	if !slices.Equal(saved, []string{filepath.Join(folder, "f1.txt")}) {
 		t.Fatalf("saved %v", saved)
+	}
+}
+
+// Finishing a barrier that main couldn't apply must save main's changes aside like applying it does.
+func TestFinishingAnInterruptedBarrierSavesMainsChangesAside(t *testing.T) {
+	folder := t.TempDir()
+	writeFile(t, folder, "a/f.txt", "a\n")
+	writeFile(t, folder, "b/f.txt", "b\n")
+	r := newRig(t, Unit{Main: folder})
+	writeFile(t, folder, "a/f.txt", "the worker's a\n")
+	writeFile(t, folder, "b/f.txt", "the worker's b\n")
+	waitFor(t, "changes staged", func() bool { return stagedCount(r) == 2 })
+	b := filepath.Join(folder, "b/f.txt")
+	writeFile(t, r.dst, b, "main's b\n")
+	stuck := r.dst + filepath.Join(folder, "a")
+	os.Chmod(stuck, 0o500) // applying fails before it gets to b
+	t.Cleanup(func() { os.Chmod(stuck, 0o755) })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if n, _, err := r.src.Barrier(ctx); err == nil {
+		t.Fatalf("barrier %d applied despite the read-only folder", n)
+	}
+	<-r.served
+	<-r.ran
+
+	os.Chmod(stuck, 0o755)
+	d, err := NewMovedDestination(r.state, "/", r.dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(r.dst + b); string(data) != "the worker's b\n" {
+		t.Fatalf("main has %q", data)
+	}
+	aside := filepath.Join(r.dst, "aside", "1", "main", strconv.FormatUint(d.Checkpoint().Barrier, 10))
+	if data, err := os.ReadFile(filepath.Join(aside, b)); string(data) != "main's b\n" {
+		t.Fatalf("main's version aside: %q, %v", data, err)
+	}
+	var saved []string
+	d.Applied = func(_ Checkpoint, folder string, paths []string) {
+		if folder == aside {
+			saved = append(saved, paths...)
+		}
+	}
+	r.d = d
+	r.start(t, nil)
+	if !slices.Equal(saved, []string{b}) {
+		t.Fatalf("reported %v as saved", saved)
 	}
 }
 
