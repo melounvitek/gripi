@@ -33,6 +33,11 @@ type fakeWorkers struct {
 	copying func()
 	// copyingSince is when the repository started being copied to the worker, while it is.
 	copyingSince time.Time
+	// copyFails, if set, is what a move's copy fails with, once the sessions stopped.
+	copyFails error
+	// gitRepository, if set, is a Git repository in the repository, which then moves as one folder outside Git:
+	// Repository finds it for its folders, while Location reports the repository that holds them.
+	gitRepository string
 }
 
 // refusal is an error of Workers that refuses what was asked.
@@ -61,6 +66,9 @@ func (workers *fakeWorkers) Move(_ context.Context, folder, worker string, stop 
 		workers.copyingSince = time.Now()
 		workers.copying()
 		workers.copyingSince = time.Time{}
+	}
+	if workers.copyFails != nil {
+		return workers.copyFails
 	}
 	workers.moves = append(workers.moves, "to "+worker)
 	workers.placed = true
@@ -114,6 +122,9 @@ func (workers *fakeWorkers) Location(folder string) (gateway.WorkerLocation, boo
 }
 
 func (workers *fakeWorkers) Repository(folder string) (string, []string, error) {
+	if git := workers.gitRepository; git != "" && (folder == git || strings.HasPrefix(folder, git+"/")) {
+		return git, nil, nil
+	}
 	return workers.repository, []string{workers.repository + "-feature"}, nil
 }
 
@@ -324,6 +335,18 @@ func TestANewSessionThatPiHasNotSavedStartsAgainWhereItsRepositoryMoved(t *testi
 		t.Fatalf("Pi of the new session started %v, on the worker %v, and stopped %v", started, onWorker, stopped)
 	}
 
+	// A move whose copy fails leaves the repository here, where the new session starts again.
+	workers.copying = nil
+	workers.copyFails = errors.New("rsync: connection unexpectedly closed")
+	if response := postWorkspaceForm(handler, "/workers/move", url.Values{"session": {session}, "worker": {"beelink"}}, ""); response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "rsync") {
+		t.Fatalf("move whose copy fails = %d %s", response.Code, response.Body.String())
+	}
+	if !slices.Equal(onWorker, []bool{false, true, false, false}) {
+		t.Fatalf("after the failed move, Pi of the new session started on the worker %v", onWorker)
+	}
+	shown("after the failed move")
+	workers.copyFails = nil
+
 	// A session that cannot start again is gone, which the move says, with the reason.
 	answers = false
 	workers.copying = nil
@@ -337,10 +360,12 @@ func TestANewSessionThatPiHasNotSavedStartsAgainWhereItsRepositoryMoved(t *testi
 }
 
 // A return of a repository whose move is still starting its new sessions again would refuse to start them while it
-// copies, and they would be gone, so the repository is moving until they have started.
+// copies, and they would be gone, so the repository is moving until they have started. That holds for a return from a
+// Git repository in it too, when the repository is a folder outside Git that moved as a whole.
 func TestARepositoryMovesNoFurtherUntilItsNewSessionsStartedAgain(t *testing.T) {
 	cfg, _, _, project := fakePiConfig(t)
-	workers := &fakeWorkers{repository: project}
+	app := filepath.Join(project, "app")
+	workers := &fakeWorkers{repository: project, gitRepository: app}
 	var onWorker []bool
 	// returning is while a return copies the repository, and overlap runs as the next Pi in the repository starts.
 	var returning bool
@@ -382,7 +407,7 @@ func TestARepositoryMovesNoFurtherUntilItsNewSessionsStartedAgain(t *testing.T) 
 			returning = false
 		}
 		go func() {
-			returned <- postWorkspaceForm(handler, "/workers/return", url.Values{"session": {session}}, "")
+			returned <- command(localHandler(t, handler), http.MethodPost, "/workers/return", url.Values{"folder": {app}})
 		}()
 		select {
 		case <-copying:

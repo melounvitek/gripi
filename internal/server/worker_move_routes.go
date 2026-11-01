@@ -141,9 +141,12 @@ func (app *application) moveRepository(response http.ResponseWriter, request *ht
 		return
 	}
 	// Workers refuse to start a session while its repository moves, so another move or return that started before the
-	// new sessions that this one stops have started again would end them.
+	// new sessions that this one stops have started again would end them. What is on a worker moves as it was placed
+	// there, which can be a folder outside Git with Git repositories in it.
 	repository := folder
-	if main, _, err := app.workers.Repository(folder); err == nil {
+	if location, found := app.workers.Location(folder); found {
+		repository = location.Repository
+	} else if main, _, err := app.workers.Repository(folder); err == nil {
 		repository = main
 	}
 	unlock, locked := app.movingRepositories.TryLock(repository)
