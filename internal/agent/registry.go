@@ -727,6 +727,39 @@ func (registry *Registry) closeIdleWhen(path string, due func(*clientEntry) bool
 	}
 	return closed, err
 }
+
+// closeIdleAfter closes an idle client once check accepts it, like closeIdleWhen, but reaches no one else meanwhile, so
+// that nothing changes what check read before the client closes.
+func (registry *Registry) closeIdleAfter(path string, check func(Client) error) (bool, error) {
+	registry.mu.Lock()
+	entry := registry.clients[path]
+	if entry == nil || entry.retiring || entry.activeRequests != 0 || entry.client.Busy() {
+		registry.mu.Unlock()
+		return false, nil
+	}
+	entry.retiring = true
+	registry.retiredSequences[path] = entry.client.EventSequence()
+	registry.mu.Unlock()
+
+	err := check(entry.client)
+	if err == nil {
+		err = entry.client.Close()
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if err != nil {
+		delete(registry.retiredSequences, path)
+		if registry.clients[path] == entry {
+			entry.retiring = false
+		}
+		return false, err
+	}
+	if registry.clients[path] == entry {
+		delete(registry.clients, path)
+	}
+	return true, nil
+}
+
 func (registry *Registry) IdleClientPaths(idle time.Duration, now time.Time, except map[string]bool) []string {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()

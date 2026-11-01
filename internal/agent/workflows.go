@@ -100,7 +100,8 @@ func RestartUnsavedSession(ctx context.Context, key string, moment time.Time, cl
 // running client, it closes nothing and returns no function.
 func StopUnsavedSession(ctx context.Context, key string, clients *Registry, pending *PendingSessionRegistry) (func(context.Context) error, error) {
 	var choices unsavedChoices
-	err := clients.WithActiveClient(ctx, key, false, func(client Client) error {
+	// The next client continues the old one's events, so a page's cursor stays valid.
+	closed, err := clients.closeIdleAfter(key, func(client Client) error {
 		var err error
 		choices, err = readUnsavedChoices(ctx, client)
 		return err
@@ -108,11 +109,7 @@ func StopUnsavedSession(ctx context.Context, key string, clients *Registry, pend
 	if errors.Is(err, errRunning) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	// The next client continues the old one's events, so a page's cursor stays valid.
-	if closed, err := clients.closeIdleWhen(key, func(*clientEntry) bool { return true }, nil); !closed || err != nil {
+	if !closed || err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context) error {

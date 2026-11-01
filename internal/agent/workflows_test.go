@@ -347,6 +347,46 @@ func TestRestartUnsavedSessionDoesNotWaitForObservers(t *testing.T) {
 	}
 }
 
+// The stopped client's session exists only in it, so a prompt or a model that it took after its state said that it was
+// idle would be lost, or overwritten by the choices read before.
+func TestStopUnsavedSessionLetsNothingReachTheSessionWhileItStops(t *testing.T) {
+	ctx := context.Background()
+	old := newChoicesClient("old", "", LiveStatus{Provider: "e2e", ModelID: "contract-model", ThinkingLevel: "high"})
+	replacement := newChoicesClient("new", "", LiveStatus{})
+	registry := NewRegistry(func(string) (Client, error) { return replacement, nil }, nil)
+	if err := registry.Register("/pending", old); err != nil {
+		t.Fatal(err)
+	}
+	pending := NewPendingSessionRegistry(nil)
+	pending.Remember("/pending", "/project", "old")
+	var prompted, chosen error
+	old.liveStatusRead = func() {
+		prompted = registry.WithClient(ctx, "/pending", func(client Client) error {
+			_, err := client.Prompt(ctx, Prompt{Text: "Hello"})
+			return err
+		})
+		chosen = registry.WithClient(ctx, "/pending", func(client Client) error {
+			_, err := client.(ModelSelector).SetModel(ctx, "e2e", "fixture-model", "low")
+			return err
+		})
+	}
+
+	restart, err := StopUnsavedSession(ctx, "/pending", registry, pending)
+
+	if err != nil || restart == nil || !old.closed() {
+		t.Fatalf("stop = %v, restart %v, old closed %v", err, restart != nil, old.closed())
+	}
+	if !errors.Is(prompted, ErrClientRetiring) || !errors.Is(chosen, ErrClientRetiring) {
+		t.Fatalf("while the session stopped, a prompt = %v, a model = %v", prompted, chosen)
+	}
+	if err := restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if registry.Client("/pending") != replacement || replacement.status != (LiveStatus{Provider: "e2e", ModelID: "contract-model", ThinkingLevel: "high"}) {
+		t.Fatalf("the new client has %#v", replacement.status)
+	}
+}
+
 type workflowClient struct {
 	*registryClient
 	state    State
@@ -362,6 +402,8 @@ type choicesClient struct {
 	*workflowClient
 	status      LiveStatus
 	setModelErr error
+	// liveStatusRead, if set, runs once the status was read.
+	liveStatusRead func()
 }
 
 func newChoicesClient(id, name string, status LiveStatus) *choicesClient {
@@ -369,7 +411,11 @@ func newChoicesClient(id, name string, status LiveStatus) *choicesClient {
 }
 
 func (client *choicesClient) LiveStatus(context.Context) (LiveStatus, error) {
-	return client.status, nil
+	status := client.status
+	if client.liveStatusRead != nil {
+		client.liveStatusRead()
+	}
+	return status, nil
 }
 func (client *choicesClient) ModelSettings(context.Context) (ModelSettings, error) {
 	return ModelSettings{}, nil
