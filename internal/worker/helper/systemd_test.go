@@ -22,9 +22,10 @@ import (
 
 // fakePi stands in for Pi. It starts processes the way Pi's tools do, in the background, in a session of their own
 // and orphaned, and lists their PIDs after its own in FAKE_PI_PIDS. Then it says where it runs and echoes its input.
-// With FAKE_PI_IGNORE_TERM set, it ignores SIGTERM.
+// With FAKE_PI_IGNORE_TERM set, it ignores SIGTERM, and with FAKE_PI_ENV, it writes its environment there first.
 const fakePi = `#!/bin/sh
 [ -z "$FAKE_PI_IGNORE_TERM" ] || trap '' TERM
+[ -z "$FAKE_PI_ENV" ] || env > "$FAKE_PI_ENV"
 echo $$ > "$FAKE_PI_PIDS"
 sleep 1000 &
 echo $! >> "$FAKE_PI_PIDS"
@@ -90,6 +91,12 @@ type unitHelper struct {
 
 func startUnitHelper(t *testing.T, lease time.Duration) *unitHelper {
 	t.Helper()
+	return startUnitHelperWith(t, lease, nil, "--home", os.Getenv("GRIPI_TEST_VIEW_HOME"))
+}
+
+// startUnitHelperWith starts the helper with env in its environment and flags after its usual ones.
+func startUnitHelperWith(t *testing.T, lease time.Duration, env []string, flags ...string) *unitHelper {
+	t.Helper()
 	if exec.Command("systemd-run", "--user", "--pipe", "--quiet", "true").Run() != nil {
 		t.Skip("needs a systemd user manager")
 	}
@@ -102,9 +109,13 @@ func startUnitHelper(t *testing.T, lease time.Duration) *unitHelper {
 	unit := make([]byte, 6)
 	rand.Read(unit)
 	runtimeDir := filepath.Join(folder, "run")
-	command := exec.Command("systemd-run", "--user", "--pipe", "--quiet", "--collect", "--unit", "gripi-test-"+hex.EncodeToString(unit),
-		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL", "-p", "NotifyAccess=all",
-		gripi, "worker", "serve", "--lease", lease.String(), "--runtime-dir", runtimeDir, "--home", os.Getenv("GRIPI_TEST_VIEW_HOME"))
+	arguments := []string{"--user", "--pipe", "--quiet", "--collect", "--unit", "gripi-test-" + hex.EncodeToString(unit),
+		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL", "-p", "NotifyAccess=all"}
+	for _, variable := range env {
+		arguments = append(arguments, "--setenv="+variable)
+	}
+	arguments = append(arguments, gripi, "worker", "serve", "--lease", lease.String(), "--runtime-dir", runtimeDir)
+	command := exec.Command("systemd-run", append(arguments, flags...)...)
 	command.Stderr = os.Stderr
 	input, err := command.StdinPipe()
 	if err != nil {
@@ -149,6 +160,25 @@ func (unit *unitHelper) createSession(id string, env ...string) []int {
 	}
 	unit.t.Fatal("the fake Pi did not start its processes")
 	return nil
+}
+
+// environment starts the fake Pi for a session with env on top of its own variables, and returns the value of each
+// variable that Pi got.
+func (unit *unitHelper) environment(id string, env ...string) map[string]string {
+	unit.t.Helper()
+	path := filepath.Join(unit.t.TempDir(), "env")
+	unit.createSession(id, append(env, "FAKE_PI_ENV="+path)...)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		unit.t.Fatal(err)
+	}
+	variables := map[string]string{}
+	for _, line := range strings.Split(string(contents), "\n") {
+		if name, value, ok := strings.Cut(line, "="); ok {
+			variables[name] = value
+		}
+	}
+	return variables
 }
 
 // attach runs `gripi worker attach` for a session and returns what passes its RPC through.

@@ -88,7 +88,10 @@ func serveHelper(t *testing.T, options helper.Options) (*fakeMain, *fakeClock) {
 func (main *fakeMain) next() helper.Message {
 	main.t.Helper()
 	select {
-	case message := <-main.messages:
+	case message, ok := <-main.messages:
+		if !ok {
+			main.t.Fatal("the helper stopped")
+		}
 		return message
 	case <-time.After(2 * time.Second):
 		main.t.Fatal("no message from the helper")

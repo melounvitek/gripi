@@ -45,8 +45,8 @@ const closeTimeout = 5 * time.Second
 // releaseTimeout is how long session.release waits for a session's processes to die once it has killed them.
 const releaseTimeout = 5 * time.Second
 
-// create starts Pi for a session, in the session's cgroup, with the helper's environment, request.Env and
-// GRIPI_WORKER_SOCKET.
+// create starts Pi for a session, in the session's cgroup, with the helper's environment, request.Env, the helper's
+// DOCKER_HOST if it serves one, and GRIPI_WORKER_SOCKET.
 func (s *server) create(request Message) error {
 	id := request.Session
 	if err := checkSession(id); err != nil {
@@ -87,6 +87,9 @@ func (s *server) create(request Message) error {
 	current.cwd = request.Cwd
 
 	environment := append(append(os.Environ(), request.Env...), "GRIPI_WORKER_SOCKET="+current.listeners[1].Addr().String())
+	if s.docker != "" {
+		environment = append(environment, "DOCKER_HOST="+s.docker)
+	}
 	path, err := lookPath(request.Args[0], environment)
 	if err != nil {
 		return err

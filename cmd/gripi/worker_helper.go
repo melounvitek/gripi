@@ -5,11 +5,13 @@ import (
 	"flag"
 	"io"
 	"log"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
 	"github.com/melounvitek/gripi/internal/worker/auth"
+	"github.com/melounvitek/gripi/internal/worker/dockerproxy"
 	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/view"
 )
@@ -21,8 +23,10 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	lease := flags.Duration("lease", helper.DefaultLease, "")
 	runtimeDir := flags.String("runtime-dir", "", "")
 	home := flags.String("home", "", "")
-	// The cgroup that systemd delegated to the unit, which serve passes on to itself in the view.
+	// The cgroup that systemd delegated to the unit, and the worker user's own home folder, which serve passes on to
+	// itself in the view.
 	cgroup := flags.String("cgroup", "", "")
+	ownHome := flags.String("own-home", "", "")
 	if positional, err := parseArguments(flags, arguments); err != nil {
 		return usageError(stderr, "worker", err.Error())
 	} else if len(positional) > 0 {
@@ -38,10 +42,14 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 			return failure(stderr, "worker", err)
 		}
 	}
-	if view.Needed(*home) {
+	if *ownHome == "" && view.Needed(*home) {
+		own, err := os.UserHomeDir()
+		if err != nil {
+			return failure(stderr, "worker", err)
+		}
 		// Only the unit's first process can take the delegated cgroup, as its only one. The processes of the view and
 		// the sessions stay in the unit, where systemd's watchdog and KillMode=control-group reach them.
-		code, err := view.Run(*home, append([]string{"/proc/self/exe", "worker", "serve", "--cgroup", options.Cgroup}, arguments...), stdin, stdout, stderr)
+		code, err := view.Run(*home, append([]string{"/proc/self/exe", "worker", "serve", "--cgroup", options.Cgroup, "--own-home", own}, arguments...), stdin, stdout, stderr)
 		if err != nil {
 			return failure(stderr, "worker", err)
 		}
@@ -57,11 +65,14 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer stop()
 	options.ApplyAuth = func(path, contents string) error { return auth.WriteLocked(ctx, path, []byte(contents)) }
-	// Docker, wired in after internal/worker/dockerproxy is merged: when serve runs in the view (*home set and
-	// --cgroup given), start dockerproxy.Serve(ctx, dockerproxy.Options{Listen: <RuntimeDir>/docker.sock, Upstream:
-	// dockerproxy.Upstream(os.Environ()), From: *home, To: the worker user's own home folder}) here, which the first
-	// serve, outside the view, can pass on next to --cgroup, and add DOCKER_HOST=unix://<that socket> to every session's
-	// environment, after main's variables.
+	if *ownHome != "" {
+		// The Docker daemon runs outside the view, so the sessions get a socket that moves the host paths in their
+		// requests from main's home folder to the worker user's own, and passes them on to the helper's Docker.
+		upstream := dockerproxy.Upstream(os.Environ())
+		options.Docker = func(ctx context.Context, socket string) error {
+			return dockerproxy.Serve(ctx, dockerproxy.Options{Listen: socket, Upstream: upstream, From: *home, To: *ownHome})
+		}
+	}
 	if err := helper.Serve(ctx, stdin, stdout, options); err != nil {
 		return failure(stderr, "worker", err)
 	}

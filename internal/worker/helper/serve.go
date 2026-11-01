@@ -86,6 +86,9 @@ type Options struct {
 	Mirror Mirror
 	// ApplyAuth writes a login file for auth.apply. Without it, auth.apply fails.
 	ApplyAuth func(path, contents string) error
+	// Docker, when set, serves Docker's API for the sessions on socket, in RuntimeDir, until ctx ends, and every
+	// session's DOCKER_HOST names socket, also when Docker fails.
+	Docker func(ctx context.Context, socket string) error
 	// Clock is CLOCK_BOOTTIME when nil. It must keep counting while the machine is suspended, so a lease can't
 	// outlast what main allows.
 	Clock func() time.Duration
@@ -104,6 +107,7 @@ type server struct {
 	stopping bool // no session starts once Serve has started to kill them
 	sessions map[string]*session
 	mirrors  map[string]*mirroredUnit // by the unit's main folder
+	docker   string                   // the sessions' DOCKER_HOST, if Options.Docker serves it
 }
 
 // Serve runs the control protocol on input and output. It returns nil when main closes input, ErrLeaseExpired when main
@@ -135,6 +139,23 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	}
 	defer mirrors.Close()
 	go s.serveMirrors(mirrors)
+	if options.Docker != nil {
+		// The dot keeps it apart from the sessions' sockets.
+		socket := filepath.Join(options.RuntimeDir, "docker.api.sock")
+		s.docker = "unix://" + socket
+		docker, stopDocker := context.WithCancel(ctx)
+		dockerStopped := make(chan struct{})
+		go func() {
+			defer close(dockerStopped)
+			if err := options.Docker(docker, socket); docker.Err() == nil {
+				log.Printf("serve Docker for the sessions: %v", err)
+			}
+		}()
+		defer func() {
+			stopDocker()
+			<-dockerStopped
+		}()
+	}
 	defer close(s.done)
 	go s.write(output)
 	closed := make(chan struct{})
