@@ -208,18 +208,11 @@ func (host *hostServer) runMirror(hello Message, reader io.Reader, connection ne
 		current.attached = true
 	}
 	host.mu.Unlock()
-	if !replyHello(connection, err) {
+	if err != nil {
+		replyHello(connection, err)
 		return
 	}
-	defer close(current.done)
-	stream := struct {
-		io.Reader
-		io.Writer
-		io.Closer
-	}{reader, connection, connection}
-	if err := current.source.Run(current.ctx, stream); err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("mirror of move %s: %v", host.config.Move, err)
-	}
+	current.run(&host.mu, connection, reader, "move "+host.config.Move)
 }
 
 // release has main take the last barrier of each mirror, then stops them, once they have stopped. A mirror that

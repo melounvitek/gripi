@@ -37,9 +37,14 @@ type move struct {
 	Private    []string  `json:"private"`
 	Created    time.Time `json:"created"`
 
-	id   string
+	id     string
+	closed bool // once released or deleted, which server.mu guards, no session starts in the move
+
 	mu   sync.Mutex // held while the host starts, answers move.release or stops
 	host *hostProcess
+	// What the last move.release that reached the host answered, for a retry.
+	released    Barriers
+	releaseFail error
 }
 
 // Barriers are the last barriers that main applied of a move's mirrors, which move.release answers; 0 for a mirror
@@ -224,37 +229,41 @@ func (s *server) seed(id string) error {
 	return err
 }
 
-// releaseMove kills every process of a move's sessions, then has main take the last barrier of each of the move's
-// mirrors, which have kept running meanwhile, and stops them.
+// releaseMove keeps new sessions out of a move, kills every process of its sessions, then has main take the last
+// barrier of each of the move's mirrors, which have kept running meanwhile, and stops them. A retry answers the same,
+// unless the mirrors started again, as after a failed release, whose last barriers it takes then.
 func (s *server) releaseMove(id string) (Barriers, error) {
 	m, err := s.move(id)
 	if err != nil {
 		return Barriers{}, err
 	}
-	if err := s.release(releaseTimeout, s.sessionsOf(id)...); err != nil {
+	if err := s.release(releaseTimeout, s.closeMove(m)...); err != nil {
 		return Barriers{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.host == nil {
-		return Barriers{}, nil
+		return m.released, m.releaseFail
 	}
 	answer, err := m.host.call(context.Background(), Message{Type: "release"})
 	if stopped := s.stopHost(m); err == nil {
 		err = stopped
 	}
-	if err != nil {
-		return Barriers{}, err
+	m.released, m.releaseFail = Barriers{}, err
+	if err == nil {
+		m.released = *answer.Barriers
 	}
-	return *answer.Barriers, nil
+	return m.released, m.releaseFail
 }
 
-func (s *server) sessionsOf(move string) []string {
+// closeMove keeps new sessions from starting in the move, and returns those that run in it.
+func (s *server) closeMove(m *move) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	m.closed = true
 	var ids []string
 	for id, current := range s.sessions {
-		if current.move == move {
+		if current.move == m.id {
 			ids = append(ids, id)
 		}
 	}
@@ -271,7 +280,7 @@ func (s *server) deleteMove(id string) error {
 	if err != nil {
 		return err
 	}
-	if len(s.sessionsOf(id)) > 0 {
+	if len(s.closeMove(m)) > 0 {
 		return fmt.Errorf("move %s still runs sessions; release it first", id)
 	}
 	s.cache.Lock()

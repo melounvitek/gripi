@@ -284,15 +284,52 @@ func TestReleaseTakesTheFinalBarriersOnceTheMovesProcessesHaveStopped(t *testing
 			t.Fatal("a mirror still runs after move.release")
 		}
 	}
-	counter := read(rig.copy("m1", filepath.Join(repository, "counter")))
-	if counter == "" || read(shadow+filepath.Join(repository, "counter")) != counter {
-		t.Fatalf("main has the counter at %q, the worker at %q", read(shadow+filepath.Join(repository, "counter")), counter)
+	// The writer may die between emptying the file and writing it again.
+	counter, err := os.ReadFile(rig.copy("m1", filepath.Join(repository, "counter")))
+	if onMain := read(shadow + filepath.Join(repository, "counter")); err != nil || onMain != string(counter) {
+		t.Fatalf("main has the counter at %q, the worker at %q, %v", onMain, counter, err)
 	}
 	if session := read(file); session == "" || read(main+file) != session {
 		t.Fatalf("main's copy of the session has %d lines, the worker's %d", strings.Count(read(main+file), "\n"), strings.Count(session, "\n"))
 	}
 	if _, err := net.Dial("unix", filepath.Join(rig.runtimeDir, "m1.move.sock")); err == nil {
 		t.Fatal("the move's mirrors still listen")
+	}
+}
+
+// A release that couldn't take a mirror's last barrier says so until the mirror's channel works again, and no session
+// starts in a released move.
+func TestAReleaseThatMissedTheLastChangesKeepsSayingSo(t *testing.T) {
+	rig := startMoveHelper(t, helper.DefaultLease)
+	private := rig.privateRoot()
+	shadow, repository := rig.shadow(private, "first\n")
+	rig.move("m1", private, shadow, repository)
+	rig.session("s1", "m1", repository)
+	if response := rig.request(map[string]any{"type": "mirror.start", "move": "m1"}); !response.OK {
+		t.Fatalf("mirror.start = %+v", response)
+	}
+
+	for range 2 {
+		if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); response.OK || !strings.Contains(response.Error, "isn't connected") {
+			t.Fatalf("move.release without main's copy = %+v", response)
+		}
+	}
+	create := map[string]any{"type": "session.create", "session": "s2", "move": "m1", "cwd": repository, "args": []string{rig.pi}}
+	if response := rig.request(create); response.OK || !strings.Contains(response.Error, "released") {
+		t.Fatalf("session.create in a released move = %+v", response)
+	}
+	repositoryDestination, _ := rig.destinations(shadow, t.TempDir(), filepath.Join(t.TempDir(), "s1.jsonl"))
+	served := rig.mirror("m1", "", repositoryDestination)
+	for repositoryDestination.Checkpoint().Barrier == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	for range 2 {
+		if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); !response.OK || response.Barriers.Repository == 0 {
+			t.Fatalf("move.release once main's copy is connected = %+v", response)
+		}
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("main's copy ended with %v", err)
 	}
 }
 

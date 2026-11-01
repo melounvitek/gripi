@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/melounvitek/gripi/internal/worker/mirror"
@@ -138,7 +139,20 @@ func (s *server) runMirror(connection net.Conn) {
 		current.attached = true
 	}
 	s.mu.Unlock()
-	if !replyHello(connection, err) {
+	if err != nil {
+		replyHello(connection, err)
+		return
+	}
+	current.run(&s.mu, connection, reader, hello.Path)
+}
+
+// run runs the Source over main's channel, which the caller took for it, with mu held, once main has the answer.
+func (current *mirroredUnit) run(mu *sync.Mutex, connection net.Conn, reader io.Reader, name string) {
+	if !replyHello(connection, nil) {
+		// Main never learnt of it, so another channel may take it.
+		mu.Lock()
+		current.attached = false
+		mu.Unlock()
 		return
 	}
 	defer close(current.done)
@@ -148,7 +162,7 @@ func (s *server) runMirror(connection net.Conn) {
 		io.Closer
 	}{reader, connection, connection}
 	if err := current.source.Run(current.ctx, stream); err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("mirror of %s: %v", hello.Path, err)
+		log.Printf("mirror of %s: %v", name, err)
 	}
 }
 

@@ -71,6 +71,9 @@ func (s *server) create(request Message, inMove *move) error {
 	}
 	var moveID string
 	if inMove != nil {
+		if inMove.closed {
+			return fmt.Errorf("move %s is released", inMove.id)
+		}
 		moveID = inMove.id
 	}
 	current := s.sessions[id]
