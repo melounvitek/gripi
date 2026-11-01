@@ -509,6 +509,47 @@ func TestPisAndGripisOwnFoldersNeverMoveToAWorker(t *testing.T) {
 	}
 }
 
+// Two repositories on workers, or on their way to one, never share a folder: no folder of one, its main folder, a
+// worktree or its Git folder, holds or is in a folder of the other.
+func TestAMoveRefusesARepositoryThatSharesAFolderWithAnother(t *testing.T) {
+	base := t.TempDir()
+	project, feature := filepath.Join(base, "project"), filepath.Join(base, "worktrees", "feature")
+	git(t, base, "init", "-q", project)
+	git(t, project, "commit", "-q", "--allow-empty", "-m", "first")
+	git(t, project, "worktree", "add", "-q", feature)
+	stop := func(func(string) bool) error {
+		t.Error("a refused move stopped the sessions")
+		return errors.New("stopped")
+	}
+	for _, test := range []struct {
+		other  mirror.Unit
+		moving bool
+	}{
+		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{filepath.Join(project, "vendor")}}},
+		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{feature}}},
+		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{filepath.Dir(feature)}}},
+		{other: mirror.Unit{Main: filepath.Join(feature, "vendor")}},
+		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{filepath.Join(project, "vendor")}}, moving: true},
+		{other: mirror.Unit{Main: "/work/other", Worktrees: []string{feature}}, moving: true},
+	} {
+		manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: t.TempDir()})
+		if test.moving {
+			done, err := manager.startMoving(test.other)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer done()
+		} else if err := manager.options.Placements.Add(Placement{Worker: "nuc", Unit: test.other}); err != nil {
+			t.Fatal(err)
+		}
+
+		err := manager.Move(context.Background(), project, "beelink", stop)
+		if !refused(err) || !strings.Contains(err.Error(), project) || !strings.Contains(err.Error(), test.other.Main) {
+			t.Errorf("Move while %+v is on a worker or moving (%v) = %v", test.other, test.moving, err)
+		}
+	}
+}
+
 func TestMainsCopiesWriteOnlyInTheFoldersOfTheirUnit(t *testing.T) {
 	manager := newTestManager(t, ManagerOptions{
 		Store: fakeStore{}, Pi: Pi{AgentDir: "/home/me/.pi/agent"}, StateDir: "/home/me/.pi/gripi", GatewayPaths: []string{"/home/me/.config/gripi"},

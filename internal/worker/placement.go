@@ -55,13 +55,14 @@ func (placements *Placements) All() []Placement {
 	return slices.Clone(placements.list)
 }
 
-// Add records a placement, unless its unit overlaps one placed already.
+// Add records a placement, unless a folder of its unit is or is in a folder of a unit placed already, or the other way
+// round.
 func (placements *Placements) Add(placement Placement) error {
 	placements.mu.Lock()
 	defer placements.mu.Unlock()
 	for _, existing := range placements.list {
-		if existing.Unit.Contains(placement.Unit.Main) || placement.Unit.Contains(existing.Unit.Main) {
-			return fmt.Errorf("%s is on worker %s already", existing.Unit.Main, existing.Worker)
+		if folder, found := shared(unitFolders(placement.Unit), unitFolders(existing.Unit)); found {
+			return refuse("%s and %s, which is on worker %s, would share %s", placement.Unit.Main, existing.Unit.Main, existing.Worker, folder)
 		}
 	}
 	return placements.save(append(slices.Clone(placements.list), placement))

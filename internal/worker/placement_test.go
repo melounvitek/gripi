@@ -35,6 +35,9 @@ func TestPlacementsFindTheUnitOfAFolderAndPersist(t *testing.T) {
 	if err := reloaded.Add(Placement{Worker: "other", Unit: mirror.Unit{Main: "/work/project/src"}}); err == nil {
 		t.Fatal("a folder inside a placed unit was placed again")
 	}
+	if err := reloaded.Add(Placement{Worker: "other", Unit: mirror.Unit{Main: "/work/.worktrees"}}); !refused(err) {
+		t.Fatalf("Add of a folder that holds a placed worktree = %v", err)
+	}
 
 	if err := reloaded.Remove(unit.Main); err != nil {
 		t.Fatal(err)

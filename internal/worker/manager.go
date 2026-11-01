@@ -715,10 +715,8 @@ func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root str
 		if slices.Contains(folders, root) {
 			return nil
 		}
-		for _, other := range manager.options.Placements.All() {
-			if other.Unit.Main != unit.Main && slices.ContainsFunc(unitFolders(other.Unit), func(folder string) bool { return holds(folder, root) || holds(root, folder) }) {
-				return fmt.Errorf("it holds or is in %s, which is on worker %s", other.Unit.Main, other.Worker)
-			}
+		if err := manager.claim(unit.Main, []string{root}); err != nil {
+			return err
 		}
 		info, err := os.Lstat(root)
 		if errors.Is(err, os.ErrNotExist) {
@@ -763,6 +761,49 @@ func (manager *Manager) ownFolder(folder string) string {
 // holds reports whether path is folder or in it.
 func holds(folder, path string) bool {
 	return path == folder || strings.HasPrefix(path, folder+"/")
+}
+
+// shared returns a folder that is or is in both a folder among folders and one among others, if any.
+func shared(folders, others []string) (string, bool) {
+	for _, folder := range folders {
+		for _, other := range others {
+			if holds(folder, other) {
+				return other, true
+			}
+			if holds(other, folder) {
+				return folder, true
+			}
+		}
+	}
+	return "", false
+}
+
+// claim refuses the folders that the repository whose main folder is main would take, roots such as its main folder
+// and worktrees, when another repository on a worker, or moving to one, owns one of them: no root of one may be or be
+// in a root of the other.
+func (manager *Manager) claim(main string, roots []string) error {
+	type owner struct {
+		unit  mirror.Unit
+		where string
+	}
+	var owners []owner
+	for _, placement := range manager.options.Placements.All() {
+		owners = append(owners, owner{placement.Unit, "on worker " + placement.Worker})
+	}
+	manager.mu.Lock()
+	for _, unit := range manager.movingUnits {
+		owners = append(owners, owner{unit, "moving to a worker"})
+	}
+	manager.mu.Unlock()
+	for _, owner := range owners {
+		if owner.unit.Main == main {
+			continue
+		}
+		if folder, found := shared(roots, unitFolders(owner.unit)); found {
+			return refuse("%s and %s, which is %s, would share %s", main, owner.unit.Main, owner.where, folder)
+		}
+	}
+	return nil
 }
 
 // unitFolders are a unit's main folder, worktrees and Git folder.
@@ -1014,6 +1055,10 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 		return err
 	}
 	defer done()
+	// Once the unit is moving, a move of another unit with a shared folder is refused too.
+	if err := manager.claim(unit.Main, unitFolders(unit)); err != nil {
+		return err
+	}
 	if err := stop(unit.Contains); err != nil {
 		return err
 	}
