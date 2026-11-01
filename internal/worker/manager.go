@@ -370,7 +370,7 @@ func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mir
 		}
 	}
 	if sessions != nil && sessions.running() {
-		if !slices.ContainsFunc(manager.sessionFolders(unit, worker.name), func(folder string) bool { return !sessions.unit.Contains(folder) }) {
+		if folders, _ := manager.sessionFolders(unit, worker.name); !slices.ContainsFunc(folders, func(folder string) bool { return !sessions.unit.Contains(folder) }) {
 			return nil
 		}
 		// The worker's helper watches only the folders that its mirror started with.
@@ -578,7 +578,11 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 	}
 	unit := repository
 	if sessions {
-		folders := manager.sessionFolders(repository, worker.name)
+		folders, cwds := manager.sessionFolders(repository, worker.name)
+		// The worker's helper makes the folders that the worker doesn't have yet.
+		if err := manager.rememberSessions(repository.Main, worker.name, cwds); err != nil {
+			return err
+		}
 		unit = mirror.Unit{Main: folders[0], Worktrees: folders[1:]}
 	}
 	folder := manager.mirrorFolder(unit.Main)
@@ -592,9 +596,6 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, reposit
 			if !unit.Contains(root) {
 				unit.Worktrees = append(unit.Worktrees, root)
 			}
-		}
-		if err := manager.updateWorkerCopy(repository.Main, worker.name, func(kept *workerCopy) { kept.Sessions = unitFolders(unit) }); err != nil {
-			return err
 		}
 	}
 	destination.Applied = manager.applied(repository, sessions)
@@ -1048,8 +1049,9 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 	return err
 }
 
-// copyToWorker copies a unit and its sessions' folders to the worker, then starts their mirrors and waits until
-// main's copies have their first barriers.
+// copyToWorker copies a unit and its sessions' folders to the worker, and keeps aside there the worker's copies of
+// sessions that are no longer the unit's, then starts the mirrors and waits until main's copies have their first
+// barriers.
 func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit mirror.Unit) error {
 	conn, err := manager.connection(worker)
 	if err != nil {
@@ -1074,10 +1076,15 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 		}
 		return nil
 	}
+	folders, cwds := manager.sessionFolders(unit, worker.name)
+	// The worker keeps what a move that fails later copied, which the next move there must bring up to date.
+	if err := manager.rememberSessions(unit.Main, worker.name, cwds); err != nil {
+		return err
+	}
 	if err := copyFolders(unit); err != nil {
 		return err
 	}
-	for _, folder := range manager.sessionFolders(unit, worker.name) {
+	for _, folder := range folders {
 		// The worker's copy of a folder that main no longer has may hold sessions that were deleted here.
 		if err := os.MkdirAll(folder, 0700); err != nil {
 			return err
@@ -1086,10 +1093,32 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 			return err
 		}
 	}
-	if isStale {
-		if err := manager.updateWorkerCopy(unit.Main, worker.name, func(kept *workerCopy) { kept.Stale = false }); err != nil {
-			return err
+	// The worker's copies of sessions that are no longer the unit's, which its mirror leaves alone, go aside there,
+	// unless they are another unit's there.
+	var others []string
+	for _, cwd := range copies[worker.name].SessionCwds {
+		if manager.owns(unit, cwd) {
+			continue
 		}
+		others = append(others, cwd)
+		folder := sessionFolder(manager.options.SessionsRoot, cwd)
+		if slices.Contains(folders, folder) || manager.heldOn(worker.name, unit, cwd) {
+			continue
+		}
+		aside := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".gripi-aside", now, folder)
+		moved, err := runScript(ctx, conn.Pool, nil, `[ ! -e "$1" ] || { mkdir -p "$(dirname "$2")" && mv "$1" "$2" && echo moved; }`, folder, aside)
+		if err != nil {
+			return fmt.Errorf("keep aside the copy of %s on worker %s: %w", folder, worker.name, err)
+		}
+		if moved != "" {
+			log.Printf("the sessions that started in %s are no longer those of %s; the move kept their copies on worker %s in %s", cwd, unit.Main, worker.name, aside)
+		}
+	}
+	if err := manager.updateWorkerCopy(unit.Main, worker.name, func(kept *workerCopy) {
+		kept.Stale = false
+		kept.SessionCwds = slices.DeleteFunc(kept.SessionCwds, func(cwd string) bool { return slices.Contains(others, cwd) })
+	}); err != nil {
+		return err
 	}
 	for _, sessions := range []bool{false, true} {
 		main := unit.Main
@@ -1215,9 +1244,10 @@ type workerCopy struct {
 	// Stale is set when the repository continued on main without the worker, whose copies of the repository and of its
 	// sessions may have changes that main never got.
 	Stale bool `json:"stale,omitempty"`
-	// Sessions are the folders of the repository's sessions that the worker has, which the next move there brings up
-	// to date, also those whose sessions were deleted here meanwhile.
-	Sessions []string `json:"sessions,omitempty"`
+	// SessionCwds are folders that the repository's sessions on the worker started in, whose session folders the
+	// worker has. The next move there brings those folders up to date, also those whose sessions were deleted here
+	// meanwhile, while they are the repository's, and keeps the worker's copies of the others aside.
+	SessionCwds []string `json:"session_cwds,omitempty"`
 }
 
 // workerCopies returns what workers keep of the repository whose main folder is main, by the workers' names.
@@ -1248,6 +1278,40 @@ func (manager *Manager) updateWorkerCopy(main, name string, update func(kept *wo
 	return state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Write(contents)
 }
 
+// rememberSessions records that the worker of a name has, or is getting, the session folders of cwds, folders that
+// sessions of the repository whose main folder is main started in.
+func (manager *Manager) rememberSessions(main, name string, cwds []string) error {
+	return manager.updateWorkerCopy(main, name, func(kept *workerCopy) {
+		for _, cwd := range cwds {
+			if !slices.Contains(kept.SessionCwds, cwd) {
+				kept.SessionCwds = append(kept.SessionCwds, cwd)
+			}
+		}
+	})
+}
+
+// owns reports whether the sessions that started in cwd are a unit's: cwd is in the unit, and in no other unit on a
+// worker.
+func (manager *Manager) owns(unit mirror.Unit, cwd string) bool {
+	return unit.Contains(cwd) && !slices.ContainsFunc(manager.options.Placements.All(), func(other Placement) bool {
+		return other.Unit.Main != unit.Main && other.Unit.Contains(cwd)
+	})
+}
+
+// heldOn reports whether a unit other than unit that is on the worker of a name, or on its way there, holds cwd, so
+// that the worker's copies of the sessions that started in cwd are that unit's.
+func (manager *Manager) heldOn(name string, unit mirror.Unit, cwd string) bool {
+	holds := func(worker string, other mirror.Unit) bool {
+		return worker == name && other.Main != unit.Main && other.Contains(cwd)
+	}
+	if slices.ContainsFunc(manager.options.Placements.All(), func(placement Placement) bool { return holds(placement.Worker, placement.Unit) }) {
+		return true
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	return slices.ContainsFunc(manager.copying, func(copying copying) bool { return holds(copying.worker, copying.unit) })
+}
+
 // goneAt is when the worker of a name must have stopped the sessions of every connection that main lost, including
 // those of a gateway before this one, which stopped answering before this one started.
 func (manager *Manager) goneAt(name string) time.Time {
@@ -1260,14 +1324,14 @@ func (manager *Manager) goneAt(name string) time.Time {
 	return goneAt
 }
 
-// sessionFolders are Pi's folders of the sessions in a unit on the worker of a name, the main folder's first: one for
-// each of its worktrees, one for each other folder in it that a session started in or is starting in, and those that
-// the worker has from earlier.
-func (manager *Manager) sessionFolders(unit mirror.Unit, worker string) []string {
-	var folders []string
+// sessionFolders are Pi's folders of the sessions in a unit on the worker of a name, the main folder's first, with a
+// folder that sessions in each started in at the same index of cwds: one for each of the unit's worktrees, one for
+// each other folder in it that a session started in or is starting in, and one for each that the worker has from
+// earlier and that is still the unit's.
+func (manager *Manager) sessionFolders(unit mirror.Unit, worker string) (folders, cwds []string) {
 	add := func(cwd string) {
 		if folder := sessionFolder(manager.options.SessionsRoot, cwd); !slices.Contains(folders, folder) {
-			folders = append(folders, folder)
+			folders, cwds = append(folders, folder), append(cwds, cwd)
 		}
 	}
 	for _, root := range append([]string{unit.Main}, unit.Worktrees...) {
@@ -1281,9 +1345,10 @@ func (manager *Manager) sessionFolders(unit mirror.Unit, worker string) []string
 		}
 	}
 	if copies, err := manager.workerCopies(unit.Main); err == nil {
-		for _, folder := range copies[worker].Sessions {
-			if !slices.Contains(folders, folder) {
-				folders = append(folders, folder)
+		for _, cwd := range copies[worker].SessionCwds {
+			// Another repository's sessions may have started there since, whose copies on main only it may write.
+			if manager.owns(unit, cwd) {
+				add(cwd)
 			}
 		}
 	}
@@ -1299,7 +1364,7 @@ func (manager *Manager) sessionFolders(unit mirror.Unit, worker string) []string
 			add(cwd)
 		}
 	}
-	return folders
+	return folders, cwds
 }
 
 // sessionFolder is where Pi keeps the sessions started in cwd, as Pi names it.

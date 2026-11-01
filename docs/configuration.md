@@ -344,7 +344,7 @@ Pi there loads a second Gripi extension, which holds each tool result and `!` co
 
 Treat main’s copy as read-only while the repository is on a worker. Changes made to it anyway don’t reach the worker. Main’s copy takes the worker’s changes only in the repository’s folders and in worktrees made on the worker, and refuses a worktree made there that holds or is in Pi’s or Gripi’s own folders or another repository on a worker. A refused worktree stops confirmations. When the worker’s version of a file that changed on main replaces or deletes it, main’s version is first saved in a folder under `mirrors/` in Gripi’s state folder (see [gateway state](#gateway-state)), at its full path, and the conversation names that folder until you dismiss the notice. Git’s index alone doesn’t count, so `git status` on main is harmless.
 
-`gripi worker return <session or folder>`, or **Continue on main** in the palette, brings the repository back. It stops everything that the repository’s sessions run on the worker, including background processes, takes their last changes, and runs the sessions on main again. The worker keeps its copy, which the next move updates.
+`gripi worker return <session or folder>`, or **Continue on main** in the palette, brings the repository back. It stops everything that the repository’s sessions run on the worker, including background processes, takes their last changes, and runs the sessions on main again. The worker keeps its copy, which the next move updates. When sessions there started in a folder that is no longer the repository’s, such as a removed worktree, the next move keeps the worker’s copies of them aside, in `.<folder>.gripi-aside/` next to their Pi session folder there.
 
 ### Losing a worker
 
