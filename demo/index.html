@@ -329,6 +329,8 @@
     .worker-badge-state:empty { display: none; }
     /* The folder that holds main's saved files is a long path, which wraps rather than push Dismiss away. */
     [data-worker-notice] > div { min-width: 0; overflow-wrap: anywhere; }
+    .worker-notice-details summary { width: fit-content; color: var(--muted); font: 0.78rem var(--mono); cursor: pointer; }
+    .worker-notice-details pre { max-height: 12rem; overflow: auto; margin: 0.4rem 0 0; color: var(--muted); font: 0.74rem/1.45 var(--mono); white-space: pre-wrap; }
     /* Picking a worker says what moves; forwarding a port says where it goes. */
     .worker-card { width: min(40rem, 100%); }
     .picker-row.worker-picker-row { grid-template-columns: 2ch 10ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: baseline; font-family: var(--mono); }

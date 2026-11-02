@@ -241,30 +241,25 @@ export class WorkerController {
     return path.split("/").filter(Boolean).pop() || "the repository";
   }
 
-  // What the session's returns kept aside, where main kept its own version: the worker's files in the latest return's
-  // folder, and its commits under recovery refs.
+  // What the session's returns kept aside, where main kept its own version: the paths and where the worker's
+  // versions are, with the details of each return, which say why.
   renderNotice() {
     const { notice } = this.elements;
     if (!notice) return;
     const notices = this.notices;
     notice.hidden = !notices.length;
     if (!notices.length) return;
-    const items = notices.flatMap((each) => (each.items || []).map((item) => ({ ...item, repository: each.repository })));
-    const refs = items.filter((item) => item.ref).map((item) => item.ref);
-    const files = items.length - refs.length;
-    const worker = notices.at(-1).worker;
-    const shown = items.map(({ path, repository }) => (path.startsWith(`${repository}/`) ? path.slice(repository.length + 1) : this.callbacks.homePath(path)));
-    const where = [
-      files && `${worker}'s version${files === 1 ? " is" : "s are"} in ${this.asideFolders()}, at ${files === 1 ? "its path" : "their paths"}`,
-      refs.length && `its commit${refs.length === 1 ? " is" : "s are"} kept as ${list(refs, 2)}`
-    ].filter(Boolean);
-    notice.querySelector("[data-worker-notice-title]").textContent = `${items.length} change${items.length === 1 ? "" : "s"} from ${worker} kept aside.`;
-    notice.querySelector("[data-worker-notice-text]").textContent = `Main kept its own ${list(shown, 3)}. ${where.join("; ")}.`;
+    const shown = notices.flatMap(({ repository, items }) => items.map(({ path }) => (path.startsWith(`${repository}/`) ? path.slice(repository.length + 1) : this.callbacks.homePath(path))));
+    const folders = this.asideFolders();
+    const workers = [...new Set(notices.map(({ worker }) => worker))];
+    notice.querySelector("[data-worker-notice-title]").textContent = `${shown.length} change${shown.length === 1 ? "" : "s"} from ${list(workers, 2)} kept aside.`;
+    notice.querySelector("[data-worker-notice-text]").textContent =
+      `Main kept its own ${list(shown, 3)}. The worker's versions, if any, are in ${list([...folders, ...notices.flatMap(({ refs }) => refs)], folders.length + 2)}.`;
+    notice.querySelector("[data-worker-notice-details]").textContent = notices.map(({ text }) => text).join("\n\n");
   }
 
   asideFolders() {
-    const earlier = this.notices.length - 1;
-    return `${this.callbacks.homePath(this.notices.at(-1).aside)}${earlier ? ` and the folder${earlier === 1 ? "" : "s"} of ${earlier} earlier return${earlier === 1 ? "" : "s"}` : ""}`;
+    return [...new Set(this.notices.map(({ aside }) => this.callbacks.homePath(aside)))];
   }
 
   keydown(event) {
@@ -320,8 +315,8 @@ export class WorkerController {
   }
 
   async dismissNotices() {
-    const { worker } = this.notices.at(-1);
-    if (!this.window.confirm(`Dismissing also deletes what the return kept aside: ${worker}'s versions in ${this.asideFolders()} and the refs that keep its commits. Main's files stay as they are.`)) return;
+    const folders = this.asideFolders();
+    if (!this.window.confirm(`Dismissing also deletes what was kept aside: the worker's versions in ${list(folders, folders.length)} and its recovery refs. Main's files stay as they are.`)) return;
     const message = await this.post("/workers/dismiss_notices", { session: this.callbacks.sessionPath() });
     if (message) {
       this.callbacks.failed(message);

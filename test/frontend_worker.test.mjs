@@ -33,8 +33,9 @@ function fixture({ replies = [] } = {}) {
   const notice = part("[data-worker-notice]", "div");
   const noticeTitle = part("[data-worker-notice-title]");
   const noticeText = part("[data-worker-notice-text]");
+  const noticeDetails = part("[data-worker-notice-details]", "pre");
   const dismiss = part("[data-worker-notice-dismiss]", "button");
-  notice.append(noticeTitle, noticeText, dismiss);
+  notice.append(noticeTitle, noticeText, noticeDetails, dismiss);
   for (const element of [badge, prompt, notice]) element.hidden = true;
   const form = new FakeElement("form");
   const statusBar = new FakeElement("div");
@@ -65,7 +66,7 @@ function fixture({ replies = [] } = {}) {
     return event;
   };
   const facts = () => parts.facts.children.map((child) => child.textContent);
-  return { controller, badge, badgeName, badgeState, prompt, parts, proceed, wait, notice, noticeTitle, noticeText, dismiss, form, statusBar, sent, calls, click, key, facts };
+  return { controller, badge, badgeName, badgeState, prompt, parts, proceed, wait, notice, noticeTitle, noticeText, noticeDetails, dismiss, form, statusBar, sent, calls, click, key, facts };
 }
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -252,26 +253,28 @@ const notice = {
   items: [
     { path: "/home/me/Work/storefront/src/cart/totals.ts", reason: "changed on both sides" },
     { path: "/home/me/Work/storefront/.env.local", reason: "deleted on main, changed on the worker" },
-    { path: "refs/heads/coupons", reason: "main moved it too", ref: "refs/gripi/returns/0a1b2c3d/refs/heads/coupons" }
+    { path: "refs/heads/coupons", reason: "changed on both sides", ref: "refs/gripi/returns/0a1b2c3d/refs/heads/coupons" }
   ],
-  refs: ["refs/gripi/returns/0a1b2c3d/refs/heads/coupons"]
+  refs: ["refs/gripi/returns/0a1b2c3d/refs/heads/coupons"],
+  text: "Main kept its own version of what follows. The worker's is in /home/me/.pi/gripi/returns/0a1b2c3d/worker or under the ref named, with the base's and main's in /home/me/.pi/gripi/returns/0a1b2c3d/base and /home/me/.pi/gripi/returns/0a1b2c3d/main to compare, until the record is discarded:\n- /home/me/Work/storefront/src/cart/totals.ts: changed on both sides"
 };
 
-test("what a return kept aside shows in the sync banner, naming the folder and the refs, until dismissed", async () => {
-  const { controller, notice: banner, noticeTitle, noticeText, dismiss, sent, calls, click } = fixture();
+test("what a return kept aside shows in the sync banner, naming the folder and the refs, until a confirmed dismiss", async () => {
+  const { controller, notice: banner, noticeTitle, noticeText, noticeDetails, dismiss, sent, calls, click } = fixture();
 
   controller.update(null, [notice]);
   assert.equal(banner.hidden, false);
   assert.equal(noticeTitle.textContent, "3 changes from beelink kept aside.");
   assert.equal(noticeText.textContent,
-    "Main kept its own src/cart/totals.ts, .env.local and refs/heads/coupons. beelink's versions are in ~/.pi/gripi/returns/0a1b2c3d/worker, at their paths; " +
-    "its commit is kept as refs/gripi/returns/0a1b2c3d/refs/heads/coupons.");
+    "Main kept its own src/cart/totals.ts, .env.local and refs/heads/coupons. The worker's versions, if any, are in ~/.pi/gripi/returns/0a1b2c3d/worker " +
+    "and refs/gripi/returns/0a1b2c3d/refs/heads/coupons.");
+  // Each item, why main kept its own, and where the worker's is.
+  assert.equal(noticeDetails.textContent, notice.text);
 
-  // Dismissing deletes them, which it asks about first.
   calls.confirm = false;
   click(dismiss);
   await flush();
-  assert.match(calls.confirms[0], /also deletes what the return kept aside: beelink's versions in ~\/\.pi\/gripi\/returns\/0a1b2c3d\/worker and the refs that keep its commits\. Main's files stay as they are\./);
+  assert.deepEqual(calls.confirms, ["Dismissing also deletes what was kept aside: the worker's versions in ~/.pi/gripi/returns/0a1b2c3d/worker and its recovery refs. Main's files stay as they are."]);
   assert.deepEqual(sent, []);
   assert.equal(banner.hidden, false);
 
@@ -282,18 +285,19 @@ test("what a return kept aside shows in the sync banner, naming the folder and t
   assert.equal(banner.hidden, true);
 });
 
-test("several returns' notices list their paths together and name the latest folder", () => {
-  const { controller, noticeTitle, noticeText } = fixture();
+test("several returns' notices name every worker and folder, and give every return's details", () => {
+  const { controller, noticeTitle, noticeText, noticeDetails } = fixture();
   const later = {
-    ...notice, aside: "/home/me/.pi/gripi/returns/9f8e7d6c/worker", refs: [],
+    ...notice, worker: "nuc", aside: "/home/me/.pi/gripi/returns/9f8e7d6c/worker", refs: [], text: "Main kept its own version of what follows…",
     items: [{ path: "/home/me/Work/.worktrees/storefront/coupons", reason: "the worker removed this worktree; main keeps it" }, { path: "stash", reason: "the worker dropped \"wip\", which main keeps" }]
   };
 
   controller.update(connected, [notice, later]);
-  assert.equal(noticeTitle.textContent, "5 changes from beelink kept aside.");
+  assert.equal(noticeTitle.textContent, "5 changes from beelink and nuc kept aside.");
   assert.equal(noticeText.textContent,
-    "Main kept its own src/cart/totals.ts, .env.local, refs/heads/coupons and 2 more. beelink's versions are in ~/.pi/gripi/returns/9f8e7d6c/worker and the folder of 1 earlier return, at their paths; " +
-    "its commit is kept as refs/gripi/returns/0a1b2c3d/refs/heads/coupons.");
+    "Main kept its own src/cart/totals.ts, .env.local, refs/heads/coupons and 2 more. The worker's versions, if any, are in ~/.pi/gripi/returns/0a1b2c3d/worker, " +
+    "~/.pi/gripi/returns/9f8e7d6c/worker and refs/gripi/returns/0a1b2c3d/refs/heads/coupons.");
+  assert.equal(noticeDetails.textContent, `${notice.text}\n\n${later.text}`);
 });
 
 function pickerFixture({ replies = [], forwarded = [] } = {}) {

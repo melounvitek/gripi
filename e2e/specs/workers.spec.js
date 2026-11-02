@@ -9,7 +9,12 @@ async function openOnFakeWorker(page, isMobile, { rendered = null } = {}) {
   const posted = [];
   const answers = new Map();
   let held = rendered ? [] : null;
-  const answer = (route) => route.fulfill({ json: { events: [], last_seq: 0, missed: false, sudo_requests: [], worker: live.worker, worker_notices: live.notices } });
+  // Events, such as of a shell command, which the page asks for after the last that it has.
+  const events = [];
+  const answer = (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after"));
+    return route.fulfill({ json: { events: events.slice(after), last_seq: events.length, missed: false, sudo_requests: [], worker: live.worker, worker_notices: live.notices } });
+  };
   await page.route(/\/events(?:\?|$)/, (route) => (held ? held.push(route) : answer(route)));
   await page.route(/\/workers\/(move|return|forward|unforward|dismiss_notices)$/, async (route) => {
     const action = new URL(route.request().url()).pathname.split("/").pop();
@@ -35,7 +40,8 @@ async function openOnFakeWorker(page, isMobile, { rendered = null } = {}) {
   await page.goto(url);
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
   const session = await page.locator('.prompt-form input[name="session"]').inputValue();
-  const poll = (changes) => {
+  const poll = ({ events: added = [], ...changes }) => {
+    events.push(...added);
     Object.assign(live, changes);
     held?.forEach(answer);
     held = null;
@@ -62,7 +68,7 @@ const press = (locator, isMobile) => (isMobile ? locator.tap() : locator.click()
 const at = (seconds) => new Date(Date.now() + seconds * 1000).toISOString();
 const connected = { worker: "beelink", state: "connected", repository: "/work/storefront", ports: [{ port: 5173, local: 5173 }] };
 const listed = {
-  workers: [{ name: "beelink", destination: "e2e@worker.invalid", state: "connected" }],
+  workers: [{ name: "nuc", destination: "e2e@nuc.invalid", state: "unreachable" }, { name: "beelink", destination: "e2e@worker.invalid", state: "connected" }],
   repository: { main: "/work/storefront", roots: ["/work/storefront", "/work/.worktrees/storefront/coupons"], worktrees: 1, sessions: 1 }
 };
 
@@ -106,12 +112,17 @@ test("Run on worker says that only this session moves, and the editor's place sh
   await palette(page, "Run on worker…");
   const card = page.getByRole("dialog", { name: "Run on worker" });
   const worker = card.getByRole("option", { name: /beelink/ });
+  const other = card.getByRole("option", { name: /nuc/ });
   await expect(worker).toContainText("e2e@worker.invalid");
+  await expect(worker).toHaveAttribute("aria-selected", "true");
   await expect(card).toContainText("this session only, to a private copy of storefront");
   await expect(card).toContainText("storefront and /work/.worktrees/storefront/coupons");
   await expect(card).toContainText("storefront's other sessions keep running");
   await expect(card).toContainText("brings its changes back; what main changed too is kept aside");
-  // The first tap points at the worker; the move has its own button.
+  // The first tap points at a worker; the move has its own button.
+  await press(other, isMobile);
+  await expect(other).toHaveAttribute("aria-selected", "true");
+  await expect(card.getByRole("button", { name: "move to nuc" })).toBeVisible();
   await press(worker, isMobile);
   await expect(worker).toHaveAttribute("aria-selected", "true");
   await press(card.getByRole("button", { name: "move to beelink" }), isMobile);
@@ -155,6 +166,25 @@ test("Run on worker says why a session can't move, and isn't offered to one on a
   await expect(dialog.getByRole("option", { name: "Run on worker…", exact: true })).toHaveCount(0);
 });
 
+test("Run on worker isn't offered while a shell command runs, which a move would refuse", async ({ page, isMobile }) => {
+  const { poll } = await openOnFakeWorker(page, isMobile);
+  const offered = async (count) => {
+    const dialog = await openPalette(page, "");
+    await expect(dialog.getByRole("option", { name: "Choose model and thinking" })).toBeVisible();
+    await expect(dialog.getByRole("option", { name: "Run on worker…", exact: true })).toHaveCount(count);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  };
+  const command = { bashId: "e2e-worker-bash", command: "sleep 30" };
+
+  await poll({ events: [{ type: "bash_start", ...command }] });
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "bash");
+  await offered(0);
+  await poll({ events: [{ type: "bash_end", ...command, result: { output: "", exitCode: 0 } }] });
+  await expect(page.locator(".composer-state")).not.toHaveAttribute("data-state", "bash");
+  await offered(1);
+});
+
 test("Forward a port forwards it, and the editor's footer lists it until it is stopped", async ({ page, isMobile }) => {
   const { live, posted, answers, session, poll } = await openOnFakeWorker(page, isMobile);
   await poll({ worker: connected });
@@ -181,18 +211,23 @@ const kept = {
   paths: ["/work/storefront/src/cart/totals.ts", "refs/heads/coupons"],
   items: [
     { path: "/work/storefront/src/cart/totals.ts", reason: "changed on both sides" },
-    { path: "refs/heads/coupons", reason: "main moved it too", ref: "refs/gripi/returns/0a1b2c3d/refs/heads/coupons" }
+    { path: "refs/heads/coupons", reason: "changed on both sides", ref: "refs/gripi/returns/0a1b2c3d/refs/heads/coupons" }
   ],
-  refs: ["refs/gripi/returns/0a1b2c3d/refs/heads/coupons"]
+  refs: ["refs/gripi/returns/0a1b2c3d/refs/heads/coupons"],
+  text: "Main kept its own version of what follows. The worker's is in /state/returns/0a1b2c3d/worker or under the ref named:\n- /work/storefront/src/cart/totals.ts: changed on both sides"
 };
 
 test("what a return kept aside shows above the editor, as the page renders it, until a confirmed dismiss", async ({ page, isMobile }) => {
   const { posted, session, poll } = await openOnFakeWorker(page, isMobile, { rendered: { worker: null, notices: [kept] } });
   const notice = page.locator("[data-worker-notice]");
   await expect(notice).toContainText("2 changes from beelink kept aside.");
-  await expect(notice).toContainText("Main kept its own src/cart/totals.ts and refs/heads/coupons. beelink's version is in /state/returns/0a1b2c3d/worker, at its path; its commit is kept as refs/gripi/returns/0a1b2c3d/refs/heads/coupons.");
+  await expect(notice).toContainText("Main kept its own src/cart/totals.ts and refs/heads/coupons. The worker's versions, if any, are in /state/returns/0a1b2c3d/worker and refs/gripi/returns/0a1b2c3d/refs/heads/coupons.");
   await expect(composer(page)).toBeVisible();
   await poll({});
+  const details = notice.getByText("- /work/storefront/src/cart/totals.ts: changed on both sides");
+  await expect(details).toBeHidden();
+  await press(notice.getByText("details", { exact: true }), isMobile);
+  await expect(details).toBeVisible();
 
   const dismiss = notice.getByRole("button", { name: "Dismiss" });
   const warnings = [];
@@ -201,7 +236,7 @@ test("what a return kept aside shows above the editor, as the page renders it, u
     dialog.dismiss();
   });
   await press(dismiss, isMobile);
-  await expect.poll(() => warnings).toEqual([expect.stringContaining("also deletes what the return kept aside")]);
+  await expect.poll(() => warnings).toEqual([expect.stringContaining("also deletes what was kept aside")]);
   await expect(notice).toBeVisible();
 
   page.once("dialog", (dialog) => dialog.accept());

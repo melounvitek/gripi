@@ -397,6 +397,7 @@ function commandPaletteCommands() {
   const target = row && sessionActionsController.targetFor(row);
   const writable = promptTextarea && !promptTextarea.disabled;
   const running = composerState?.dataset.state === "running";
+  const working = ["running", "bash", "sending", "stopping"].includes(composerState?.dataset.state);
   const otherView = document.querySelector('[data-conversation-view][aria-pressed="false"]');
   // Hermes has none of Pi's session commands, and Gripi cannot rename its sessions.
   const pi = !hermesSession();
@@ -421,7 +422,7 @@ function commandPaletteCommands() {
     ["This session", [
       writable && pi && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
       // The gateway says why a session can't move, unless the page knows: it is moving, Pi works or sending is paused.
-      writable && pi && !running && !worker && !workerController.pending && liveOutput && "workersAdded" in liveOutput.dataset && { label: "Run on worker…", run: () => workerPickerController.openMove() },
+      writable && pi && !working && !worker && !workerController.pending && liveOutput && "workersAdded" in liveOutput.dataset && { label: "Run on worker…", run: () => workerPickerController.openMove() },
       writable && pi && { label: "Session tree", detail: "/tree", run: openTreeSessionModal },
       writable && pi && { label: "Fork from a message", detail: "/fork", run: openForkSessionModal },
       writable && pi && { label: "Compact context", detail: "/compact", run: () => runPaletteCommand("/compact") },

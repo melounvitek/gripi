@@ -356,7 +356,7 @@ Main takes the base of the move, the state of the repository’s files, refs, ch
 
 A new session that Pi has not saved yet exists only in its Pi, so it starts again on the worker as after a change of the [environment variables](#environment-variables), and a return does the same on main. If it cannot start, or not with what was chosen in it, the move or return fails with the reason, and the session starts again with what was chosen in it at its next return.
 
-Gripi cannot tell when something outside Gripi, such as your editor or Pi CLI, changes the repository’s files, so it doesn’t wait for that. A file saved while main takes the base may reach the copy half-written, and a return checks each of main’s files just before it changes it, but loses a change saved in that very moment. So avoid editing the repository’s files yourself while a session moves or returns.
+Gripi cannot tell when something outside Gripi, such as your editor or Pi CLI, changes the repository’s files, so it doesn’t wait for that. A file saved while main takes the base may reach the copy half-written. A return compares main’s files with what it expects before it changes them, but a change saved while it brings the session’s changes in can be lost. So avoid editing the repository’s files yourself while a session moves or returns.
 
 #### On the worker
 
@@ -379,11 +379,11 @@ Main never gets conflict markers, and Gripi never merges or rebases history. Ret
 
 What a return kept aside stays in a recovery folder, `returns/<move>/` in Gripi’s state folder, and under recovery refs in the repository:
 
-- `worker/`, `base/` and `main/` in the folder hold the worker’s, the base’s and main’s version of each file kept aside, at its full path, such as `returns/<move>/worker/home/alice/Work/shop/src/cart.ts`. Compare them with `diff`, or merge the worker’s changes into main’s file, with conflict markers where they clash, with `git merge-file <main’s file> <the base’s> <the worker’s>`.
+- For a file kept aside, `worker/`, `base/` and `main/` in the folder hold the worker’s, the base’s and main’s version, at its full path, such as `returns/<move>/worker/home/alice/Work/shop/src/cart.ts`; a side that deleted the file has none. Compare them with `diff`, or merge the worker’s changes into main’s file, with conflict markers where they clash, with `git merge-file <main’s file> <the base’s> <the worker’s>`. The worker’s changed Git configuration and hooks are only in `worker/`.
 - The worker’s commits that main didn’t take are under `refs/gripi/returns/<move>/`, by their names, such as `refs/gripi/returns/<move>/refs/heads/feature` for the worker’s branch `feature`. See them with `git log feature..refs/gripi/returns/<move>/refs/heads/feature`, and keep them with `git branch feature-worker refs/gripi/returns/<move>/refs/heads/feature`, a merge or a cherry-pick.
 - For a checkout that main kept, the worker’s index is listed in `worker/<the worktree’s Git folder>/index.txt`; for a worktree that main didn’t make, its files are in `worker/<its path>`.
 
-The session’s page lists above the editor what was kept aside, the folder and the refs, until you dismiss that notice, which deletes the recovery folder and the refs, after asking. So copy what you need first. A return that kept nothing aside leaves nothing behind and shows no notice.
+The session’s page lists above the editor what was kept aside and where, with each item’s reason in its details, until you dismiss that notice, which deletes the recovery folder and the refs, after asking. So copy what you need first. A return that kept nothing aside leaves nothing behind and shows no notice.
 
 ### Losing a worker
 
@@ -409,7 +409,7 @@ The helper cannot stop what others run for Pi: Docker and Podman containers, whi
 - A session on a worker can be deleted only once it continues on main, because the worker would send main its file again. It can’t start a new session in place, with `/new`, `/clone` or `/fork`, nor can `gripi` on the worker.
 - Continue a session on a worker only in Gripi. If Pi CLI on main writes it, Gripi asks to take the session over, as for any session in use in Pi CLI, and then shows a conflict, because the worker’s copy replaces what Pi CLI wrote.
 - Only the session’s repository is on the worker: other projects in the folders that show its copy, such as another repository in `~/Work` that the session also works in, are missing there.
-- Worktrees that the session removes on the worker stay on main. Worktrees that it makes outside the folders that show its copy, such as in `/tmp`, stay on the worker: their commits come back with the Git folder, but not their files.
+- Worktrees that the session removes on the worker stay on main. Worktrees that it makes outside the folders that show its copy, such as in `/tmp`, stay on the worker with their files: the commits on their branches come back with the Git folder, but not commits that only a detached HEAD there has.
 - Main’s copy of the session’s changes writes each batch of them to a journal before it applies it. When main refuses one of them for good, such as a folder below a symbolic link that the session made, the batch stays in the journal, and main’s copy can’t open until it is applied: the session can neither confirm its tool results nor come back, and recovering from that is a manual repair of `moves/<move>/`.
 - Gripi doesn’t wait for edits made outside Gripi while a session moves or returns (see [waiting for the other sessions](#waiting-for-the-other-sessions)).
 - The `moves/` and `returns/` folders in Gripi’s state folder must be on the same file system as the repositories and Pi’s sessions.
