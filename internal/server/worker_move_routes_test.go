@@ -54,6 +54,11 @@ func (workers *fakeWorkers) onWorker(key string) bool {
 	return workers.placed[key]
 }
 
+// Session tells the gripi commands of beelink which sessions run there.
+func (workers *fakeWorkers) Session(key string) bool {
+	return workers.onWorker(key)
+}
+
 func (workers *fakeWorkers) move(ctx context.Context, key, record string, prepare func(context.Context, func(string) bool) (func(), error), placed bool) error {
 	workers.mu.Lock()
 	if workers.moving == nil {
@@ -454,6 +459,36 @@ func TestANewSessionThatPiHasNotSavedStartsAgainWhereItMoved(t *testing.T) {
 	}
 	if status := getWorkspace(handler, "/status?session="+url.QueryEscape(session), "").Body.String(); !strings.Contains(status, `"model":"e2e/contract-model"`) || !strings.Contains(status, `"thinking":"high"`) {
 		t.Fatalf("after the return, the new session's status = %s", status)
+	}
+}
+
+// A worker's gripi command that prompts a session there while the session comes back waits for the return, and then
+// reaches nothing: the session runs on main, which the worker's commands don't reach.
+func TestAWorkersPromptThatAReturnHeldDoesNotRunTheSessionOnMain(t *testing.T) {
+	handler, alpha, _, project := fakePiGateway(t)
+	local := localHandler(t, handler)
+	workers := &fakeWorkers{repository: project}
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	worker := workerHandler(handler, workers)
+	if response := command(local, http.MethodPost, "/workers/move", url.Values{"session": {alpha}, "worker": {"beelink"}}); response.Code != http.StatusOK {
+		t.Fatalf("move = %d %s", response.Code, response.Body.String())
+	}
+	var held <-chan *httptest.ResponseRecorder
+	workers.snapshot = func() {
+		held = promptLater(worker, alpha)
+		if !waiting(held) {
+			t.Error("the worker's prompt didn't wait for the return")
+		}
+	}
+
+	if response := command(local, http.MethodPost, "/workers/return", url.Values{"session": {alpha}}); response.Code != http.StatusOK {
+		t.Fatalf("return = %d %s", response.Code, response.Body.String())
+	}
+	if answer := <-held; answer.Code != http.StatusNotFound {
+		t.Fatalf("the worker's held prompt = %d %s", answer.Code, answer.Body.String())
+	}
+	if started, _ := fakePiPIDs(t, alpha); len(started) != 0 {
+		t.Fatalf("the worker's prompt started Pi on main: %v", started)
 	}
 }
 

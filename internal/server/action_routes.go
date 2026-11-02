@@ -101,8 +101,9 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	defer releasePrompt()
-	// Deletion may have completed after actionSessionPath validated the request.
-	if !app.commandSessionAvailable(path) {
+	// Deletion, or a return from a worker that held the prompt, may have completed after actionSessionPath validated the
+	// request.
+	if !app.commandSessionAvailable(path) || !reachesSession(request, path) {
 		http.NotFound(response, request)
 		return
 	}
