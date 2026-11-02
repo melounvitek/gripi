@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -538,4 +539,52 @@ func inodeOf(t *testing.T, path string) uint64 {
 		t.Fatal(err)
 	}
 	return info.Sys().(*syscall.Stat_t).Ino
+}
+
+// Main's copy of a unit that it keeps elsewhere, such as a moved session's shadow, never follows a link that the
+// source made there out of it, also not to a folder of the unit below the link.
+func TestAMovedDestinationNeverWritesThroughTheSourcesLinks(t *testing.T) {
+	outside := t.TempDir()
+	writeFile(t, outside, "x/precious", "main's\n")
+	dst := t.TempDir()
+	d, err := NewMovedDestination(t.TempDir(), "/", dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, destination := net.Pipe()
+	served := make(chan error, 1)
+	go func() { served <- d.Serve(context.Background(), destination, t.TempDir()) }()
+	c := newConn(source)
+	unit := "/work/app"
+	if err := c.send(&frame{Kind: kindHello, Version: version, Roots: []string{unit}}); err != nil || c.flush() != nil {
+		t.Fatal(err)
+	}
+	if manifest, err := c.receive(); err != nil || manifest.Kind != kindManifest {
+		t.Fatalf("manifest = %+v, %v", manifest, err)
+	}
+	for _, f := range []*frame{
+		{Kind: kindSymlink, Path: unit + "/link", Target: outside},
+		{Kind: kindRoots, Roots: []string{unit, unit + "/link/x"}},
+		{Kind: kindDelete, Path: unit + "/link/x"},
+		{Kind: kindMkdir, Path: unit + "/link/x/new", Mode: 0o755},
+		{Kind: kindBarrier, N: 1},
+	} {
+		if err := c.send(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.flush()
+	if ack, err := c.receive(); err != nil || ack.Kind != kindAck || !strings.Contains(ack.Error, "link") {
+		t.Fatalf("ack = %+v, %v", ack, err)
+	}
+	source.Close()
+	if err := <-served; err == nil {
+		t.Fatal("Serve succeeded")
+	}
+	if contents, err := os.ReadFile(filepath.Join(outside, "x", "precious")); err != nil || string(contents) != "main's\n" {
+		t.Fatalf("the file outside the copy = %q, %v", contents, err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "x", "new")); !os.IsNotExist(err) {
+		t.Fatalf("the folder made outside the copy: %v", err)
+	}
 }

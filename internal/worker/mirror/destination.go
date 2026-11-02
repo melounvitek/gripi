@@ -500,6 +500,9 @@ func (a *applier) resolve(p string, create bool) (*os.Root, string, error) {
 	}
 	root := a.opened[r]
 	if root == nil {
+		if err := a.d.linkAbove(r); err != nil {
+			return nil, "", err
+		}
 		local := a.d.local(r)
 		info, err := os.Lstat(local)
 		if errors.Is(err, fs.ErrNotExist) && create {
@@ -523,6 +526,21 @@ func (a *applier) resolve(p string, create bool) (*os.Root, string, error) {
 		return root, ".", nil
 	}
 	return root, p[len(r)+1:], nil
+}
+
+// linkAbove refuses a folder of a unit that this machine keeps elsewhere than the source when a link is above it
+// there, which only the source could have made, so that it can't lead this machine's writes out of where it keeps the
+// unit.
+func (d *Destination) linkAbove(r string) error {
+	if d.to == "/" {
+		return nil
+	}
+	for dir := filepath.Dir(d.local(r)); dir != d.to && within(dir, d.to); dir = filepath.Dir(dir) {
+		if info, err := os.Lstat(dir); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("mirror: refusing the folder %s below the link %s", r, dir)
+		}
+	}
+	return nil
 }
 
 // forget drops the handle of a worktree folder that is created or deleted.
@@ -653,6 +671,9 @@ func (a *applier) apply(o op) error {
 				}
 			}
 			a.forget(o.Path)
+			if err := a.d.linkAbove(o.Path); err != nil {
+				return err
+			}
 			return os.RemoveAll(a.d.local(o.Path))
 		}
 		root, rel, ok, err := a.existing(o.Path)
@@ -1065,6 +1086,9 @@ func (r *receiver) list(skip []string) []entry {
 	}
 	var entries []entry
 	for _, root := range r.roots {
+		if r.d.linkAbove(root) != nil {
+			continue
+		}
 		local := r.d.local(root)
 		filepath.WalkDir(local, func(lp string, de fs.DirEntry, err error) error {
 			if err != nil {
