@@ -27,7 +27,7 @@ import (
 // gateway's socket does, so gripi needs nothing else there.
 const askpassSocket = "askpass.sock"
 
-// sudoPrompt is the prompt that gripi sudo gives sudo, which gripi, as askpass, answers (server.SudoAskpassPrompt).
+// sudoPrompt is the prompt that gripi sudo gives sudo, which gripi, as askpass, answers (server.SudoAskpassPrompts).
 const sudoPrompt = "gripi"
 
 // passwordLifetime bounds how long the helper keeps a password that sudo's askpass program hasn't taken.

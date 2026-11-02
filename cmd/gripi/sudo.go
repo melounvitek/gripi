@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
@@ -87,7 +88,7 @@ func runAsRoot(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 func answerSudoPrompt(arguments []string, stdout, stderr io.Writer) int {
 	// Where sudoers keeps the environment, a command that sudo runs has the token too, and may run gripi.
 	parent, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", os.Getppid()))
-	if len(arguments) != 1 || arguments[0] != gateway.SudoAskpassPrompt || err != nil || string(parent) != "sudo\n" {
+	if len(arguments) != 1 || !slices.Contains(gateway.SudoAskpassPrompts, arguments[0]) || err != nil || string(parent) != "sudo\n" {
 		fmt.Fprintln(stderr, "gripi sudo: Gripi answers only the password prompt of the sudo that it runs")
 		return exitFailure
 	}

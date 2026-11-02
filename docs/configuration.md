@@ -182,7 +182,7 @@ platform_hints:
 
 Requirements and limits:
 
-- Linux only, tested with [sudo-rs](https://github.com/trifectatechfoundation/sudo-rs). Gripi answers only pam_unix’s untranslated `Password: ` prompt. If PAM asks for anything else, such as a one-time code, or in another language, sudo fails without running the command.
+- Linux only, with [sudo-rs](https://github.com/trifectatechfoundation/sudo-rs) or classic [sudo](https://www.sudo.ws/). Gripi answers only pam_unix’s password prompt: with sudo-rs, its untranslated `Password: `, and with classic sudo, `Password: ` or its translation. If PAM asks for anything else, such as a one-time code, sudo fails without running the command. With classic sudo, sudoers must not set `passprompt_override`, which would show Gripi every prompt of PAM as the password prompt.
 - sudoers must not keep `SUDO_ASKPASS` or `GRIPI_SUDO_TOKEN` with `env_keep`, which would pass them on to the command.
 - Every command needs your approval and your password. Gripi runs sudo with `-k`, so an earlier sudo login doesn’t count.
 - `!` commands and nested subagents can’t use it. Gripi can’t tell which conversation they belong to, so `gripi sudo` fails at once.

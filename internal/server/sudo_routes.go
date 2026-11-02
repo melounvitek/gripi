@@ -27,10 +27,12 @@ var SudoPath = "/usr/bin/sudo"
 // sudoPrompt is the prompt that Gripi gives sudo, without a %, which sudo would expand.
 const sudoPrompt = "gripi"
 
-// SudoAskpassPrompt is the only prompt that gripi, as sudo's askpass program, answers with the password. sudo-rs asks
-// askpass "[sudo: <the -p prompt>] <PAM's prompt>" for each hidden prompt of PAM, one-time codes too, and
-// "[sudo: input needed <PAM's prompt> " for each visible one, so this is the password prompt of pam_unix alone.
-const SudoAskpassPrompt = "[sudo: " + sudoPrompt + "] Password: "
+// SudoAskpassPrompts are the only prompts that gripi, as sudo's askpass program, answers with the password: the
+// password prompt of pam_unix alone, as sudo-rs and classic sudo pass it on. sudo-rs asks askpass
+// "[sudo: <the -p prompt>] <PAM's prompt>" for each hidden prompt of PAM, one-time codes too, and
+// "[sudo: input needed <PAM's prompt> " for each visible one. Classic sudo asks with the -p prompt in place of PAM's
+// "Password: " or its translation, and with PAM's own prompt for any other, unless sudoers sets passprompt_override.
+var SudoAskpassPrompts = []string{"[sudo: " + sudoPrompt + "] Password: ", sudoPrompt}
 
 const sudoOutputLimit = 16 << 20
 
