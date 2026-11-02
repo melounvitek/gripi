@@ -307,6 +307,15 @@ func (manager *Manager) Location(key string) (Location, bool) {
 	return location, true
 }
 
+// Placed returns the folders that the sessions on workers run in, by the sessions' keys.
+func (manager *Manager) Placed() map[string]string {
+	placed := map[string]string{}
+	for _, placement := range manager.options.Placements.All() {
+		placed[placement.Session] = placement.Cwd
+	}
+	return placed
+}
+
 // connected reports whether main has a connection to the worker of a name.
 func (manager *Manager) connected(name string) bool {
 	manager.mu.Lock()

@@ -29,6 +29,8 @@ type Workers interface {
 	List() ([]Worker, error)
 	// Location reports where a session runs while it is on a worker or is moving to one.
 	Location(key string) (WorkerLocation, bool)
+	// Placed returns the folders that the sessions on workers run in, by the sessions' keys.
+	Placed() map[string]string
 	// Selection returns what would move with a session in cwd: the main checkout of its repository and the worktrees
 	// that the session's copy gets, or why it can't move.
 	Selection(key, cwd string) (repository string, worktrees []string, err error)
@@ -47,6 +49,12 @@ func refused(err error) bool {
 // SetWorkers lets gripi commands and the browser move sessions to workers and back. Call it before serving.
 func (handler *Handler) SetWorkers(workers Workers) {
 	handler.app.workers = workers
+	// A new session that Pi had not saved when it moved exists only on its worker, so it stays a new one.
+	for key, cwd := range workers.Placed() {
+		if !handler.app.sessionStore.Exists(key) {
+			handler.app.pendingSessions.Remember(key, cwd, "")
+		}
+	}
 }
 
 // Guard returns the guard of the sessions, which the gateway's own writes to them from elsewhere, such as of the

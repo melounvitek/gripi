@@ -411,6 +411,9 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 			t.Fatalf("the worker has the copies %q", copies())
 		}
 	}
+	// A new gateway has no Pi of the new session, which exists only on the worker until Pi saves it.
+	stopGateway()
+	startGateway()
 	if reply := run(blank.Path, "hostname && echo blank > blank.txt"); !strings.Contains(reply, onHost(workerHost)) {
 		t.Fatalf("the new session moved to the worker replied %q", reply)
 	}

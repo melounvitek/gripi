@@ -390,6 +390,8 @@ func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) 
 	return gateway.WorkerLocation{}, false
 }
 
+func (workers *recordedWorkers) Placed() map[string]string { return nil }
+
 func (workers *recordedWorkers) Selection(_, cwd string) (string, []string, error) {
 	return cwd, []string{cwd}, nil
 }

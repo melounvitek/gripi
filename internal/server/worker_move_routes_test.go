@@ -59,6 +59,18 @@ func (workers *fakeWorkers) Session(key string) bool {
 	return workers.onWorker(key)
 }
 
+func (workers *fakeWorkers) Placed() map[string]string {
+	workers.mu.Lock()
+	defer workers.mu.Unlock()
+	placed := map[string]string{}
+	for key, onWorker := range workers.placed {
+		if onWorker {
+			placed[key] = workers.repository
+		}
+	}
+	return placed
+}
+
 func (workers *fakeWorkers) move(ctx context.Context, key, record string, prepare func(context.Context, func(string) bool) (func(), error), placed bool) error {
 	workers.mu.Lock()
 	if workers.moving == nil {
@@ -489,6 +501,63 @@ func TestAWorkersPromptThatAReturnHeldDoesNotRunTheSessionOnMain(t *testing.T) {
 	}
 	if started, _ := fakePiPIDs(t, alpha); len(started) != 0 {
 		t.Fatalf("the worker's prompt started Pi on main: %v", started)
+	}
+}
+
+// A new session that Pi had not saved when it moved exists only on its worker, so a new gateway learns of it from
+// where it runs: the session is listed, continues on the worker and returns.
+func TestANewSessionThatPiHasNotSavedStaysOnItsWorkerAfterARestart(t *testing.T) {
+	cfg, _, _, project := fakePiConfig(t)
+	workers := &fakeWorkers{repository: project}
+	// Whether the session was on the worker at each start of its Pi.
+	var onWorker []bool
+	start := func() http.Handler {
+		handler, err := gateway.NewPiHandlerWithLauncher(cfg, gripi.WebFiles, func(process agent.Process) (*exec.Cmd, func(), error) {
+			if process.Dir == project {
+				onWorker = append(onWorker, process.Key != "" && workers.onWorker(process.Key))
+			}
+			return nil, nil, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+		handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+		return handler
+	}
+	first := start()
+	created := serveAction(first, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": project}, true))
+	var payload struct{ Session string }
+	if err := json.Unmarshal(created.Body.Bytes(), &payload); err != nil || created.Code != http.StatusOK {
+		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
+	}
+	session := payload.Session
+	if response := postWorkspaceForm(first, "/workers/move", url.Values{"session": {session}, "worker": {"beelink"}}, ""); response.Code != http.StatusOK {
+		t.Fatalf("move = %d %s", response.Code, response.Body.String())
+	}
+	if err := first.(interface{ Close(context.Context) error }).Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	second := start()
+	local, worker := localHandler(t, second), workerHandler(second, workers)
+	for _, commands := range []http.Handler{local, worker} {
+		if listed := localSessions(t, commands, "?session="+url.QueryEscape(session)); len(listed) != 1 || listed[0].CWD != project {
+			t.Fatalf("after a restart, the session is listed as %+v", listed)
+		}
+	}
+	// A shell command leaves the session unsaved.
+	if response := command(worker, http.MethodPost, "/prompt", url.Values{"session": {session}, "message": {"!printf hi"}}); response.Code != http.StatusOK {
+		t.Fatalf("shell command on the worker = %d %s", response.Code, response.Body.String())
+	}
+	if response := command(local, http.MethodPost, "/workers/return", url.Values{"session": {session}}); response.Code != http.StatusOK {
+		t.Fatalf("return = %d %s", response.Code, response.Body.String())
+	}
+	if response := postPrompt(local, socketHost, url.Values{"session": {session}, "message": {"Show the deterministic browser response"}}); response.Code != http.StatusOK {
+		t.Fatalf("prompt on main = %d %s", response.Code, response.Body.String())
+	}
+	if !slices.Equal(onWorker, []bool{false, true, true, false}) {
+		t.Fatalf("Pi of the new session started on the worker %v", onWorker)
 	}
 }
 

@@ -24,8 +24,7 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
 	}
-	// A new session that Pi has not saved yet has no Pi while its repository moves, which its page shows meanwhile.
-	if _, pending := app.pendingSessions.CWD(path); !pending && !app.commandSessionAvailable(path) {
+	if !app.commandSessionAvailable(path) {
 		http.NotFound(response, request)
 		return
 	}
@@ -238,6 +237,11 @@ func (app *application) commandSessionAvailable(path string) bool {
 		return false
 	}
 	if app.rpcClients.Active(path) {
+		return true
+	}
+	// A new session that Pi has not saved yet has no Pi while it moves to a worker or back, or after a restart while it
+	// is on one, until it gets one.
+	if _, pending := app.pendingSessions.CWD(path); pending {
 		return true
 	}
 	_, ok := app.sessionStore.Session(path)
