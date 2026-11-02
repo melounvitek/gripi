@@ -336,7 +336,7 @@ test("Run on worker lists the workers with their state and what moves, and moves
   const workers = [{ name: "nuc", destination: "gripi@nuc", state: "unreachable" }, { name: "beelink", destination: "gripi@beelink", state: "connected" }];
   const roots = ["/home/me/Work/storefront", "/home/me/Work/.worktrees/storefront/coupons"];
   const { picker, modal, sent, calls, fire, terms, list, go } = pickerFixture({
-    replies: [reply(200, { workers, repository: { main: "/home/me/Work/storefront", roots, worktrees: 1, sessions: 1 } })]
+    replies: [reply(200, { workers, repository: { main: "/home/me/Work/storefront", roots } })]
   });
 
   await picker.openMove();
@@ -371,14 +371,14 @@ test("Run on worker lists the workers with their state and what moves, and moves
 test("Run on worker names the session's own worktree when it started in one", async () => {
   const worktree = "/home/me/Work/.worktrees/storefront/coupons";
   const { picker, terms } = pickerFixture({
-    replies: [reply(200, { workers: [{ name: "beelink", destination: "gripi@beelink", state: "connected" }], repository: { main: "/home/me/Work/storefront", roots: [worktree], worktrees: 1, sessions: 1 } })]
+    replies: [reply(200, { workers: [{ name: "beelink", destination: "gripi@beelink", state: "connected" }], repository: { main: "/home/me/Work/storefront", roots: [worktree] } })]
   });
   await picker.openMove();
   assert.equal(terms()[3], "~/Work/.worktrees/storefront/coupons, with storefront's Git folder");
 });
 
 test("Run on worker says how to add a worker when there is none, and why the session can't move", async () => {
-  const { picker, status, go } = pickerFixture({ replies: [reply(200, { workers: [], repository: { main: "/home/me/Work/storefront", roots: ["/home/me/Work/storefront"], worktrees: 0, sessions: 1 } })] });
+  const { picker, status, go } = pickerFixture({ replies: [reply(200, { workers: [], repository: { main: "/home/me/Work/storefront", roots: ["/home/me/Work/storefront"] } })] });
   await picker.openMove();
   assert.match(status.textContent, /gripi worker add user@host/);
   assert.equal(go.hidden, true);

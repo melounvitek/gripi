@@ -69,7 +69,7 @@ const at = (seconds) => new Date(Date.now() + seconds * 1000).toISOString();
 const connected = { worker: "beelink", state: "connected", repository: "/work/storefront", ports: [{ port: 5173, local: 5173 }] };
 const listed = {
   workers: [{ name: "nuc", destination: "e2e@nuc.invalid", state: "unreachable" }, { name: "beelink", destination: "e2e@worker.invalid", state: "connected" }],
-  repository: { main: "/work/storefront", roots: ["/work/storefront", "/work/.worktrees/storefront/coupons"], worktrees: 1, sessions: 1 }
+  repository: { main: "/work/storefront", roots: ["/work/storefront", "/work/.worktrees/storefront/coupons"] }
 };
 
 test("a lost worker takes the editor's place, counts down, and one tap continues on main", async ({ page, isMobile }) => {

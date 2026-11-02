@@ -680,13 +680,12 @@ func TestTheBrowserMovesItsSessionAndSeesWhereItRuns(t *testing.T) {
 	var choices struct {
 		Workers    []gateway.Worker `json:"workers"`
 		Repository struct {
-			Main                string
-			Roots               []string
-			Worktrees, Sessions int
+			Main  string
+			Roots []string
 		} `json:"repository"`
 	}
 	if err := json.Unmarshal(listed.Body.Bytes(), &choices); err != nil || listed.Code != http.StatusOK || len(choices.Workers) != 2 || choices.Workers[1].State != "unreachable" ||
-		choices.Repository.Main != project || !slices.Equal(choices.Repository.Roots, []string{project, project + "-feature"}) || choices.Repository.Worktrees != 1 || choices.Repository.Sessions != 1 {
+		choices.Repository.Main != project || !slices.Equal(choices.Repository.Roots, []string{project, project + "-feature"}) {
 		t.Fatalf("workers = %d %s (%v)", listed.Code, listed.Body.String(), err)
 	}
 	if page := getWorkspace(handler, "/?session="+url.QueryEscape(alpha), ""); !strings.Contains(page.Body.String(), "data-workers-added") || strings.Contains(page.Body.String(), "session-worker-indicator") {

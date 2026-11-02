@@ -3,7 +3,6 @@ package server
 import (
 	"html/template"
 	"net/http"
-	"slices"
 	"time"
 )
 
@@ -83,7 +82,7 @@ func (app *application) registerWorkerRoutes(mux *http.ServeMux) {
 }
 
 // listWorkers lists the workers for the browser, with what would move to one with the session: the main checkout of
-// its repository, the worktrees that its copy gets, and how many of them are linked worktrees.
+// its repository and the worktrees that its copy gets.
 func (app *application) listWorkers(response http.ResponseWriter, request *http.Request) {
 	key, ok := app.workerSession(response, request)
 	if !ok {
@@ -99,8 +98,7 @@ func (app *application) listWorkers(response http.ResponseWriter, request *http.
 		writeWorkersError(response, "find what moves with a session", err)
 		return
 	}
-	linked := len(slices.DeleteFunc(slices.Clone(worktrees), func(worktree string) bool { return worktree == main }))
-	writeJSON(response, map[string]any{"workers": workers, "repository": map[string]any{"main": main, "roots": worktrees, "worktrees": linked, "sessions": 1}})
+	writeJSON(response, map[string]any{"workers": workers, "repository": map[string]any{"main": main, "roots": worktrees}})
 }
 
 func (app *application) dismissWorkerNotices(response http.ResponseWriter, request *http.Request) {
