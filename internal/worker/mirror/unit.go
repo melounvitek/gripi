@@ -76,16 +76,6 @@ func (u Unit) roots() []string {
 	return roots
 }
 
-// Contains reports whether path is in one of the unit's folders.
-func (u Unit) Contains(path string) bool {
-	for _, root := range u.roots() {
-		if within(path, root) {
-			return true
-		}
-	}
-	return false
-}
-
 // WalkMirrored walks the folders of the unit's worktrees that a mirror of it takes, also of worktrees that joined the
 // unit since (see Within), and calls visit with each one. Its ignored reports whether a folder, which needn't exist,
 // is one that the mirror leaves out because Git ignores it and that holds none of the repository's worktrees: one

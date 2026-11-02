@@ -77,9 +77,6 @@ func TestAUnitOfSelectedFoldersNeverTakesTheOthers(t *testing.T) {
 	if want := []string{repository.GitDir, featA, featC}; !slices.Equal(roots, sorted(want)) {
 		t.Errorf("the checkpoint's folders = %v, want %v", roots, sorted(want))
 	}
-	if !r.src.Contains(filepath.Join(featC, "new.txt")) || r.src.Contains(filepath.Join(repository.Main, "README")) || r.src.Contains(outside) {
-		t.Error("the source counts the wrong worktrees as the unit's")
-	}
 
 	// A worktree that joined the unit and goes on the worker goes on main too.
 	git(t, featA, "worktree", "remove", "--force", featC)

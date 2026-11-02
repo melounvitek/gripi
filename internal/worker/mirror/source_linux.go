@@ -36,8 +36,7 @@ type Source struct {
 	done     chan struct{} // closed when Run returns
 	err      error         // what Run returned, once done is closed
 	healthy  atomic.Bool
-	failing  atomic.Bool          // the last barrier failed because something couldn't be read
-	current  atomic.Pointer[Unit] // the unit's folders as Run last found them
+	failing  atomic.Bool // the last barrier failed because something couldn't be read
 
 	overflows  atomic.Int64
 	beforeRead func() // lets tests stall the reader
@@ -101,15 +100,6 @@ func (s *Source) Healthy() bool {
 	default:
 		return s.healthy.Load() && !s.failing.Load()
 	}
-}
-
-// Contains reports whether path is in one of the unit's folders, as worktrees
-// added and removed since the source started have left them.
-func (s *Source) Contains(path string) bool {
-	if unit := s.current.Load(); unit != nil {
-		return unit.Contains(path)
-	}
-	return s.unit.Contains(path)
 }
 
 // Barrier returns once the destination has durably applied every change made
@@ -714,8 +704,6 @@ func (s *Source) refreshWorktrees() error {
 			s.mark(r, writesUnknown)
 		}
 	}
-	linked := slices.DeleteFunc(slices.Clone(s.roots), func(r string) bool { return r == s.main || r == s.gitDir })
-	s.current.Store(&Unit{Main: s.main, Worktrees: linked, GitDir: s.gitDir, Within: s.within})
 	s.mapIndexes()
 	if added {
 		return s.c.send(&frame{Kind: kindRoots, Roots: s.roots})

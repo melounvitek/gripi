@@ -126,14 +126,8 @@ func TestMirrorsGitOperations(t *testing.T) {
 			writeFile(t, featC, "src/d14/f1.txt", "in feat-c\n")
 			git(t, featC, "commit", "-qam", "feat-c change")
 			r.verify(t)
-			if !r.src.Contains(filepath.Join(featC, "src")) {
-				t.Error("the source doesn't count the new worktree as the unit's")
-			}
 			git(t, main, "worktree", "remove", "--force", featB)
 			r.verify(t)
-			if r.src.Contains(featB) {
-				t.Error("the source counts the removed worktree as the unit's")
-			}
 			if _, err := os.Lstat(r.dst + featB); err == nil {
 				t.Errorf("the removed worktree is still on main")
 			}
@@ -496,9 +490,6 @@ func TestAFolderInAnotherRepositoryKeepsToItselfWhenTheSourceRescans(t *testing.
 	r := newRig(t, Unit{Main: folder})
 	writeFile(t, folder, ".gitignore", "*.tmp\n") // which makes the source rescan
 	r.barrier(t)
-	if !r.src.Contains(folder) || r.src.Contains(other.Worktrees[0]) {
-		t.Fatal("the source took the other repository's worktrees for its folders")
-	}
 	for _, p := range []string{filepath.Join(folder, "s.jsonl"), filepath.Join(folder, ".gitignore")} {
 		if _, err := os.Lstat(r.dst + p); err != nil {
 			t.Errorf("main's copy of %s: %v", p, err)

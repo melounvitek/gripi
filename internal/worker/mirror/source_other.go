@@ -18,8 +18,6 @@ func NewSource(Unit, Options) *Source { return &Source{} }
 
 func (*Source) Healthy() bool { return false }
 
-func (*Source) Contains(string) bool { return false }
-
 func (*Source) Barrier(context.Context) (uint64, []string, error) { return 0, nil, errUnsupported }
 
 func (*Source) Run(context.Context, io.ReadWriter) error { return errUnsupported }
