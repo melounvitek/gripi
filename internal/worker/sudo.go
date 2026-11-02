@@ -67,10 +67,11 @@ func (conn *Conn) Sudo(ctx context.Context, session, cwd string, argv []string, 
 	if err := command.Start(); err != nil {
 		return 0, err
 	}
-	input.Write(append(run, '\n'))
-	// gripi worker sudo stops sudo once its input ends.
+	// gripi worker sudo stops sudo once its input ends, which also ends a write that it doesn't read.
 	stop := context.AfterFunc(ctx, func() { input.Close() })
 	defer stop()
+	// A failed write, as after gripi worker sudo has ended or ctx has, leaves the outcome to Wait.
+	input.Write(append(run, '\n'))
 	if err := command.Wait(); command.ProcessState == nil {
 		return 0, err
 	}
