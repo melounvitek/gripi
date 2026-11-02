@@ -15,11 +15,17 @@ import (
 // mapping moves paths at or under one folder to another.
 type mapping struct{ from, to string }
 
-func (m mapping) path(path string) string {
-	if rest, ok := strings.CutPrefix(path, m.from); ok && (rest == "" || rest[0] == '/') {
-		return m.to + rest
+type mappings []mapping
+
+// path moves path by the mapping of the longest folder that holds it, if any.
+func (all mappings) path(path string) string {
+	longest, moved := -1, path
+	for _, m := range all {
+		if rest, ok := strings.CutPrefix(path, m.from); ok && (rest == "" || rest[0] == '/') && len(m.from) > longest {
+			longest, moved = len(m.from), m.to+rest
+		}
 	}
-	return path
+	return moved
 }
 
 // resolve returns path made clean, as Docker cleans a bind's path before it follows links, with the symbolic links in

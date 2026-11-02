@@ -33,6 +33,22 @@ type Session struct {
 	// Env holds NAME=value variables on top of the helper's environment. They travel only over the control channel,
 	// never on a command line.
 	Env []string
+	// Move is the ID of the move whose view Pi runs in, if any.
+	Move string
+}
+
+// Move is a session that moves to the worker on a private copy of its repository, which the session's Pi, its
+// mirrors and its Docker socket see at main's paths there. Paths are main's.
+type Move struct {
+	// ID names the move on the worker: 1 to 64 letters, digits, '-' or '_'.
+	ID string
+	// Repository is the repository's common Git folder; empty for a folder outside Git.
+	Repository string
+	// Roots are the worktrees that the copy holds, the session's own first.
+	Roots []string
+	// Private are the folders directly in main's home folder that hold Repository and Roots, which the move's view
+	// shows from the copy.
+	Private []string
 }
 
 // Control is main's end of a helper's control channel. It answers the helper's pings at once, whatever else it
@@ -200,6 +216,12 @@ func (control *Control) watch() {
 }
 
 func (control *Control) call(ctx context.Context, request helper.Message) error {
+	_, err := control.request(ctx, request)
+	return err
+}
+
+// request sends a request to the helper and returns its answer.
+func (control *Control) request(ctx context.Context, request helper.Message) (helper.Message, error) {
 	reply := make(chan helper.Message, 1)
 	control.mu.Lock()
 	control.lastID++
@@ -207,7 +229,7 @@ func (control *Control) call(ctx context.Context, request helper.Message) error 
 	select {
 	case <-control.closed:
 		control.mu.Unlock()
-		return ErrControlClosed
+		return helper.Message{}, ErrControlClosed
 	default:
 		control.pending[request.ID] = reply
 	}
@@ -221,32 +243,69 @@ func (control *Control) call(ctx context.Context, request helper.Message) error 
 	case control.requests <- request:
 	case <-control.closing:
 		forget()
-		return ErrControlClosed
+		return helper.Message{}, ErrControlClosed
 	case <-ctx.Done():
 		forget()
-		return ctx.Err()
+		return helper.Message{}, ctx.Err()
 	}
 	select {
 	case response, ok := <-reply:
 		if !ok {
-			return ErrControlClosed
+			return helper.Message{}, ErrControlClosed
 		}
 		if !response.OK {
-			return fmt.Errorf("worker: %s", response.Error)
+			return response, fmt.Errorf("worker: %s", response.Error)
 		}
-		return nil
+		return response, nil
 	case <-ctx.Done():
 		forget()
-		return ctx.Err()
+		return helper.Message{}, ctx.Err()
 	}
 }
 
 // Instance names the helper, so that streams reach only this one.
 func (control *Control) Instance() string { return control.instance }
 
-// CreateSession starts Pi for a session, in the session's cgroup on the worker.
+// CreateSession starts Pi for a session, in the session's cgroup on the worker, and in its move's view if it has one.
 func (control *Control) CreateSession(ctx context.Context, session Session) error {
-	return control.call(ctx, helper.Message{Type: "session.create", Session: session.ID, Cwd: session.Cwd, Args: session.Args, Env: session.Env})
+	return control.call(ctx, helper.Message{Type: "session.create", Session: session.ID, Cwd: session.Cwd, Args: session.Args, Env: session.Env, Move: session.Move})
+}
+
+// PrepareMove makes the folder of a move's copy on the worker, unless it has it, and returns it as the helper sees
+// it. Then the move's copy gets main's shadow of the move's folders (Conn.UploadMove), and the session's file
+// (Conn.UploadSessionFile), before the session starts there.
+func (control *Control) PrepareMove(ctx context.Context, move Move) (string, error) {
+	response, err := control.request(ctx, helper.Message{Type: "move.prepare", Move: move.ID, Repository: move.Repository, Roots: move.Roots, Private: move.Private})
+	return response.Path, err
+}
+
+// SeedMove gives a move's copy, once it has main's shadow, the folders that Git ignores, such as node_modules, from
+// the latest earlier copy of its repository on the worker, or from those that deleted copies left.
+func (control *Control) SeedMove(ctx context.Context, id string) error {
+	return control.call(ctx, helper.Message{Type: "move.seed", Move: id})
+}
+
+// StartMoveMirror prepares a mirror of a move, which sends the copy's changes, or with file, the session's file's,
+// once AttachMoveMirror connects main's copy to it. A session's barriers need both of its move's mirrors.
+func (control *Control) StartMoveMirror(ctx context.Context, id, file string) error {
+	return control.call(ctx, helper.Message{Type: "mirror.start", Move: id, File: file})
+}
+
+// ReleaseMove kills every process of a move's sessions, then has main take the last barrier of each of its mirrors,
+// which run until then, and stops them, so that main's copies end. It returns the numbers of those barriers, 0 for a
+// mirror that never started.
+func (control *Control) ReleaseMove(ctx context.Context, id string) (helper.Barriers, error) {
+	response, err := control.request(ctx, helper.Message{Type: "move.release", Move: id})
+	if err != nil || response.Barriers == nil {
+		return helper.Barriers{}, err
+	}
+	return *response.Barriers, nil
+}
+
+// DeleteMove deletes the copy of a released move, once main has what it needs of it, and leaves the folders in it
+// that Git ignores to the next copies of its repository. A move that is gone already is fine.
+func (control *Control) DeleteMove(ctx context.Context, id string) error {
+	return control.call(ctx, helper.Message{Type: "move.delete", Move: id})
 }
 
 // CloseSession stops a session's Pi, as Gripi stops an idle Pi, and keeps the processes that Pi started.

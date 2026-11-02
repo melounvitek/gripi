@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"flag"
 	"io"
@@ -23,6 +24,8 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	lease := flags.Duration("lease", helper.DefaultLease, "")
 	runtimeDir := flags.String("runtime-dir", "", "")
 	home := flags.String("home", "", "")
+	// Gripi's folder on the worker, as Docker sees it, for the moves' copies.
+	dataDir := flags.String("data-dir", "", "")
 	// The cgroup that systemd delegated to the unit, and the worker user's own home folder, which serve passes on to
 	// itself in the view.
 	cgroup := flags.String("cgroup", "", "")
@@ -32,7 +35,7 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	} else if len(positional) > 0 {
 		return usageError(stderr, "worker", "serve takes no arguments besides its flags")
 	}
-	options := helper.Options{Lease: *lease, Cgroup: *cgroup}
+	options := helper.Options{Lease: *lease, Cgroup: *cgroup, Home: *home, OwnHome: cmp.Or(*ownHome, *home), DataDir: *dataDir}
 	var err error
 	if options.RuntimeDir, err = runtimeDirectory(*runtimeDir); err != nil {
 		return failure(stderr, "worker", err)
@@ -65,12 +68,12 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer stop()
 	options.ApplyAuth = func(path, contents string) error { return auth.WriteLocked(ctx, path, []byte(contents)) }
+	options.DockerUpstream = dockerproxy.Upstream(os.Environ())
 	if *ownHome != "" {
 		// The Docker daemon runs outside the view, so the sessions get a socket that moves the host paths in their
 		// requests from main's home folder to the worker user's own, and passes them on to the helper's Docker.
-		upstream := dockerproxy.Upstream(os.Environ())
 		options.Docker = func(ctx context.Context, socket string) error {
-			return dockerproxy.Serve(ctx, dockerproxy.Options{Listen: socket, Upstream: upstream, From: *home, To: *ownHome})
+			return dockerproxy.Serve(ctx, dockerproxy.Options{Listen: socket, Upstream: options.DockerUpstream, Mappings: []dockerproxy.Mapping{{From: *home, To: *ownHome}}})
 		}
 	}
 	if err := helper.Serve(ctx, stdin, stdout, options); err != nil {
@@ -100,44 +103,83 @@ func attachWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer)
 	return 0
 }
 
-// mirrorWorker connects main's copy of a unit to the unit's mirror in the helper.
+// mirrorWorker connects main's copy of a unit to the unit's mirror in the helper, or with --move, to a mirror of a
+// move: of the move's copy, or with --file, of the session's file.
 func mirrorWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("worker mirror", flag.ContinueOnError)
 	runtimeDir := flags.String("runtime-dir", "", "")
+	move := flags.String("move", "", "")
+	file := flags.String("file", "", "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "worker", err.Error())
 	}
-	if len(positional) != 2 {
+	if *move != "" && len(positional) != 1 {
+		return usageError(stderr, "worker", "mirror --move takes a helper instance")
+	}
+	if *move == "" && len(positional) != 2 {
 		return usageError(stderr, "worker", "mirror takes a unit's main folder and a helper instance")
 	}
 	folder, err := runtimeDirectory(*runtimeDir)
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
-	if err := helper.AttachMirror(folder, positional[0], positional[1], stdin, stdout); err != nil {
+	if *move != "" {
+		err = helper.AttachMoveMirror(folder, *move, *file, positional[0], stdin, stdout)
+	} else {
+		err = helper.AttachMirror(folder, positional[0], positional[1], stdin, stdout)
+	}
+	if err != nil {
 		return failure(stderr, "worker", err)
 	}
 	return 0
 }
 
-// receiveWorker connects the channel that main opened for a copy of its folder to the helper, which makes the copy.
+// hostMove runs a move's mirrors and Docker socket for the helper, which starts it in the move's view.
+func hostMove(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(arguments) > 0 {
+		return usageError(stderr, "worker", "move-host takes no arguments")
+	}
+	log.SetFlags(0)
+	if err := helper.Host(stdin, stdout); err != nil {
+		return failure(stderr, "worker", err)
+	}
+	return 0
+}
+
+// receiveWorker connects the channel that main opened for a copy of its folder to the helper, which makes the copy:
+// with --move, the move's copy, and with --file, a copy of main's file at the same path.
 func receiveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("worker receive", flag.ContinueOnError)
 	runtimeDir := flags.String("runtime-dir", "", "")
 	aside := flags.String("aside", "", "")
+	move := flags.String("move", "", "")
+	file := flags.String("file", "", "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "worker", err.Error())
 	}
-	if len(positional) != 3 {
+	switch {
+	case *move != "" && len(positional) != 2:
+		return usageError(stderr, "worker", "receive --move takes main's folder and a helper instance")
+	case *file != "" && len(positional) != 1:
+		return usageError(stderr, "worker", "receive --file takes a helper instance")
+	case *move == "" && *file == "" && len(positional) != 3:
 		return usageError(stderr, "worker", "receive takes main's folder, the folder here and a helper instance")
 	}
 	folder, err := runtimeDirectory(*runtimeDir)
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
-	if err := helper.AttachReceive(folder, positional[0], positional[1], *aside, positional[2], stdin, stdout); err != nil {
+	switch {
+	case *move != "":
+		err = helper.AttachReceiveMove(folder, *move, positional[0], positional[1], stdin, stdout)
+	case *file != "":
+		err = helper.AttachReceiveFile(folder, *file, positional[0], stdin, stdout)
+	default:
+		err = helper.AttachReceive(folder, positional[0], positional[1], *aside, positional[2], stdin, stdout)
+	}
+	if err != nil {
 		return failure(stderr, "worker", err)
 	}
 	return 0

@@ -138,17 +138,28 @@ func (s *server) runMirror(connection net.Conn) {
 		current.attached = true
 	}
 	s.mu.Unlock()
-	if !replyHello(connection, err) {
+	if err != nil {
+		replyHello(connection, err)
 		return
 	}
+	current.run(connection, reader, hello.Path)
+}
+
+// run runs the Source over main's channel, which the caller took for it, once main has the answer. Without the
+// answer, the Source never runs, and makes way for the next one that mirror.start prepares.
+func (current *mirroredUnit) run(connection net.Conn, reader io.Reader, name string) {
 	defer close(current.done)
+	if !replyHello(connection, nil) {
+		current.cancel()
+		return
+	}
 	stream := struct {
 		io.Reader
 		io.Writer
 		io.Closer
 	}{reader, connection, connection}
 	if err := current.source.Run(current.ctx, stream); err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("mirror of %s: %v", hello.Path, err)
+		log.Printf("mirror of %s: %v", name, err)
 	}
 }
 
@@ -175,28 +186,52 @@ func (s *server) sources(session string) (repository, sessions *mirror.Source) {
 }
 
 // Barrier and Healthy answer the worker extension from both Sources of a session, so main has both the repository
-// and the session's file as they were.
+// and the session's file as they were. Those of a move's session run in its host.
 func (s *server) Barrier(ctx context.Context, session string) error {
-	repository, sessions := s.sources(session)
-	switch {
-	case repository == nil:
-		return errors.New("nothing mirrors this session's folder to main")
-	case sessions == nil:
-		return errors.New("nothing mirrors this session's file to main")
+	if host, moved := s.hostOf(session); moved {
+		if host == nil {
+			return errors.New("nothing mirrors this session's folder to main")
+		}
+		_, err := host.call(ctx, Message{Type: "barrier"})
+		return err
 	}
-	// Each barrier waits for main, so they wait together.
-	sessionsDone := make(chan error, 1)
-	go func() {
-		_, _, err := sessions.Barrier(ctx)
-		sessionsDone <- err
-	}()
-	_, _, err := repository.Barrier(ctx)
-	return errors.Join(err, <-sessionsDone)
+	repository, sessions := s.sources(session)
+	return bothBarriers(ctx, repository, sessions)
 }
 
 func (s *server) Healthy(session string) bool {
-	repository, sessions := s.sources(session)
-	return repository != nil && sessions != nil && repository.Healthy() && sessions.Healthy()
+	if host, moved := s.hostOf(session); moved {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		answer, err := Response{}, errors.New("no mirrors")
+		if host != nil {
+			answer, err = host.call(ctx, Message{Type: "health"})
+		}
+		return err == nil && answer.OK
+	}
+	return bothHealthy(s.sources(session))
+}
+
+// bothBarriers returns once main has what a session changed in its repository and its file.
+func bothBarriers(ctx context.Context, repository, session *mirror.Source) error {
+	switch {
+	case repository == nil:
+		return errors.New("nothing mirrors this session's folder to main")
+	case session == nil:
+		return errors.New("nothing mirrors this session's file to main")
+	}
+	// Each barrier waits for main, so they wait together.
+	sessionDone := make(chan error, 1)
+	go func() {
+		_, _, err := session.Barrier(ctx)
+		sessionDone <- err
+	}()
+	_, _, err := repository.Barrier(ctx)
+	return errors.Join(err, <-sessionDone)
+}
+
+func bothHealthy(repository, session *mirror.Source) bool {
+	return repository != nil && session != nil && repository.Healthy() && session.Healthy()
 }
 
 // readHello reads the first line of a stream to the helper, which names the helper's instance.
@@ -225,6 +260,15 @@ func replyHello(connection net.Conn, err error) bool {
 // `gripi worker mirror` does, if the helper that runs it is instance.
 func AttachMirror(runtimeDir, main, instance string, stdin io.Reader, stdout io.Writer) error {
 	return pass(filepath.Join(runtimeDir, mirrorSocket), Message{Instance: instance, Path: main}, stdin, stdout)
+}
+
+// AttachMoveMirror passes stdin and stdout through to a mirror of a move, that of the session's file if file is set,
+// as `gripi worker mirror --move` does, if the helper that runs the move is instance.
+func AttachMoveMirror(runtimeDir, move, file, instance string, stdin io.Reader, stdout io.Writer) error {
+	if err := checkID("move", move); err != nil {
+		return err
+	}
+	return pass(hostConfig{RuntimeDir: runtimeDir, Move: move}.socket(), Message{Type: "mirror", Instance: instance, File: file}, stdin, stdout)
 }
 
 // pass sends hello to the helper's socket at path and, once the helper agrees, passes stdin and stdout through.

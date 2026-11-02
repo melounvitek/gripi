@@ -34,6 +34,8 @@ type sender struct {
 	opts     Options
 	main     string
 	gitDir   string
+	within   []string // Unit.Within
+	file     string   // Unit.File
 	roots    []string
 	cls      map[string]*classifier // per worktree
 	skipped  map[string]bool        // excluded worktree files and folders found by walks
@@ -73,7 +75,7 @@ const (
 
 func newSender(u Unit, opts Options, rw io.ReadWriter) *sender {
 	s := &sender{
-		opts: opts, main: u.Main, gitDir: u.GitDir, cls: map[string]*classifier{}, skipped: map[string]bool{}, followed: map[string]bool{},
+		opts: opts, main: u.Main, gitDir: u.GitDir, within: u.Within, file: u.File, cls: map[string]*classifier{}, skipped: map[string]bool{}, followed: map[string]bool{},
 		sent: map[string]entry{}, dirty: map[string]writes{}, objDels: map[string]uint64{}, unread: map[string]error{},
 		sigs: make(chan *frame, sigBatch), hashes: make(chan *frame, 1), stopped: make(chan struct{}), waiters: map[uint64][]chan error{},
 	}
@@ -151,6 +153,9 @@ func (s *sender) inWorktree(p string) bool { return !s.inGit(p) }
 // excluded reports whether p is left out of the mirror by itself; see
 // excludedAbove for the folders above it.
 func (s *sender) excluded(p string, isDir bool, size int64) bool {
+	if s.file != "" {
+		return p != s.file && p != s.main
+	}
 	if s.inGit(p) {
 		return gitTemporary(filepath.Base(p))
 	}
@@ -203,13 +208,13 @@ func (s *sender) kept(p string, e entry) bool {
 
 // skip remembers an excluded worktree path, which Git may track later.
 func (s *sender) skip(p string) {
-	if !s.inGit(p) {
+	if !s.inGit(p) && s.file == "" {
 		s.skipped[p] = true
 	}
 }
 
 func (s *sender) mark(p string, w writes) {
-	if s.inGit(p) && gitTemporary(filepath.Base(p)) {
+	if s.inGit(p) && gitTemporary(filepath.Base(p)) || s.file != "" && p != s.file {
 		return
 	}
 	if len(s.dirty) == 0 {
@@ -291,6 +296,12 @@ func inode(info fs.FileInfo) uint64 {
 // destination; seen, if set, collects every mirrored path.
 func (s *sender) walk(dir string, seen map[string]bool) error {
 	visit := func(p string, d fs.DirEntry, err error) error {
+		if s.file != "" && p != dir && p != s.file {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if err != nil {
 			s.cantRead(p, err)
 			return nil
@@ -418,10 +429,11 @@ func (s *sender) checkRoots() error {
 		if info, err := os.Lstat(r); err == nil && info.IsDir() {
 			continue
 		}
-		if s.gitDir != "" && r != s.main && r != s.gitDir {
+		// The main folder of a unit of selected folders may be a linked worktree too.
+		if s.gitDir != "" && (r != s.main || s.within != nil) && r != s.gitDir {
 			if listed == nil {
 				var err error
-				if listed, err = gitWorktrees(s.main); err != nil {
+				if listed, err = gitWorktrees(s.gitFolder()); err != nil {
 					return err
 				}
 			}
@@ -433,6 +445,29 @@ func (s *sender) checkRoots() error {
 		return fmt.Errorf("mirror: %s is not a folder here, so the mirror stops rather than delete the other side's copy of it", r)
 	}
 	return nil
+}
+
+// gitFolder is where Git lists the unit's worktrees: the main folder, unless the session removed that linked worktree.
+func (s *sender) gitFolder() string {
+	if _, err := os.Stat(s.main); err != nil && s.within != nil {
+		return s.gitDir
+	}
+	return s.main
+}
+
+// joinWorktrees adds the existing worktrees that Git lists and that join a unit of selected folders (see Unit.Within),
+// and returns every worktree that Git lists.
+func (s *sender) joinWorktrees() ([]string, error) {
+	listed, err := gitWorktrees(s.gitFolder())
+	if err != nil {
+		return nil, err
+	}
+	for i, worktree := range listed {
+		if _, err := os.Stat(worktree); err == nil && !s.isRoot(worktree) && joins(s.within, worktree, i == 0) {
+			s.addRoot(worktree)
+		}
+	}
+	return listed, nil
 }
 
 // fail tells the destination why the source stops, and returns err.
@@ -589,6 +624,11 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 				continue
 			}
 			delete(s.dirty, p)
+			if s.file != "" {
+				// Pi hasn't saved the session yet, or deleted it, which happens on main only.
+				delete(s.sent, p)
+				continue
+			}
 			old, had := s.sent[p]
 			if (!had && !s.sentUnder(p)) || s.kept(p, old) {
 				continue

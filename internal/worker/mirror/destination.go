@@ -43,6 +43,10 @@ type Destination struct {
 	// at the start and as it adds worktrees, and those of the checkpoint. If
 	// it refuses one, Serve fails.
 	AllowRoot func(root string) error
+	// File, if set before Serve, makes the destination keep only that file, with the source's path, of a unit of its
+	// folder: it lists nothing else there, takes nothing but the file's contents and never deletes it, so that the
+	// folder's other files, such as other sessions, stay as they are.
+	File string
 
 	state     string
 	recovered replayed // what finishing an interrupted barrier did, which Serve reports
@@ -1047,7 +1051,7 @@ func (r *receiver) fail(err error) error {
 
 func (r *receiver) addRoots(roots []string) error {
 	for _, root := range roots {
-		if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" || !within(root, r.d.from) {
+		if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" || !within(root, r.d.from) || r.d.File != "" && root != filepath.Dir(r.d.File) {
 			return fmt.Errorf("mirror: refusing the folder %q", root)
 		}
 		if slices.Contains(r.roots, root) {
@@ -1064,7 +1068,7 @@ func (r *receiver) addRoots(roots []string) error {
 }
 
 func (r *receiver) check(p string) error {
-	if !filepath.IsAbs(p) || filepath.Clean(p) != p || rootFor(r.roots, p) == "" {
+	if !filepath.IsAbs(p) || filepath.Clean(p) != p || rootFor(r.roots, p) == "" || r.d.File != "" && p != r.d.File {
 		return fmt.Errorf("mirror: refusing the path %q outside the unit", p)
 	}
 	return nil
@@ -1072,6 +1076,12 @@ func (r *receiver) check(p string) error {
 
 // list returns what the destination has, leaving out the source's ignored folders.
 func (r *receiver) list(skip []string) []entry {
+	if r.d.File != "" {
+		if info, err := os.Lstat(r.d.local(r.d.File)); err == nil && info.Mode().IsRegular() {
+			return []entry{entryOf(r.d.File, info)}
+		}
+		return nil
+	}
 	var entries []entry
 	for _, root := range r.roots {
 		local := r.d.local(root)
@@ -1099,6 +1109,9 @@ func (r *receiver) list(skip []string) []entry {
 }
 
 func (r *receiver) handle(f *frame) error {
+	if r.d.File != "" && f.Kind != kindPut && f.Kind != kindSigRequest && f.Kind != kindSumRequest {
+		return fmt.Errorf("mirror: refusing anything but the contents of %s", r.d.File)
+	}
 	switch f.Kind {
 	case kindRoots:
 		return r.addRoots(f.Roots)
