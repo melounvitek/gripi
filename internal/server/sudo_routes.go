@@ -175,8 +175,13 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "a sudo request needs a command and an absolute working directory"})
 		return
 	}
+	placement, fromWorker := workerOf(request)
 	if !app.validOwnedSessionPath(request, session) || !app.knownOrPendingSession(request, session) {
-		writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": "the command runs in no session of yours in Gripi, so nobody could answer"})
+		refusal := "the command runs in no session of yours in Gripi, so nobody could answer"
+		if fromWorker {
+			refusal = "the command runs in no session of yours on worker " + placement.Name() + ", so nobody could answer; ask the user to run it on main"
+		}
+		writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": refusal})
 		return
 	}
 	// The browser's page and live events show the requests of the canonical session, which an alias would miss.
@@ -186,7 +191,7 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		return
 	}
 	var worker, user string
-	if placement, fromWorker := workerOf(request); fromWorker {
+	if fromWorker {
 		location, _ := app.workers.Location(session)
 		worker, user = placement.Name(), location.User
 	}

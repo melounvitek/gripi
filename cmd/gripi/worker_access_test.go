@@ -189,7 +189,7 @@ func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 		}
 	}
 	t.Setenv("PI_SESSION_FILE", beta)
-	if code, _, stderr := runCLI("sudo", "--", "true"); code != 1 || !strings.Contains(stderr, "no session of yours") {
+	if code, _, stderr := runCLI("sudo", "--", "true"); code != 1 || !strings.Contains(stderr, "the command runs in no session of yours on worker beelink, so nobody could answer; ask the user to run it on main") {
 		t.Fatalf("gripi sudo in a session on main = %d, stderr %q", code, stderr)
 	}
 
