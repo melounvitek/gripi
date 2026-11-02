@@ -1,12 +1,13 @@
 import { movePickerCursor } from "./dom.js";
 
-// Owns the dialog that picks a worker to run the session's repository on, which says what moves before it moves, and
-// the one that forwards a port of the worker. The WorkerController sends what they ask for.
+// Owns the dialog that picks a worker to run the session on, which says what moves with it before it moves, and the
+// one that forwards a port of the worker. The WorkerController sends what they ask for.
 export class WorkerPickerController {
   constructor(document, window, callbacks) {
     this.document = document;
     this.window = window;
-    // openModal, closeModal, sessionPath, move(worker, repository), forward(port) → {port, local} or {error}, refresh.
+    // openModal, closeModal, sessionPath, homePath, move(worker, repository), forward(port) → {port, local} or
+    // {error}, refresh.
     this.callbacks = callbacks;
     this.modal = document.querySelector('[data-modal="worker-modal"]');
     if (!this.modal) return;
@@ -24,7 +25,7 @@ export class WorkerPickerController {
     this.cursor = 0;
     this.opening = 0;
     this.sending = false;
-    // A tap points at a worker, and the move waits for its own button, because it stops the repository's sessions.
+    // A tap points at a worker, and the move waits for its own button, because it stops the session's Pi.
     this.list.addEventListener("click", (event) => {
       const row = event.target.closest('[role="option"]');
       if (row) this.choose([...this.list.querySelectorAll('[role="option"]')].indexOf(row));
@@ -34,7 +35,7 @@ export class WorkerPickerController {
     this.modal.addEventListener("keydown", (event) => this.keydown(event));
   }
 
-  // Lists the workers, with what moves along with the session's repository.
+  // Lists the workers, with what the session's private copy of its repository gets.
   async openMove() {
     const opening = this.open("move", "Run on worker");
     this.setStatus("Loading workers…");
@@ -59,13 +60,17 @@ export class WorkerPickerController {
     }
     this.setStatus("");
     this.list.replaceChildren(...this.workers.map((worker) => this.row(worker)));
-    const { main, worktrees, sessions } = this.repository;
+    const { main, roots } = this.repository;
     const name = main.split("/").filter(Boolean).pop();
-    const moves = [worktrees && `its ${count(worktrees, "worktree")}`, sessions && count(sessions, "session")].filter(Boolean);
+    const copied = roots.map((root) => (root === main ? name : this.callbacks.homePath(root)));
+    const listed = copied.length > 1 ? `${copied.slice(0, -1).join(", ")} and ${copied.at(-1)}` : copied[0];
     this.renderFacts([
-      ["moves", moves.length ? `${name}, ${moves.length > 1 ? `${moves[0]} and ${moves[1]}` : moves[0]}` : name],
-      ["copies", "the repository and ignored files up to 10 MB, not ignored folders such as node_modules/"],
-      ["on main", `${name} stays read-only until it comes back`]
+      ["moves", `this session only, to a private copy of ${name}`],
+      // The main checkout holds the Git folder, which comes along without it too.
+      ["copy", roots.includes(main) ? listed : `${listed}, with ${name}'s Git folder`],
+      ["ignored", "files up to 10 MB; folders such as node_modules/ come from the worker's earlier copies"],
+      ["on main", `${name}'s other sessions keep running`],
+      ["return", "brings its changes back; main keeps what it changed too, and the worker's version is kept aside"]
     ]);
     this.go.hidden = false;
     this.choose(Math.max(0, this.workers.findIndex((worker) => worker.state === "connected")));
@@ -183,8 +188,4 @@ export class WorkerPickerController {
     this.callbacks.closeModal(this.modal);
     this.callbacks.refresh();
   }
-}
-
-function count(number, noun) {
-  return `${number} ${noun}${number === 1 ? "" : "s"}`;
 }

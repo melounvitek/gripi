@@ -119,18 +119,25 @@ func serve() error {
 		}
 	}
 	// The workers stop their sessions' processes once the connections close.
-	workers.Close()
+	if workers != nil {
+		workers.Close()
+	}
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
 	return nil
 }
 
-// newGateway returns the gateway's handler, and the workers that run the sessions of repositories placed on them,
-// connecting to them with the options of connection.
+// newGateway returns the gateway's handler, and the workers that run the sessions placed on them, connecting to them
+// with the options of connection; or no workers while the previous version of Gripi has repositories on them.
 func newGateway(cfg config.Config, connection remote.Options) (http.Handler, *remote.Manager, error) {
 	var workers *remote.Manager
-	piAdapter, err := newPiAdapter(cfg, func(process agent.Process) (*exec.Cmd, func(), error) { return workers.Launch(process) })
+	piAdapter, err := newPiAdapter(cfg, func(process agent.Process) (*exec.Cmd, func(), error) {
+		if workers == nil {
+			return nil, nil, nil
+		}
+		return workers.Launch(process)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -138,7 +145,11 @@ func newGateway(cfg config.Config, connection remote.Options) (http.Handler, *re
 	if err != nil {
 		return nil, nil, err
 	}
-	if workers, err = newWorkers(cfg, piAdapter, handler, connection); err != nil {
+	if workers, err = newWorkers(cfg, piAdapter, handler, connection); errors.Is(err, remote.ErrPreviousPlacements) {
+		log.Printf("Workers are unavailable: %v", err)
+		return handler, nil, nil
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(gatewayWorkers{workers, cfg.WorkersPath})

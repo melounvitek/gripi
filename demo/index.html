@@ -300,16 +300,16 @@
     .sudo-prompt-actions .sudo-prompt-run { color: var(--gold); font-weight: 700; }
     /* 16px keeps iOS from zooming into the field. */
     @media (max-width: 760px), (pointer: coarse) { .sudo-prompt-field input { min-height: 2.75rem; font-size: 16px; } }
-    /* Like the sudo prompt, copying to a worker or losing it takes the editor's place: gold rules while copying, red while lost. */
+    /* Like the sudo prompt, moving to a worker or back, or losing it, takes the editor's place: gold rules while it moves, red when it needs an answer. */
     .prompt-form[data-worker] > :not(.composer-controls) { display: none; }
     .worker-prompt { display: grid; gap: 0.5rem; font: 0.86rem/1.45 var(--mono); }
     .worker-prompt-editor { display: grid; gap: 0.55rem; padding: 0.6rem var(--text-inset) 0.7rem; border-block: 1px solid var(--danger); }
     .worker-prompt .worker-icon { display: inline-flex; color: var(--danger); }
-    .worker-prompt:is([data-mode="copying"], [data-mode="returning"]) .worker-prompt-editor { border-color: var(--gold); }
-    .worker-prompt:is([data-mode="copying"], [data-mode="returning"]) .worker-icon { color: var(--gold); }
+    .worker-prompt:is([data-mode="waiting"], [data-mode="copying"], [data-mode="returning"]) .worker-prompt-editor { border-color: var(--gold); }
+    .worker-prompt:is([data-mode="waiting"], [data-mode="copying"], [data-mode="returning"]) .worker-icon { color: var(--gold); }
     .worker-prompt .worker-icon svg { width: 0.9rem; height: 0.9rem; }
     .worker-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
-    .worker-prompt-head h2 { display: flex; align-items: center; gap: 0.5rem; color: var(--text); font-size: inherit; font-weight: 700; letter-spacing: 0; text-transform: none; }
+    .worker-prompt-head h2 { display: flex; align-items: center; gap: 0.5rem; color: var(--text); font-size: inherit; font-weight: 700; letter-spacing: 0; text-transform: none; white-space: normal; }
     .worker-prompt-time { color: var(--muted-soft); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .worker-prompt-progress { height: 2px; overflow: hidden; background: var(--panel-softer); }
     .worker-prompt-progress span { display: block; width: 30%; height: 100%; background: var(--gold); animation: worker-progress 1.6s ease-in-out infinite alternate; }
@@ -329,6 +329,8 @@
     .worker-badge-state:empty { display: none; }
     /* The folder that holds main's saved files is a long path, which wraps rather than push Dismiss away. */
     [data-worker-notice] > div { min-width: 0; overflow-wrap: anywhere; }
+    .worker-notice-details summary { width: fit-content; color: var(--muted); font: 0.78rem var(--mono); cursor: pointer; }
+    .worker-notice-details pre { max-height: 12rem; overflow: auto; margin: 0.4rem 0 0; color: var(--muted); font: 0.74rem/1.45 var(--mono); white-space: pre-wrap; }
     /* Picking a worker says what moves; forwarding a port says where it goes. */
     .worker-card { width: min(40rem, 100%); }
     .picker-row.worker-picker-row { grid-template-columns: 2ch 10ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: baseline; font-family: var(--mono); }
@@ -493,7 +495,7 @@
     /* Sessions on a worker: the icon is coloured by the worker's state, and quiet while the worker isn't connected. */
     [data-worker-state] { --worker-state: var(--muted); }
     [data-worker-state="connected"] { --worker-state: var(--success); }
-    [data-worker-state="connecting"], [data-worker-state="copying"] { --worker-state: var(--gold); }
+    [data-worker-state="connecting"], [data-worker-state="copying"], [data-worker-state="returning"] { --worker-state: var(--gold); }
     [data-worker-state="unreachable"], [data-worker-state="gone"] { --worker-state: var(--danger); }
     .session-worker-indicator, .worker-badge .worker-icon, .worker-badge-state, .worker-status-state { color: var(--worker-state); }
     .session-worker-indicator { display: inline-flex; flex: 0 0 0.875rem; }

@@ -347,6 +347,98 @@ func TestRestartUnsavedSessionDoesNotWaitForObservers(t *testing.T) {
 	}
 }
 
+// The stopped client's session exists only in it, so a prompt or a model that it took after its state said that it was
+// idle would be lost, or overwritten by the choices read before.
+func TestStopUnsavedSessionLetsNothingReachTheSessionWhileItStops(t *testing.T) {
+	ctx := context.Background()
+	old := newChoicesClient("old", "", LiveStatus{Provider: "e2e", ModelID: "contract-model", ThinkingLevel: "high"})
+	replacement := newChoicesClient("new", "", LiveStatus{})
+	registry := NewRegistry(func(string) (Client, error) { return replacement, nil }, nil)
+	if err := registry.Register("/pending", old); err != nil {
+		t.Fatal(err)
+	}
+	pending := NewPendingSessionRegistry(nil)
+	pending.Remember("/pending", "/project", "old")
+	var prompted, chosen error
+	old.liveStatusRead = func() {
+		prompted = registry.WithClient(ctx, "/pending", func(client Client) error {
+			_, err := client.Prompt(ctx, Prompt{Text: "Hello"})
+			return err
+		})
+		chosen = registry.WithClient(ctx, "/pending", func(client Client) error {
+			_, err := client.(ModelSelector).SetModel(ctx, "e2e", "fixture-model", "low")
+			return err
+		})
+	}
+
+	restart, err := StopUnsavedSession(ctx, "/pending", registry, pending)
+
+	if err != nil || restart == nil || !old.closed() {
+		t.Fatalf("stop = %v, restart %v, old closed %v", err, restart != nil, old.closed())
+	}
+	if !errors.Is(prompted, ErrClientRetiring) || !errors.Is(chosen, ErrClientRetiring) {
+		t.Fatalf("while the session stopped, a prompt = %v, a model = %v", prompted, chosen)
+	}
+	if err := restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if registry.Client("/pending") != replacement || replacement.status != (LiveStatus{Provider: "e2e", ModelID: "contract-model", ThinkingLevel: "high"}) {
+		t.Fatalf("the new client has %#v", replacement.status)
+	}
+}
+
+// A new client that refuses what was chosen in the stopped one leaves the session without a client, also while a page
+// reads it, so that the next try still has the choices.
+func TestStopUnsavedSessionKeepsTheChoicesWhenTheNewClientRefusesThem(t *testing.T) {
+	ctx := context.Background()
+	old := newChoicesClient("old", "", LiveStatus{Provider: "e2e", ModelID: "contract-model", ThinkingLevel: "high"})
+	var replacements []*choicesClient
+	var registry *Registry
+	observing, observed := make(chan struct{}), make(chan struct{})
+	registry = NewRegistry(func(string) (Client, error) {
+		replacement := newChoicesClient("new", "", LiveStatus{})
+		if len(replacements) == 0 {
+			replacement.setModelErr = &RequestError{Message: "No API key for e2e/contract-model"}
+			replacement.modelSet = func() {
+				go registry.WithObservingClient(ctx, "/pending", false, func(Client) error {
+					close(observing)
+					<-observed
+					return nil
+				})
+				<-observing
+			}
+		}
+		replacements = append(replacements, replacement)
+		return replacement, nil
+	}, nil)
+	defer close(observed)
+	if err := registry.Register("/pending", old); err != nil {
+		t.Fatal(err)
+	}
+	pending := NewPendingSessionRegistry(nil)
+	pending.Remember("/pending", "/project", "old")
+	restart, err := StopUnsavedSession(ctx, "/pending", registry, pending)
+	if err != nil || restart == nil {
+		t.Fatalf("stop = %v, restart %v", err, restart != nil)
+	}
+
+	if err := restart(ctx); err == nil {
+		t.Fatal("the restart took a client that refused the choices")
+	}
+	if registry.Registered("/pending") || !replacements[0].closed() {
+		t.Fatalf("after the refused choices, registered %v, the new client closed %v", registry.Registered("/pending"), replacements[0].closed())
+	}
+	if _, kept := pending.CWD("/pending"); !kept {
+		t.Fatal("the session was forgotten")
+	}
+	if err := restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if registry.Client("/pending") != replacements[1] || replacements[1].status != old.status {
+		t.Fatalf("the next client has %#v", replacements[1].status)
+	}
+}
+
 type workflowClient struct {
 	*registryClient
 	state    State
@@ -362,6 +454,8 @@ type choicesClient struct {
 	*workflowClient
 	status      LiveStatus
 	setModelErr error
+	// liveStatusRead, if set, runs once the status was read, and modelSet once a model was set or refused.
+	liveStatusRead, modelSet func()
 }
 
 func newChoicesClient(id, name string, status LiveStatus) *choicesClient {
@@ -369,12 +463,19 @@ func newChoicesClient(id, name string, status LiveStatus) *choicesClient {
 }
 
 func (client *choicesClient) LiveStatus(context.Context) (LiveStatus, error) {
-	return client.status, nil
+	status := client.status
+	if client.liveStatusRead != nil {
+		client.liveStatusRead()
+	}
+	return status, nil
 }
 func (client *choicesClient) ModelSettings(context.Context) (ModelSettings, error) {
 	return ModelSettings{}, nil
 }
 func (client *choicesClient) SetModel(_ context.Context, provider, modelID, thinkingLevel string) (ModelChoice, error) {
+	if client.modelSet != nil {
+		defer client.modelSet()
+	}
 	if client.setModelErr != nil {
 		return ModelChoice{}, client.setModelErr
 	}

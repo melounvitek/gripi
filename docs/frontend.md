@@ -17,8 +17,8 @@ Page-lifetime listeners are registered once by `public/assets/app.js`. Replaceab
 - `HermesPanelController` owns the Hermes panel and its tab on the page, and on the panel's own page the buttons that close it or open it in a window, and following the current conversation.
 - `VoiceCallController` owns the Hermes panel's voice button, the call view in the conversation's place, the call line with its controls, and the `VoiceConversation` they run.
 - `SudoPromptController` owns the prompt that asks, in the editor's place, for the password of a `gripi sudo` request, from the page's and the live events' pending requests.
-- `WorkerController` owns what the page shows about the worker that runs the session's repository, from the page's and the live events' worker state: the marks in the header and the editor's footer, the block that takes the editor's place while the repository is copied there or the worker is lost, and the notice about main's files saved aside. It also sends the moves that the block shows.
-- `WorkerPickerController` owns the dialogs that the command palette opens for a worker: picking one to run the session's repository on, which says what moves first, and forwarding one of its ports.
+- `WorkerController` owns what the page shows about the worker that runs the session, from the page's and the live events' worker state: the marks in the header and the editor's footer, the block that takes the editor's place while the session moves there or back, waits for another session to do so, or has lost the worker, and the notice about what its returns kept aside. It also sends the moves that the block shows.
+- `WorkerPickerController` owns the dialogs that the command palette opens for a worker: picking one to run the session on, which says first what its private copy of the repository gets, and forwarding one of its ports.
 - The access, gateway update, project select, and new-session form controllers own their respective timers and listeners.
 
 Before replacing a session view, `app.js` resets controllers that hold session DOM or asynchronous work. After replacement, it binds the new elements before polling resumes.

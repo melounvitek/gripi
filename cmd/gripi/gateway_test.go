@@ -22,9 +22,9 @@ import (
 // browser serves the browser's routes of the gateway that fakePiGateway started last.
 var browser http.Handler
 
-// fakePiGateway runs a gateway backed by the fake Pi on a socket the commands
-// will find. It has two idle sessions, 0a1-alpha and the more recent 0a1-beta.
-func fakePiGateway(t *testing.T, configure ...func(*config.Config)) (alpha, beta string) {
+// fakePiConfig configures a gateway backed by the fake Pi, with two idle sessions, 0a1-alpha and the more recent
+// 0a1-beta.
+func fakePiConfig(t *testing.T) (cfg config.Config, alpha, beta string) {
 	t.Helper()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -46,13 +46,21 @@ func fakePiGateway(t *testing.T, configure ...func(*config.Config)) (alpha, beta
 	_, file, _, _ := runtime.Caller(0)
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", filepath.Join(root, "fake-pi.log"))
-	cfg := config.Config{
+	cfg = config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(home, ".pi", "gripi", "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")},
 	}
+	return cfg, alpha, beta
+}
+
+// fakePiGateway runs a gateway backed by the fake Pi on a socket the commands
+// will find. It has the sessions of fakePiConfig.
+func fakePiGateway(t *testing.T, configure ...func(*config.Config)) (alpha, beta string) {
+	t.Helper()
+	cfg, alpha, beta := fakePiConfig(t)
 	for _, change := range configure {
 		change(&cfg)
 	}

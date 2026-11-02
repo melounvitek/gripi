@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
@@ -1590,6 +1591,45 @@ func TestSessionsIndexUncachedFilesInParallelUpToTheBuildBound(t *testing.T) {
 	}
 	if err := <-opened; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Workers check each listed session by its key, and the cache keeps fewer indexes than a listing has sessions.
+func TestSessionOfAListedSessionIndexesItNoMore(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	paths := make([]string, maxCacheEntries+16)
+	for number := range paths {
+		paths[number] = filepath.Join(root, fmt.Sprintf("session-%03d.jsonl", number))
+		writeSessionLines(t, paths[number], []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Message")})
+	}
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+	if sessions, err := store.Sessions(); err != nil || len(sessions) != len(paths) {
+		t.Fatalf("sessions = %d, err = %v", len(sessions), err)
+	}
+	var builds atomic.Int32
+	original := buildIndex
+	t.Cleanup(func() { buildIndex = original })
+	buildIndex = func(path string, stat os.FileInfo) (*index, error) {
+		builds.Add(1)
+		return original(path, stat)
+	}
+
+	for _, path := range paths {
+		if session, found := store.Session(path); !found || session.Path != path || session.CWD != project {
+			t.Fatalf("Session(%s) = %#v, %v", path, session, found)
+		}
+	}
+	if builds.Load() != 0 {
+		t.Fatalf("Session indexed %d of %d listed sessions again", builds.Load(), len(paths))
+	}
+	// A session that changed since is read again.
+	writeSessionLines(t, paths[0], []string{sessionLine(root)})
+	if session, found := store.Session(paths[0]); !found || session.CWD != root || builds.Load() != 1 {
+		t.Fatalf("Session of a changed session = %#v, %v, after %d builds", session, found, builds.Load())
 	}
 }
 

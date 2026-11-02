@@ -77,30 +77,11 @@ func StartNewSession(ctx context.Context, cwd string, start func(cwd string) (Cl
 func RestartUnsavedSession(ctx context.Context, key string, moment time.Time, clients *Registry, pending *PendingSessionRegistry) (bool, error) {
 	var id string
 	restarted, err := clients.restartIfStartedBefore(key, moment, func(old, replacement Client) error {
-		state, err := old.State(ctx)
+		choices, err := readUnsavedChoices(ctx, old)
 		if err != nil {
 			return err
 		}
-		// The agent can take a prompt before it reports the run that the prompt starts.
-		if state.Streaming || state.Compacting {
-			return errRunning
-		}
-		status, err := old.LiveStatus(ctx)
-		if err != nil {
-			return err
-		}
-		if models, ok := replacement.(ModelSelector); ok && status.Provider != "" && status.ModelID != "" {
-			if _, err := models.SetModel(ctx, status.Provider, status.ModelID, status.ThinkingLevel); err != nil {
-				return err
-			}
-		}
-		if renamer, ok := replacement.(Renamer); ok && state.Name != "" {
-			if err := renamer.Rename(ctx, state.Name); err != nil {
-				return err
-			}
-		}
-		state, err = replacement.State(ctx)
-		id = state.ID
+		id, err = choices.apply(ctx, replacement)
 		return err
 	})
 	if cwd, ok := pending.CWD(key); restarted && ok {
@@ -112,7 +93,78 @@ func RestartUnsavedSession(ctx context.Context, key string, moment time.Time, cl
 	return restarted, err
 }
 
+// StopUnsavedSession closes the idle client of a session that the agent has not saved yet, like RestartUnsavedSession
+// but for when no client may run the session for a while, such as while its folder moves to another computer. The
+// session keeps its pending key meanwhile, and the function that it returns starts a new client under the key, with
+// the model, thinking level and name chosen in the old one. If no client can start with them, the session keeps its
+// key without a client, and the function can run again. With a running client, it closes nothing and returns no
+// function.
+func StopUnsavedSession(ctx context.Context, key string, clients *Registry, pending *PendingSessionRegistry) (func(context.Context) error, error) {
+	var choices unsavedChoices
+	// The next client continues the old one's events, so a page's cursor stays valid.
+	closed, err := clients.closeIdleAfter(key, func(client Client) error {
+		var err error
+		choices, err = readUnsavedChoices(ctx, client)
+		return err
+	})
+	if errors.Is(err, errRunning) {
+		return nil, nil
+	}
+	if !closed || err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) error {
+		err := clients.WithClient(ctx, key, func(client Client) error {
+			id, err := choices.apply(ctx, client)
+			if cwd, ok := pending.CWD(key); err == nil && ok {
+				pending.Remember(key, cwd, id)
+			}
+			return err
+		})
+		if err != nil {
+			// A client without the choices would take their place at the next stop.
+			clients.CloseClientWithoutOperations(key)
+		}
+		return err
+	}, nil
+}
+
 var errRunning = errors.New("the session is running")
+
+// unsavedChoices are what was chosen in a session that the agent has not saved yet, which only its client has.
+type unsavedChoices struct {
+	status LiveStatus
+	name   string
+}
+
+func readUnsavedChoices(ctx context.Context, client Client) (unsavedChoices, error) {
+	state, err := client.State(ctx)
+	if err != nil {
+		return unsavedChoices{}, err
+	}
+	// The agent can take a prompt before it reports the run that the prompt starts.
+	if state.Streaming || state.Compacting {
+		return unsavedChoices{}, errRunning
+	}
+	status, err := client.LiveStatus(ctx)
+	return unsavedChoices{status: status, name: state.Name}, err
+}
+
+// apply gives the choices to a new client of the session, and returns the session's ID there.
+func (choices unsavedChoices) apply(ctx context.Context, client Client) (string, error) {
+	if models, ok := client.(ModelSelector); ok && choices.status.Provider != "" && choices.status.ModelID != "" {
+		if _, err := models.SetModel(ctx, choices.status.Provider, choices.status.ModelID, choices.status.ThinkingLevel); err != nil {
+			return "", err
+		}
+	}
+	if renamer, ok := client.(Renamer); ok && choices.name != "" {
+		if err := renamer.Rename(ctx, choices.name); err != nil {
+			return "", err
+		}
+	}
+	state, err := client.State(ctx)
+	return state.ID, err
+}
 
 // BranchSession runs branch on the client of the session previous and moves the client to the session it creates.
 // It returns the key that the client serves afterwards, which stays previous when the agent refused or cancelled the

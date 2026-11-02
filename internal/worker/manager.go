@@ -6,22 +6,17 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"maps"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/state"
+	"github.com/melounvitek/gripi/internal/keyedlock"
 	"github.com/melounvitek/gripi/internal/worker/auth"
 	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
@@ -33,15 +28,17 @@ type State string
 const (
 	Disconnected State = "disconnected"
 	Connecting   State = "connecting"
-	// Copying means a repository is being copied to the worker.
+	// Copying means a session's copy of its repository is being copied to the worker.
 	Copying   State = "copying"
 	Connected State = "connected"
 	// Unreachable means that main lost its connection to the worker, whose helper may still run sessions until the
 	// worker is gone.
 	Unreachable State = "unreachable"
-	// Gone means that main lost the worker long enough ago for every session there to have stopped, so the
-	// repositories on it can continue on this machine.
+	// Gone means that main lost the worker long enough ago for every session there to have stopped, so they can
+	// continue on this machine.
 	Gone State = "gone"
+	// Returning is a session's, not a worker's: it is coming back to main, or a return of it has to be finished.
+	Returning State = "returning"
 )
 
 // Status is how main's connection to a worker is.
@@ -51,7 +48,7 @@ type Status struct {
 	GoneAt time.Time `json:"gone_at,omitzero"`
 }
 
-// refusal is an error that refuses what was asked, such as moving a repository that is moving already, rather than
+// refusal is an error that refuses what was asked, such as moving a session that is moving already, rather than
 // failing at it.
 type refusal struct{ error }
 
@@ -71,8 +68,8 @@ const connectTimeout = 5 * time.Minute
 // another.
 const reconnectInterval = 2 * time.Second
 
-// firstBarrierTimeout bounds waiting until main's copies of a repository on a worker and of its sessions have the
-// first barriers of their mirrors, which a session's Pi waits for.
+// firstBarrierTimeout bounds waiting until main's copies of a move have the first barriers of their mirrors, which a
+// session's Pi waits for.
 var firstBarrierTimeout = time.Minute
 
 // closeSessionTimeout bounds closing a session's Pi on a worker, which the helper kills when it hasn't stopped 5
@@ -83,16 +80,16 @@ const closeSessionTimeout = 10 * time.Second
 type ManagerOptions struct {
 	// Destination returns where ssh connects for the worker of a name, as `gripi worker add` saved it.
 	Destination func(name string) (string, error)
-	// Placements records which repositories are on which worker.
+	// Placements records which sessions are on which worker.
 	Placements *Placements
-	// StateDir is Gripi's state folder, which holds ssh's control sockets and main's side of each repository's mirror.
-	// It must be on the file system of the repositories.
+	// StateDir is Gripi's state folder, which holds ssh's control sockets and main's side of each move. It must be on
+	// the file system of the repositories and of Pi's sessions.
 	StateDir string
 	// Pi is main's Pi, which every worker gets a copy of. Its ExtensionDir holds WorkerExtension.
 	Pi Pi
 	// WorkerExtension is the path of Gripi's worker extension, which the Pi of every session on a worker loads.
 	WorkerExtension string
-	// SessionsRoot holds Pi's session folders, one for each folder that sessions started in.
+	// SessionsRoot holds Pi's session folders.
 	SessionsRoot string
 	// GatewayPaths are Gripi's other own files and folders, wherever its settings put them, such as its configuration
 	// folder and state files. Like Pi's agent folder, the sessions' root and Gripi's state folder, they never move to a
@@ -100,67 +97,80 @@ type ManagerOptions struct {
 	GatewayPaths []string
 	// SocketPath is the path of the gripi socket, where gripi commands on a worker reach the worker's own socket.
 	SocketPath string
-	// Store finds the folders of saved sessions.
+	// Store finds saved sessions, and with agent.ToolPathsReader the worktrees that they used.
 	Store agent.Store
-	// StopSessions stops the Pi of every session on this machine, of any user, whose folder passes inFolder, as Move's
-	// stop does, and refuses with an error that has a Refused method while one of them is working.
-	StopSessions func(inFolder func(folder string) bool) error
 	// Rewritten tells the guard of the sessions' files that main's copy of a session's file on a worker was written
 	// anew, as the worker's Pi rewrote it (agent.Guard's Rewritten).
 	Rewritten func(key string)
-	// ServeSocket serves the gripi commands of a worker, which reach what placement says is on the worker, on a
-	// socket of its own.
+	// ServeSocket serves the gripi commands of a worker, which reach the sessions that placement says are on the
+	// worker, on a socket of its own.
 	ServeSocket func(name string, placement WorkerPlacement) (socket string, stop func() error, err error)
-	// Connection holds Connect's options but Destination and SocketDir, which the manager sets for each worker.
+	// Connection holds Connect's options but Destination and SocketDir, which the manager sets for each worker. Its
+	// Home is main's home folder, which the repositories of moving sessions must be in.
 	Connection Options
 	// Clock is time.Now when nil.
 	Clock func() time.Time
+
+	// open, in tests, replaces connecting to a worker, checking it and giving it main's Pi and gripi socket.
+	open func(ctx context.Context, name string) (link, *Installation, func() error, error)
 }
 
-// Manager runs the sessions of repositories placed on workers there: it connects to a worker when a session needs
-// it, mirrors each placed repository and its sessions' folders to main, and moves repositories between main and
-// workers.
+// link is main's connection to a worker as the manager uses it: a *Conn, or a fake in tests.
+type link interface {
+	authApplier
+	Lost() <-chan struct{}
+	GoneAt() time.Time
+	Forward(ctx context.Context, port Forward) (cancel func() error, err error)
+	CreateSession(ctx context.Context, session Session) error
+	Attach(ctx context.Context, session string) (*exec.Cmd, func(), error)
+	CloseSession(ctx context.Context, id string) error
+	PrepareMove(ctx context.Context, move Move) (string, error)
+	UploadMove(ctx context.Context, id, folder string) error
+	UploadSessionFile(ctx context.Context, file string) error
+	SeedMove(ctx context.Context, id string) error
+	StartMoveMirror(ctx context.Context, id, file string) error
+	AttachMoveMirror(ctx context.Context, id, file string) (*exec.Cmd, func(), error)
+	ReleaseMove(ctx context.Context, id string) (helper.Barriers, error)
+	DeleteMove(ctx context.Context, id string) error
+	// hangUp ends every channel at once, also over a link that hangs, before Close.
+	hangUp()
+	Close() error
+}
+
+var _ link = (*Conn)(nil)
+
+func (conn *Conn) hangUp() { conn.Pool.Close() }
+
+// Manager runs the sessions placed on workers there: it connects to a worker when a session needs it, mirrors each
+// move's copy and session file to main, and moves sessions between main and workers.
 type Manager struct {
 	options ManagerOptions
 	ctx     context.Context
 	cancel  context.CancelFunc
 	started time.Time
 	logins  *logins
+	// repositories is held, by a repository's Git folder, while a move takes its base or a return brings changes to it.
+	repositories keyedlock.Mutexes
+	// background has what goes on after a move or connection, which Close waits for.
+	background sync.WaitGroup
 
-	mu          sync.Mutex
-	workers     map[string]*remote
-	movingUnits []mirror.Unit       // units on their way to or from a worker, whose sessions can't start meanwhile
-	copying     []copying           // units that Move is copying to a worker
-	sessions    map[string]launched // by the session's ID on its worker
-	launches    []string            // folders of sessions whose Pi is starting
-	launched    *sync.Cond          // signalled when a launch ends
-	notices     []Notice
-	// accepted has the folders that main's copies of placed units accepted from their workers, which a barrier applies
-	// later, by the main folder of the copy's mirror (see covered).
-	accepted map[string][]string
+	mu       sync.Mutex
+	workers  map[string]*remote
+	moving   map[string]*moving  // sessions on their way between main and a worker, by key
+	sessions map[string]launched // by the session's ID on its worker
+	launches []string            // keys of sessions whose Pi is starting
+	launched *sync.Cond          // signalled when a launch ends
 
 	// closing has the sessions whose Pi the helper is closing, by their ID on the worker, which their next Pi waits for.
 	closing map[string]chan struct{}
-
-	copiesMu sync.Mutex // held while changing a repository's record of what workers keep of it
-	claiming sync.Mutex // held while claiming folders, so that two claims never take the same folder
 }
 
-// Notice says that files of a repository on a worker, or of its sessions, changed on this machine, which keeps a
-// read-only copy of them: before the worker's versions replaced them, this machine's were saved in Aside, at their
-// paths.
-type Notice struct {
-	Repository mirror.Unit `json:"repository"`
-	Aside      string      `json:"aside"`
-	Paths      []string    `json:"paths"`
-	Time       time.Time   `json:"time"`
-}
-
-// copying is a unit that Move is copying to a worker.
-type copying struct {
-	unit   mirror.Unit
-	worker string
-	since  time.Time
+// moving is a session on its way between main and a worker.
+type moving struct {
+	worker     string
+	repository string // its main checkout, once the move knows it
+	since      time.Time
+	returning  bool
 }
 
 // remote is main's side of one worker. The manager's mutex guards it, except connecting.
@@ -169,11 +179,12 @@ type remote struct {
 	connecting   sync.Mutex // held while connecting, so that others wait for the connection
 	state        State
 	goneAt       time.Time // when the worker is gone, after main lost its connection
-	conn         *Conn
+	conn         link
 	installation *Installation
 	stopSocket   func() error
-	mirrors      map[string]*liveMirror // by the unit's main folder
-	forwards     map[int]forwarded      // by the port on the worker; they end with the connection
+	mirrors      map[string]*moveMirrors // by move
+	starting     sync.WaitGroup          // mirrors that start on the connection
+	forwards     map[int]*forwarded      // by the port on the worker; they end with the connection
 	// tornDown is closed once the last disconnect has stopped the mirrors of its connection, whose copies on main
 	// nothing else may use until then.
 	tornDown chan struct{}
@@ -181,13 +192,12 @@ type remote struct {
 
 // launched is a session whose Pi the manager started on a worker.
 type launched struct {
-	worker, cwd string
-	lost        func(message string) // agent.Process.Lost
+	worker string
+	lost   func(message string) // agent.Process.Lost
 }
 
-// liveMirror is main's copy of a unit, kept up to date by the unit's mirror on the worker.
+// liveMirror is main's copy of one of a move's mirrors, kept up to date by the mirror on the worker.
 type liveMirror struct {
-	unit        mirror.Unit
 	destination *mirror.Destination
 	started     time.Time // before the mirror's first barrier
 	cancel      context.CancelFunc
@@ -204,7 +214,8 @@ func (live *liveMirror) running() bool {
 	}
 }
 
-// NewManager returns a manager that connects to no worker until a session or a move needs it.
+// NewManager returns a manager that connects to no worker until a session or a move needs it. It cleans up after
+// the moves that an earlier gateway didn't finish.
 func NewManager(options ManagerOptions) *Manager {
 	if options.Clock == nil {
 		options.Clock = time.Now
@@ -212,32 +223,17 @@ func NewManager(options ManagerOptions) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
 		options: options, ctx: ctx, cancel: cancel, started: options.Clock(), workers: map[string]*remote{}, sessions: map[string]launched{},
-		logins:  newLogins(auth.Pi{Command: options.Pi.Command, AgentDir: options.Pi.AgentDir}, options.Clock),
-		closing: map[string]chan struct{}{}, accepted: map[string][]string{},
+		logins: newLogins(auth.Pi{Command: options.Pi.Command, AgentDir: options.Pi.AgentDir}, options.Clock),
+		moving: map[string]*moving{}, closing: map[string]chan struct{}{},
 	}
 	manager.launched = sync.NewCond(&manager.mu)
 	go manager.logins.run(ctx, loginsPoll)
-	return manager
-}
-
-// Notices returns the notices of the repository that holds folder, oldest first, until DismissNotices.
-func (manager *Manager) Notices(folder string) []Notice {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	var notices []Notice
-	for _, notice := range manager.notices {
-		if notice.Repository.Contains(folder) {
-			notices = append(notices, notice)
+	if options.Placements != nil {
+		for _, placement := range options.Placements.Begun() {
+			manager.abandon(placement)
 		}
 	}
-	return notices
-}
-
-// DismissNotices forgets the notices of the repository that holds folder. The files saved aside stay.
-func (manager *Manager) DismissNotices(folder string) {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	manager.notices = slices.DeleteFunc(manager.notices, func(notice Notice) bool { return notice.Repository.Contains(folder) })
+	return manager
 }
 
 // Status reports the connection to the worker of a name.
@@ -258,56 +254,80 @@ func (manager *Manager) Status(name string) Status {
 	return status
 }
 
-// Location is where the sessions of a folder run while its repository is on a worker, or is being copied to one.
+// Location is where a session runs while it is on a worker, or on its way to one.
 type Location struct {
 	Worker string
+	// Status is the worker's, but Returning while the session comes back.
 	Status
-	// Repository is the main folder of the folder's repository.
+	// Repository is the main checkout of the session's repository, once a move knows it.
 	Repository string
-	// Copying is when Move started copying the repository to the worker, which it does until the sessions run there.
+	// Copying is when the session started moving to the worker, which it is until it runs there.
 	Copying time.Time
-	// Forwards are the worker's ports that main forwards, by port.
+	// Returning is when the session started coming back, while it does. A return that stopped before it finished
+	// leaves the state Returning without it.
+	Returning time.Time
+	// Forwards are the worker's ports that main forwards for the session, by port.
 	Forwards []Forwarded
 }
 
-// Location reports the worker that runs the sessions of folder, or that its repository is being copied to.
-func (manager *Manager) Location(folder string) (Location, bool) {
+// Location reports the worker that runs a session, or that it is moving to.
+func (manager *Manager) Location(key string) (Location, bool) {
 	var location Location
+	placement, placed := manager.options.Placements.Find(key)
 	manager.mu.Lock()
-	for _, copying := range manager.copying {
-		if copying.unit.Contains(folder) {
-			location = Location{Worker: copying.worker, Repository: copying.unit.Main, Copying: copying.since}
+	moving := manager.moving[key]
+	if moving != nil {
+		location = Location{Worker: moving.worker, Repository: moving.repository}
+		if !moving.returning {
+			location.Copying = moving.since
 		}
 	}
 	manager.mu.Unlock()
-	if location.Worker == "" {
-		placement, placed := manager.options.Placements.Find(folder)
-		if !placed {
-			return Location{}, false
-		}
-		location = Location{Worker: placement.Worker, Repository: placement.Unit.Main}
+	switch {
+	case placed:
+		location = Location{Worker: placement.Worker, Repository: filepath.Dir(placement.Repository)}
+	case moving == nil:
+		return Location{}, false
 	}
 	location.Status = manager.Status(location.Worker)
-	if location.Copying.IsZero() && location.State == Copying {
-		// The worker is getting another repository, while it runs this one's sessions.
+	switch {
+	case placed && (placement.Stage != "" || moving != nil && moving.returning):
+		location.State = Returning
+		if moving != nil && moving.returning {
+			location.Returning = moving.since
+		}
+	case location.Copying.IsZero() && location.State == Copying:
+		// The worker is getting another session's copy, while it runs this one.
 		location.State = Connected
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if worker := manager.workers[location.Worker]; worker != nil {
 		for port, forwarded := range worker.forwards {
-			location.Forwards = append(location.Forwards, Forwarded{Port: port, Local: forwarded.local})
+			if slices.Contains(forwarded.sessions, key) {
+				location.Forwards = append(location.Forwards, Forwarded{Port: port, Local: forwarded.local})
+			}
 		}
 	}
 	slices.SortFunc(location.Forwards, func(left, right Forwarded) int { return left.Port - right.Port })
 	return location, true
 }
 
-// Repository returns the main folder and the worktrees of the repository that holds folder, which move to a worker
-// together, or folder alone outside Git.
-func (manager *Manager) Repository(folder string) (main string, worktrees []string, err error) {
-	unit, err := mirror.Discover(folder)
-	return unit.Main, unit.Worktrees, err
+// Placed returns the folders that the sessions on workers run in, by the sessions' keys.
+func (manager *Manager) Placed() map[string]string {
+	placed := map[string]string{}
+	for _, placement := range manager.options.Placements.All() {
+		placed[placement.Session] = placement.Cwd
+	}
+	return placed
+}
+
+// connected reports whether main has a connection to the worker of a name.
+func (manager *Manager) connected(name string) bool {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	worker := manager.workers[name]
+	return worker != nil && worker.conn != nil
 }
 
 func (manager *Manager) setState(worker *remote, state State) {
@@ -316,14 +336,14 @@ func (manager *Manager) setState(worker *remote, state State) {
 	worker.state = state
 }
 
-// connect returns the worker of a name, connected and with main's Pi, and with the mirrors of every unit placed on it
-// running, but those on their way back to main. It connects when the worker is not connected yet or lost its
-// connection. It fails when the mirrors of the unit whose main folder is required don't run.
+// connect returns the worker of a name, connected and with main's Pi, and with the mirrors of every move on it
+// running, but those whose return has them already or runs. It connects when the worker is not connected yet or lost
+// its connection. It fails when the mirrors of the move required don't run.
 func (manager *Manager) connect(ctx context.Context, name, required string) (*remote, error) {
 	manager.mu.Lock()
 	worker := manager.workers[name]
 	if worker == nil {
-		worker = &remote{name: name, state: Disconnected, mirrors: map[string]*liveMirror{}}
+		worker = &remote{name: name, state: Disconnected, mirrors: map[string]*moveMirrors{}}
 		manager.workers[name] = worker
 	}
 	manager.mu.Unlock()
@@ -350,62 +370,56 @@ func (manager *Manager) connect(ctx context.Context, name, required string) (*re
 	}
 	for _, placement := range manager.options.Placements.All() {
 		manager.mu.Lock()
-		moving := slices.ContainsFunc(manager.movingUnits, func(unit mirror.Unit) bool { return unit.Main == placement.Unit.Main })
+		moving := manager.moving[placement.Session] != nil
 		manager.mu.Unlock()
-		if placement.Worker == name && !moving {
-			if err := manager.runMirrors(ctx, worker, placement.Unit); err != nil {
-				err = fmt.Errorf("mirror %s from worker %s: %w", placement.Unit.Main, name, err)
-				if placement.Unit.Main == required {
-					return nil, err
-				}
-				log.Print(err)
+		// A return that runs has the mirrors of its move, which may have ended for good.
+		if placement.Worker != name || placement.Stage == released || moving && placement.Move != required {
+			continue
+		}
+		if err := manager.startMirrors(ctx, worker, placement); err != nil {
+			err = fmt.Errorf("mirror session %s from worker %s: %w", placement.Session, name, err)
+			if placement.Move == required {
+				return nil, err
 			}
+			log.Print(err)
 		}
 	}
 	return worker, nil
 }
 
-// runMirrors makes sure that the mirrors of a placed unit run: the unit's, and that of its sessions' folders, with
-// every folder that its sessions need.
-func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mirror.Unit) error {
-	manager.mu.Lock()
-	live, sessions := worker.mirrors[unit.Main], worker.mirrors[manager.sessionsMain(unit)]
-	manager.mu.Unlock()
-	if live == nil || !live.running() {
-		if err := manager.startMirror(ctx, worker, unit, false); err != nil {
-			return err
-		}
-	}
-	if sessions != nil && sessions.running() {
-		folders, _ := manager.sessionFolders(unit, worker.name)
-		added := slices.DeleteFunc(slices.Clone(folders), sessions.unit.Contains)
-		if len(added) == 0 {
-			return nil
-		}
-		// A folder of another repository, or with sessions of another folder, is refused before the running mirror stops
-		// for it.
-		if err := manager.claim(unit.Main, nil, folders, false); err != nil {
-			return err
-		}
-		if err := manager.admitSessionFolders(unit, added); err != nil {
-			return err
-		}
-		// The worker's helper watches only the folders that its mirror started with.
-		if err := manager.stopMirror(ctx, worker, sessions.unit.Main); err != nil {
-			return err
-		}
-	}
-	return manager.startMirror(ctx, worker, unit, true)
-}
-
-// dial connects to a worker, gives it main's Pi and lets its gripi commands reach the gateway.
+// dial connects to a worker, gives it main's Pi and lets its gripi commands reach the gateway, then deletes the copies
+// that it keeps of moves that ended.
 func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 	manager.setState(worker, Connecting)
-	options := manager.options.Connection
-	var err error
-	if options.Destination, err = manager.options.Destination(worker.name); err != nil {
+	open := manager.options.open
+	if open == nil {
+		open = manager.open
+	}
+	conn, installation, stopSocket, err := open(ctx, worker.name)
+	if err != nil {
 		manager.setState(worker, Disconnected)
 		return err
+	}
+	manager.mu.Lock()
+	// The new helper runs, so the helper of a lost connection has stopped.
+	worker.conn, worker.installation, worker.stopSocket, worker.state, worker.goneAt = conn, installation, stopSocket, Connected, time.Time{}
+	manager.mu.Unlock()
+	manager.logins.add(worker.name, conn)
+	go func() {
+		<-conn.Lost()
+		manager.disconnect(worker, conn, true)
+	}()
+	manager.background.Go(func() { manager.deleteCopies(worker.name, conn) })
+	return nil
+}
+
+// open connects to the worker of a name, checks that it doesn't share main's files, gives it main's Pi, and forwards
+// its gripi socket to the gateway.
+func (manager *Manager) open(ctx context.Context, name string) (link, *Installation, func() error, error) {
+	options := manager.options.Connection
+	var err error
+	if options.Destination, err = manager.options.Destination(name); err != nil {
+		return nil, nil, nil, err
 	}
 	options.SocketDir = filepath.Join(manager.options.StateDir, "ssh")
 	var conn *Conn
@@ -414,24 +428,21 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 			break
 		}
 		manager.mu.Lock()
-		goneAt := worker.goneAt
+		goneAt := manager.workers[name].goneAt
 		manager.mu.Unlock()
 		// The helper of a lost connection refuses another until it has stopped, which it has once the worker is gone.
 		if !manager.options.Clock().Before(goneAt) {
-			manager.setState(worker, Disconnected)
-			return err
+			return nil, nil, nil, err
 		}
 		select {
 		case <-ctx.Done():
-			manager.setState(worker, Disconnected)
-			return fmt.Errorf("%w; worker %s may still run the sessions of a lost connection until %s", err, worker.name, goneAt.Local().Format(time.TimeOnly))
+			return nil, nil, nil, fmt.Errorf("%w; worker %s may still run the sessions of a lost connection until %s", err, name, goneAt.Local().Format(time.TimeOnly))
 		case <-time.After(reconnectInterval):
 		}
 	}
-	fail := func(err error) error {
+	fail := func(err error) (link, *Installation, func() error, error) {
 		conn.Close()
-		manager.setState(worker, Disconnected)
-		return err
+		return nil, nil, nil, err
 	}
 	socketDir := ""
 	if manager.options.SocketPath != "" {
@@ -446,7 +457,7 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 	if err != nil {
 		return fail(err)
 	}
-	socket, stopSocket, err := manager.options.ServeSocket(worker.name, manager.Placement(worker.name))
+	socket, stopSocket, err := manager.options.ServeSocket(name, manager.Placement(name))
 	if err != nil {
 		return fail(err)
 	}
@@ -455,16 +466,7 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 		stopSocket()
 		return fail(err)
 	}
-	manager.mu.Lock()
-	// The new helper runs, so the helper of a lost connection has stopped.
-	worker.conn, worker.installation, worker.stopSocket, worker.state, worker.goneAt = conn, installation, stopSocket, Connected, time.Time{}
-	manager.mu.Unlock()
-	manager.logins.add(worker.name, conn)
-	go func() {
-		<-conn.Lost()
-		manager.disconnect(worker, conn, true)
-	}()
-	return nil
+	return conn, installation, stopSocket, nil
 }
 
 // Reconnect connects to the worker of a name, if main is not connected to it, as the next session there or move to it
@@ -477,7 +479,7 @@ func (manager *Manager) Reconnect(ctx context.Context, name string) error {
 // disconnect forgets a worker's connection and closes it, unless the worker has another one by now. After main lost the
 // connection, the worker is unreachable until it is gone, and the steps that its sessions were running end with an
 // outcome that nobody knows. The next session there or move to it connects again.
-func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
+func (manager *Manager) disconnect(worker *remote, conn link, lost bool) {
 	manager.mu.Lock()
 	if worker.conn != conn {
 		manager.mu.Unlock()
@@ -486,7 +488,7 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 	tornDown := make(chan struct{})
 	defer close(tornDown)
 	mirrors, stopSocket := worker.mirrors, worker.stopSocket
-	worker.conn, worker.installation, worker.stopSocket, worker.mirrors, worker.state = nil, nil, nil, map[string]*liveMirror{}, Disconnected
+	worker.conn, worker.installation, worker.stopSocket, worker.mirrors, worker.state = nil, nil, nil, map[string]*moveMirrors{}, Disconnected
 	worker.tornDown = tornDown
 	worker.forwards = nil
 	var sessions []launched
@@ -502,8 +504,7 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 	}
 	manager.mu.Unlock()
 	manager.logins.remove(worker.name, conn)
-	// Ending the master connections at once ends every channel, also over a link that hangs.
-	conn.Pool.Close()
+	conn.hangUp()
 	for _, session := range sessions {
 		if lost && session.lost != nil {
 			session.lost(fmt.Sprintf("Lost the connection to worker %s. The outcome of the running step is unknown.", worker.name))
@@ -511,9 +512,9 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 	}
 	// Main's copies are as their last barriers left them once their mirrors have ended.
 	for _, live := range mirrors {
-		live.cancel()
-		<-live.done
+		live.stop()
 	}
+	worker.starting.Wait()
 	stopSocket()
 	conn.Close()
 }
@@ -537,8 +538,8 @@ func (manager *Manager) waitForTeardown(ctx context.Context, name string) error 
 	}
 }
 
-// Close stops every worker's mirrors after a last barrier, and closes the connections, which stops every session on
-// the workers. Call it once the sessions' Pi have stopped.
+// Close closes the connections, which stops every session on the workers, and their mirrors. Call it once the
+// sessions' Pi have stopped, whose last steps main's copies have.
 func (manager *Manager) Close() {
 	manager.mu.Lock()
 	workers := make([]*remote, 0, len(manager.workers))
@@ -548,25 +549,18 @@ func (manager *Manager) Close() {
 	manager.mu.Unlock()
 	for _, worker := range workers {
 		manager.mu.Lock()
-		conn, mains := worker.conn, slices.Collect(maps.Keys(worker.mirrors))
+		conn := worker.conn
 		manager.mu.Unlock()
-		if conn == nil {
-			continue
+		if conn != nil {
+			manager.disconnect(worker, conn, false)
 		}
-		for _, main := range mains {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := manager.stopMirror(ctx, worker, main); err != nil {
-				log.Printf("stop the mirror of %s from worker %s: %v", main, worker.name, err)
-			}
-			cancel()
-		}
-		manager.disconnect(worker, conn, false)
 	}
 	manager.cancel()
+	manager.background.Wait()
 }
 
 // connection returns a worker's connection, or fails when the worker has disconnected.
-func (manager *Manager) connection(worker *remote) (*Conn, error) {
+func (manager *Manager) connection(worker *remote) (link, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if worker.conn == nil {
@@ -575,466 +569,33 @@ func (manager *Manager) connection(worker *remote) (*Conn, error) {
 	return worker.conn, nil
 }
 
-// mirrorFolder holds main's state of the mirror of the unit whose main folder is main, and what main saved aside.
-func (manager *Manager) mirrorFolder(main string) string {
-	hash := sha256.Sum256([]byte(main))
-	return filepath.Join(manager.options.StateDir, "mirrors", hex.EncodeToString(hash[:8]))
-}
-
-// forgetMirror removes main's side of the mirror of the unit whose main folder is main, with the folders that main's
-// copy accepted, which are no longer the unit's.
-func (manager *Manager) forgetMirror(main string) error {
-	manager.mu.Lock()
-	delete(manager.accepted, main)
-	manager.mu.Unlock()
-	return os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state"))
-}
-
-// sessionsMain names the mirror of a unit's sessions' folders: by the folder of the sessions in the unit's main folder,
-// which comes first.
-func (manager *Manager) sessionsMain(unit mirror.Unit) string {
-	return sessionFolder(manager.options.SessionsRoot, unit.Main)
-}
-
-// startMirror starts the mirror of a placed unit on the worker, or with sessions, the mirror of the unit's sessions'
-// folders, and connects main's copy to it.
-func (manager *Manager) startMirror(ctx context.Context, worker *remote, repository mirror.Unit, sessions bool) error {
-	conn, err := manager.connection(worker)
-	if err != nil {
-		return err
-	}
-	unit := repository
-	var cwds []string
-	if sessions {
-		var folders []string
-		folders, cwds = manager.sessionFolders(repository, worker.name)
-		unit = mirror.Unit{Main: folders[0], Worktrees: folders[1:]}
-	}
-	folder := manager.mirrorFolder(unit.Main)
-	destination, err := mirror.NewDestination(filepath.Join(folder, "state"))
-	if err != nil {
-		return err
-	}
-	if sessions {
-		roots := destination.Checkpoint().Roots
-		added := slices.DeleteFunc(unitFolders(unit), func(folder string) bool { return slices.Contains(roots, folder) })
-		// Main's copy keeps every folder that it had, whose sessions would go if the worker sent no folder of them.
-		for _, root := range roots {
-			if !unit.Contains(root) {
-				unit.Worktrees = append(unit.Worktrees, root)
-			}
-		}
-		if err := manager.claim(repository.Main, nil, unitFolders(unit), false); err != nil {
-			return err
-		}
-		if err := manager.admitSessionFolders(repository, added); err != nil {
-			return err
-		}
-		// The worker's helper makes the folders that the worker doesn't have yet.
-		if err := manager.rememberSessions(repository.Main, worker.name, cwds); err != nil {
-			return err
-		}
-	}
-	destination.Applied = manager.applied(repository, sessions)
-	destination.AllowRoot = manager.allowRoot(unit, sessions)
-	sessionsOf := ""
-	if sessions {
-		sessionsOf = repository.Main
-	}
-	if err := conn.StartMirror(ctx, unit, sessionsOf); err != nil {
-		return err
-	}
-	command, release, err := conn.AttachMirror(ctx, unit.Main)
-	if err != nil {
-		return err
-	}
-	input, err := command.StdinPipe()
-	if err != nil {
-		release()
-		return err
-	}
-	output, err := command.StdoutPipe()
-	if err != nil {
-		release()
-		return err
-	}
-	stderr := &lastLines{}
-	command.Stderr = stderr
-	if err := command.Start(); err != nil {
-		release()
-		return err
-	}
-	mirrorCtx, cancel := context.WithCancel(manager.ctx)
-	live := &liveMirror{unit: unit, destination: destination, started: time.Now(), cancel: cancel, done: make(chan struct{})}
-	manager.mu.Lock()
-	worker.mirrors[unit.Main] = live
-	manager.mu.Unlock()
-	go func() {
-		defer close(live.done)
-		aside := filepath.Join(folder, "aside", time.Now().UTC().Format("20060102T150405.000000000Z"))
-		live.err = destination.Serve(mirrorCtx, struct {
-			io.Reader
-			io.WriteCloser
-		}{output, input}, aside)
-		command.Wait()
-		release()
-		if live.err != nil {
-			log.Printf("mirror of %s from worker %s: %v %s", unit.Main, worker.name, live.err, stderr)
-		}
-	}()
-	return nil
-}
-
-// applied takes what main's copy of a placed unit, or with sessions of the unit's sessions' folders, applied: files
-// that changed on main make a notice, the unit's folders, which Git on the worker may have changed, are its
-// placement's from then on, and the guard takes the sessions' files that the copy wrote anew for the gateway's own.
-func (manager *Manager) applied(repository mirror.Unit, sessions bool) func(mirror.Checkpoint, string, []string, []string) {
-	return func(checkpoint mirror.Checkpoint, aside string, saved, replaced []string) {
-		if sessions && manager.options.Rewritten != nil {
-			// A file that changed on main, such as in Pi CLI, is another writer's.
-			rewritten := slices.DeleteFunc(slices.Clone(replaced), func(path string) bool { return slices.Contains(saved, path) })
-			if len(rewritten) > 0 {
-				// The guard waits for the session, which an operation may hold while it waits for this barrier.
-				go func() {
-					for _, path := range rewritten {
-						manager.options.Rewritten(path)
-					}
-				}()
-			}
-		}
-		placement, placed := manager.options.Placements.Find(repository.Main)
-		placed = placed && placement.Unit.Main == repository.Main
-		if placed && !sessions {
-			worktrees := slices.DeleteFunc(slices.Clone(checkpoint.Roots), func(root string) bool {
-				return root == placement.Unit.Main || root == placement.Unit.GitDir
-			})
-			if !slices.Equal(slices.Sorted(slices.Values(worktrees)), slices.Sorted(slices.Values(placement.Unit.Worktrees))) {
-				placement.Unit.Worktrees = worktrees
-				if err := manager.options.Placements.Update(placement); err != nil {
-					log.Printf("note the worktrees of %s on worker %s: %v", repository.Main, placement.Worker, err)
-				}
-			}
-		}
-		if len(saved) == 0 {
-			return
-		}
-		unit := repository
-		if placed {
-			unit = placement.Unit
-		}
-		log.Printf("%d files of %s changed on this machine, which keeps a read-only copy; this machine's versions are in %s", len(saved), unit.Main, aside)
-		manager.mu.Lock()
-		defer manager.mu.Unlock()
-		manager.notices = append(manager.notices, Notice{Repository: unit, Aside: aside, Paths: saved, Time: time.Now()})
-	}
-}
-
-// allowRoot is the AllowRoot of main's copy of a unit: a placed unit's copy writes in the unit's folders and in
-// worktrees that the worker made, but never in Pi's or Gripi's own folders, in a folder that another repository on a
-// worker owns (see claim), or in a folder of this machine's own files, which the worker's would replace without saving them aside; the copy of the
-// folders of a unit's sessions, which are its unit, writes only in those.
-func (manager *Manager) allowRoot(unit mirror.Unit, sessions bool) func(root string) error {
-	return func(root string) error {
-		if sessions {
-			if !slices.Contains(unitFolders(unit), root) {
-				return fmt.Errorf("it is not one of the session folders of %s", unit.Main)
-			}
-			return nil
-		}
-		if own := manager.ownFolder(root); own != "" {
-			return fmt.Errorf("it holds or is in %s, which stays on this machine", own)
-		}
-		folders := unitFolders(unit)
-		if placement, placed := manager.options.Placements.Find(unit.Main); placed && placement.Unit.Main == unit.Main {
-			// The placement has the worktrees that the worker made since.
-			folders = unitFolders(placement.Unit)
-		}
-		if slices.Contains(folders, root) {
-			return nil
-		}
-		if info, err := os.Lstat(root); err == nil {
-			var entries []os.DirEntry
-			if info.IsDir() {
-				if entries, err = os.ReadDir(root); err != nil {
-					return err
-				}
-			}
-			if !info.IsDir() || len(entries) > 0 {
-				return errors.New("this machine has files there that are not the repository's")
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		// The unit owns the worktree from now on, though a barrier applies it later.
-		return manager.claim(unit.Main, []string{root}, []string{sessionFolder(manager.options.SessionsRoot, root)}, true)
-	}
-}
-
-// ownFolder returns Pi's or Gripi's own file or folder that folder holds or is in, if any: Pi's agent folder, with
-// its logins, the sessions' root, Gripi's state folder and its other own paths, which stay on this machine.
-func (manager *Manager) ownFolder(folder string) string {
-	paths := func(path string) []string {
-		if real, err := filepath.EvalSymlinks(path); err == nil && real != path {
-			return []string{path, real}
-		}
-		return []string{path}
-	}
-	for _, own := range append([]string{manager.options.Pi.AgentDir, manager.options.SessionsRoot, manager.options.StateDir}, manager.options.GatewayPaths...) {
-		if own == "" {
-			continue
-		}
-		for _, ownPath := range paths(own) {
-			for _, path := range paths(folder) {
-				if holds(ownPath, path) || holds(path, ownPath) {
-					return own
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// holds reports whether path is folder or in it.
-func holds(folder, path string) bool {
-	return path == folder || strings.HasPrefix(path, folder+"/")
-}
-
-// shared returns a folder that is or is in both a folder among folders and one among others, if any.
-func shared(folders, others []string) (string, bool) {
-	for _, folder := range folders {
-		for _, other := range others {
-			if holds(folder, other) {
-				return other, true
-			}
-			if holds(other, folder) {
-				return folder, true
-			}
-		}
-	}
-	return "", false
-}
-
-// claim refuses the folders that the repository whose main folder is main would take, roots such as its main folder
-// and worktrees, and Pi's session folders, when another repository on a worker, or moving between this machine and a
-// worker, owns one of them: no root of one may be or be in a root of the other, and they never share a session folder,
-// which Pi names alike for paths such as /work/a-b and /work/a/b. A repository owns its roots and the session folders
-// of its folders and sessions, and until it returns to main, every folder that its mirrors cover or take back from
-// main's copies when they start again. With keep, the repository owns the folders that it claimed from then on, as
-// main's copy does a worktree that it accepted before a barrier applies it.
-func (manager *Manager) claim(main string, roots, sessionFolders []string, keep bool) error {
-	manager.claiming.Lock()
-	defer manager.claiming.Unlock()
-	type owner struct {
-		unit          mirror.Unit
-		worker, where string
-	}
-	var owners []owner
-	for _, placement := range manager.options.Placements.All() {
-		owners = append(owners, owner{placement.Unit, placement.Worker, "on worker " + placement.Worker})
-	}
-	manager.mu.Lock()
-	for _, unit := range manager.movingUnits {
-		owners = append(owners, owner{unit, "", "moving between this machine and a worker"})
-	}
-	manager.mu.Unlock()
-	for _, owner := range owners {
-		if owner.unit.Main == main {
-			continue
-		}
-		ownedRoots, err := manager.covered(owner.unit.Main)
-		if err != nil {
-			return err
-		}
-		if folder, found := shared(roots, append(ownedRoots, unitFolders(owner.unit)...)); found {
-			return refuse("%s and %s, which is %s, would share %s", main, owner.unit.Main, owner.where, folder)
-		}
-		ownedFolders, err := manager.ownedSessionFolders(owner.unit, owner.worker)
-		if err != nil {
-			return err
-		}
-		for _, folder := range sessionFolders {
-			if slices.Contains(ownedFolders, folder) {
-				return refuse("%s and %s, which is %s, would share Pi's session folder %s", main, owner.unit.Main, owner.where, folder)
-			}
-		}
-	}
-	if keep {
-		sessions := manager.sessionsMain(mirror.Unit{Main: main})
-		manager.mu.Lock()
-		defer manager.mu.Unlock()
-		manager.accepted[main] = append(manager.accepted[main], roots...)
-		manager.accepted[sessions] = append(manager.accepted[sessions], sessionFolders...)
-	}
-	return nil
-}
-
-// ownedSessionFolders returns the session folders that a unit on the worker of a name, or moving, owns (see claim).
-func (manager *Manager) ownedSessionFolders(unit mirror.Unit, worker string) ([]string, error) {
-	owned, err := manager.covered(manager.sessionsMain(unit))
-	if err != nil {
-		return nil, err
-	}
-	folders, _ := manager.sessionFolders(unit, worker)
-	return append(owned, folders...), nil
-}
-
-// foreignSessions refuses session folders that a unit's mirror would add while this machine has sessions of another
-// folder in one of them, such as those of /work/a/b in the folder of /work/a-b, which Pi names alike: the worker's copy
-// of the folder would replace them.
-func (manager *Manager) foreignSessions(unit mirror.Unit, folders []string) error {
-	sessions, err := manager.options.Store.Sessions()
-	if err != nil {
-		return err
-	}
-	for _, session := range sessions {
-		if folder := filepath.Dir(session.Path); slices.Contains(folders, folder) && !unit.Contains(session.CWD) {
-			return refuse("%s and %s, which has sessions on this machine, would share Pi's session folder %s", unit.Main, session.CWD, folder)
-		}
-	}
-	return nil
-}
-
-// admitSessionFolders refuses session folders that the mirror of a placed unit's sessions would add, as foreignSessions
-// does, and stops the Pi of this machine's sessions of other folders there, such as a new session that Pi has not
-// saved yet, which would save its file where the worker's copy of the folder replaces it, or refuses while one of
-// them works.
-func (manager *Manager) admitSessionFolders(unit mirror.Unit, folders []string) error {
-	if err := manager.foreignSessions(unit, folders); err != nil {
-		return err
-	}
-	err := manager.options.StopSessions(func(folder string) bool {
-		return !unit.Contains(folder) && slices.Contains(folders, sessionFolder(manager.options.SessionsRoot, folder))
-	})
-	if err != nil {
-		return fmt.Errorf("stop the sessions on this machine that Pi would keep in %s: %w", strings.Join(folders, ", "), err)
-	}
-	return nil
-}
-
-// covered returns the folders of the unit whose main folder is main that its mirror covers on a worker, those of
-// main's copy, which the mirror takes back when it starts again, and those that main's copy accepted, which a barrier
-// applies later.
-func (manager *Manager) covered(main string) ([]string, error) {
-	checkpoint, err := mirror.ReadCheckpoint(filepath.Join(manager.mirrorFolder(main), "state"))
-	if err != nil {
-		return nil, err
-	}
-	folders := checkpoint.Roots
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	folders = append(folders, manager.accepted[main]...)
-	for _, worker := range manager.workers {
-		if live := worker.mirrors[main]; live != nil {
-			folders = append(folders, unitFolders(live.unit)...)
-		}
-	}
-	return folders, nil
-}
-
-// unitFolders are a unit's main folder, worktrees and Git folder.
-func unitFolders(unit mirror.Unit) []string {
-	folders := append([]string{unit.Main}, unit.Worktrees...)
-	if unit.GitDir != "" {
-		folders = append(folders, unit.GitDir)
-	}
-	return folders
-}
-
-// waitForMirrors returns once main's copies of a placed unit and of its sessions' folders have the first barriers of
-// their running mirrors, which a failed apply, a file that the worker cannot read or a stalled channel hold up.
-func (manager *Manager) waitForMirrors(ctx context.Context, worker *remote, unit mirror.Unit) error {
-	ctx, cancel := context.WithTimeoutCause(ctx, firstBarrierTimeout,
-		fmt.Errorf("main got no barrier from it within %s; the worker may be unable to read some of its files", firstBarrierTimeout))
-	defer cancel()
-	for _, main := range []string{unit.Main, manager.sessionsMain(unit)} {
-		manager.mu.Lock()
-		live := worker.mirrors[main]
-		manager.mu.Unlock()
-		if live == nil {
-			return fmt.Errorf("%s is not mirrored from worker %s", main, worker.name)
-		}
-		if err := waitForMirror(ctx, live); err != nil {
-			return fmt.Errorf("mirror %s from worker %s: %w", main, worker.name, err)
-		}
-	}
-	return nil
-}
-
-// waitForMirror returns once main's copy of a unit has applied the first barrier of its running mirror.
-func waitForMirror(ctx context.Context, live *liveMirror) error {
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for !live.destination.Checkpoint().Time.After(live.started) {
-		select {
-		case <-live.done:
-			return fmt.Errorf("the mirror stopped before its first barrier: %v", live.err)
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-ticker.C:
-		}
-	}
-	return nil
-}
-
-// stopMirror takes a last barrier of a unit's mirror, so that main has every change, and stops the mirror.
-func (manager *Manager) stopMirror(ctx context.Context, worker *remote, main string) error {
-	conn, err := manager.connection(worker)
-	if err != nil {
-		return err
-	}
-	manager.mu.Lock()
-	live := worker.mirrors[main]
-	manager.mu.Unlock()
-	if live == nil || !live.running() {
-		return fmt.Errorf("%s is not mirrored from worker %s, so main may lack its latest changes", main, worker.name)
-	}
-	if err := conn.StopMirror(ctx, main); err != nil {
-		return err
-	}
-	select {
-	case <-live.done:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	manager.mu.Lock()
-	if worker.mirrors[main] == live {
-		delete(worker.mirrors, main)
-	}
-	manager.mu.Unlock()
-	return nil
-}
-
-// Launch runs the Pi of a session in a repository placed on a worker on that worker, and leaves other sessions'
-// Pi here. It is the Pi adapter's launcher.
+// Launch runs the Pi of a session on the worker that it moved to, and leaves other sessions' Pi here. It is the Pi
+// adapter's launcher.
 func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error) {
-	cwd := process.Dir
-	if cwd == "" && process.Key != "" {
-		if session, found := manager.options.Store.Session(process.Key); found {
-			cwd = session.CWD
-		}
-	}
-	if cwd == "" {
+	key := process.Key
+	if key == "" {
 		return nil, nil, nil
 	}
-	done, err := manager.startLaunch(cwd)
+	done, err := manager.startLaunch(key)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer done()
-	placement, placed := manager.options.Placements.Find(cwd)
+	placement, placed := manager.options.Placements.Find(key)
 	if !placed {
-		// The mirror of a repository on a worker would replace what Pi here writes in one of the repository's session
-		// folders, which Pi names alike for paths such as /work/a-b and /work/a/b.
-		return nil, nil, manager.claim(cwd, nil, []string{sessionFolder(manager.options.SessionsRoot, cwd)}, false)
+		return nil, nil, nil
+	}
+	if placement.Stage != "" {
+		return nil, nil, refuse("the session is coming back from worker %s; continue on main to finish that", placement.Worker)
 	}
 	ctx, cancel := context.WithTimeout(manager.ctx, connectTimeout)
 	defer cancel()
-	// The session's barriers need both mirrors of its repository.
-	worker, err := manager.connect(ctx, placement.Worker, placement.Unit.Main)
+	// The session's barriers need both mirrors of its move.
+	worker, err := manager.connect(ctx, placement.Worker, placement.Move)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := manager.waitForMirrors(ctx, worker, placement.Unit); err != nil {
+	if err := manager.waitForMirrors(ctx, worker, placement.Move); err != nil {
 		return nil, nil, err
 	}
 	conn, err := manager.connection(worker)
@@ -1049,7 +610,7 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 		return nil, nil, err
 	}
 	session := Session{
-		ID: sessionID(process.Key), Cwd: cwd,
+		ID: sessionID(key), Cwd: placement.Cwd, Move: placement.Move,
 		Args: installation.Command(append(slices.Clone(process.Command), "--extension", manager.options.WorkerExtension)),
 		// gripi commands find the worker's socket where main's is.
 		Env: append(installation.Environment(process.Env), "GRIPI_SOCKET_PATH="+manager.options.SocketPath),
@@ -1073,7 +634,7 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 		return nil, nil, err
 	}
 	manager.mu.Lock()
-	manager.sessions[session.ID] = launched{worker: placement.Worker, cwd: cwd, lost: process.Lost}
+	manager.sessions[session.ID] = launched{worker: placement.Worker, lost: process.Lost}
 	manager.mu.Unlock()
 	return command, func() {
 		release()
@@ -1085,7 +646,7 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 // as when Gripi stops an idle Pi here. Pi there may hang on its way out, such as in a session_shutdown handler, and
 // would keep the session's next Pi from starting. It closes Pi in the background, because the adapter waits for the
 // launcher's cleanup while it stops the RPC, and the session's next Pi waits for it.
-func (manager *Manager) closeSession(conn *Conn, id string) {
+func (manager *Manager) closeSession(conn link, id string) {
 	closed := make(chan struct{})
 	manager.mu.Lock()
 	manager.closing[id] = closed
@@ -1107,411 +668,55 @@ func (manager *Manager) closeSession(conn *Conn, id string) {
 	}()
 }
 
-// sessionID names a session on its worker, the same for every Pi of the session, so they share its cgroup. A new
-// session has no key until its Pi names it, so its first Pi gets an ID of its own.
+// sessionID names a session on its worker, the same for every Pi of the session, so they share its cgroup.
 func sessionID(key string) string {
-	if key == "" {
-		random := make([]byte, 16)
-		rand.Read(random)
-		return hex.EncodeToString(random)
-	}
 	hash := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(hash[:16])
 }
 
-// startLaunch notes that the Pi of a session in cwd is starting, which a move of cwd's repository waits for, unless
-// the repository is moving already.
-func (manager *Manager) startLaunch(cwd string) (done func(), err error) {
+// newMoveID names a new move.
+func newMoveID() string {
+	random := make([]byte, 8)
+	rand.Read(random)
+	return hex.EncodeToString(random)
+}
+
+// startLaunch notes that the Pi of a session is starting, which a move or return of the session waits for, unless the
+// session is moving already.
+func (manager *Manager) startLaunch(key string) (done func(), err error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	if slices.ContainsFunc(manager.movingUnits, func(unit mirror.Unit) bool { return unit.Contains(cwd) }) {
-		return nil, fmt.Errorf("the repository of %s is moving between this machine and a worker; try again once it has moved", cwd)
+	if manager.moving[key] != nil {
+		return nil, refuse("the session is moving between this machine and a worker; try again once it has moved")
 	}
-	manager.launches = append(manager.launches, cwd)
+	manager.launches = append(manager.launches, key)
 	return func() {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
-		i := slices.Index(manager.launches, cwd)
+		i := slices.Index(manager.launches, key)
 		manager.launches = slices.Delete(manager.launches, i, i+1)
 		manager.launched.Broadcast()
 	}, nil
 }
 
-// startMoving marks a unit as moving, unless it is moving already, and waits until the sessions starting in the unit
-// have started: the Pi of a session that started on a worker while its repository went back would stay there.
-func (manager *Manager) startMoving(unit mirror.Unit) (done func(), err error) {
+// startMoving marks a session as moving between main and the worker of a name, unless it is moving already, and waits
+// until its Pi that is starting has started: a Pi that started on a worker while its session went back would stay
+// there.
+func (manager *Manager) startMoving(key, worker string, returning bool) (done func(), err error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	if slices.ContainsFunc(manager.movingUnits, func(moving mirror.Unit) bool { return moving.Contains(unit.Main) || unit.Contains(moving.Main) }) {
-		return nil, refuse("the repository of %s is moving already", unit.Main)
+	if manager.moving[key] != nil {
+		return nil, refuse("the session is moving already")
 	}
-	manager.movingUnits = append(manager.movingUnits, unit)
-	for slices.ContainsFunc(manager.launches, unit.Contains) {
+	manager.moving[key] = &moving{worker: worker, since: manager.options.Clock(), returning: returning}
+	for slices.Contains(manager.launches, key) {
 		manager.launched.Wait()
 	}
 	return func() {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
-		manager.movingUnits = slices.DeleteFunc(manager.movingUnits, func(moving mirror.Unit) bool { return moving.Main == unit.Main })
+		delete(manager.moving, key)
 	}, nil
-}
-
-// Move moves the repository that holds folder, with all its worktrees and sessions, to the worker of a name: main
-// copies it there with the sessions' folders, and the worker's mirror keeps main's copy up to date from then on.
-// stop gets a test for the folder of a session before anything is copied, which the repository's folders pass, and so
-// do those whose sessions Pi keeps in the repository's session folders, and must stop the Pi of every session there,
-// or fail when one is working.
-func (manager *Manager) Move(ctx context.Context, folder, name string, stop func(inRepository func(folder string) bool) error) error {
-	if _, err := manager.options.Destination(name); err != nil {
-		return refusal{err}
-	}
-	if placement, placed := manager.options.Placements.Find(folder); placed {
-		return refuse("%s is on worker %s already", placement.Unit.Main, placement.Worker)
-	}
-	unit, err := mirror.Discover(folder)
-	if err != nil {
-		return err
-	}
-	for _, root := range unitFolders(unit) {
-		// What the worker writes there would replace main's, such as Pi's logins.
-		if own := manager.ownFolder(root); own != "" {
-			return refuse("%s cannot move to a worker, because it holds or is in %s, which stays on this machine", root, own)
-		}
-	}
-	done, err := manager.startMoving(unit)
-	if err != nil {
-		return err
-	}
-	defer done()
-	// Once the unit is moving, a move of another unit with a shared folder is refused too.
-	sessionFolders, _ := manager.sessionFolders(unit, name)
-	if err := manager.claim(unit.Main, unitFolders(unit), sessionFolders, false); err != nil {
-		return err
-	}
-	if err := manager.foreignSessions(unit, sessionFolders); err != nil {
-		return err
-	}
-	// Pi would also keep a new session of another folder in the unit's session folders once it saves the session.
-	if err := stop(func(folder string) bool {
-		return unit.Contains(folder) || slices.Contains(sessionFolders, sessionFolder(manager.options.SessionsRoot, folder))
-	}); err != nil {
-		return err
-	}
-	manager.mu.Lock()
-	manager.copying = append(manager.copying, copying{unit: unit, worker: name, since: manager.options.Clock()})
-	manager.mu.Unlock()
-	defer func() {
-		manager.mu.Lock()
-		defer manager.mu.Unlock()
-		manager.copying = slices.DeleteFunc(manager.copying, func(copying copying) bool { return copying.unit.Main == unit.Main })
-	}()
-	worker, err := manager.connect(ctx, name, "")
-	if err != nil {
-		return err
-	}
-	manager.setState(worker, Copying)
-	err = manager.copyToWorker(ctx, worker, unit)
-	if err == nil {
-		err = manager.options.Placements.Add(Placement{Worker: name, Unit: unit})
-	}
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	if worker.conn != nil {
-		worker.state = Connected
-	}
-	// Mirrors of a unit that stays here would keep sending what nobody runs there.
-	for _, main := range []string{unit.Main, manager.sessionsMain(unit)} {
-		if live := worker.mirrors[main]; err != nil && live != nil {
-			live.cancel()
-			delete(worker.mirrors, main)
-		}
-	}
-	return err
-}
-
-// copyToWorker copies a unit and its sessions' folders to the worker, and keeps aside there the worker's copies of
-// sessions that are no longer the unit's, then starts the mirrors and waits until main's copies have their first
-// barriers.
-func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit mirror.Unit) error {
-	conn, err := manager.connection(worker)
-	if err != nil {
-		return err
-	}
-	copies, err := manager.workerCopies(unit.Main)
-	if err != nil {
-		return err
-	}
-	isStale := copies[worker.name].Stale
-	now := time.Now().UTC().Format("20060102T150405Z")
-	copyFolders := func(folders mirror.Unit) error {
-		aside := ""
-		if isStale {
-			aside = filepath.Join(filepath.Dir(folders.Main), "."+filepath.Base(folders.Main)+".gripi-aside", now)
-		}
-		if err := conn.CopyUnit(ctx, folders, aside); err != nil {
-			return fmt.Errorf("copy %s to worker %s: %w", folders.Main, worker.name, err)
-		}
-		if aside != "" {
-			log.Printf("the copy of %s on worker %s may have had changes that this machine never got; what the move replaced there is in %s", folders.Main, worker.name, aside)
-		}
-		return nil
-	}
-	folders, cwds := manager.sessionFolders(unit, worker.name)
-	// The worker keeps what a move that fails later copied, which the next move there must bring up to date.
-	if err := manager.rememberSessions(unit.Main, worker.name, cwds); err != nil {
-		return err
-	}
-	if err := copyFolders(unit); err != nil {
-		return err
-	}
-	for _, folder := range folders {
-		// The worker's copy of a folder that main no longer has may hold sessions that were deleted here.
-		if err := os.MkdirAll(folder, 0700); err != nil {
-			return err
-		}
-		if err := copyFolders(mirror.Unit{Main: folder}); err != nil {
-			return err
-		}
-	}
-	// The worker's copies of sessions that are no longer the unit's, which its mirror leaves alone, go aside there,
-	// unless they are another unit's there, which a later move keeps aside once that unit has left the worker.
-	var others []string
-	for _, cwd := range copies[worker.name].SessionCwds {
-		if manager.owns(unit, cwd) {
-			continue
-		}
-		folder := sessionFolder(manager.options.SessionsRoot, cwd)
-		owned, err := manager.ownedOn(worker.name, unit, folder)
-		if err != nil {
-			return err
-		}
-		if owned {
-			continue
-		}
-		others = append(others, cwd)
-		if slices.Contains(folders, folder) {
-			continue
-		}
-		aside := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".gripi-aside", now, folder)
-		moved, err := conn.runInView(ctx, `[ ! -e "$1" ] || { mkdir -p "$(dirname "$2")" && mv "$1" "$2" && echo moved; }`, folder, aside)
-		if err != nil {
-			return fmt.Errorf("keep aside the copy of %s on worker %s: %w", folder, worker.name, err)
-		}
-		if moved != "" {
-			log.Printf("the sessions that started in %s are no longer those of %s; the move kept their copies on worker %s in %s", cwd, unit.Main, worker.name, aside)
-		}
-	}
-	if err := manager.updateWorkerCopy(unit.Main, worker.name, func(kept *workerCopy) {
-		kept.Stale = false
-		kept.SessionCwds = slices.DeleteFunc(kept.SessionCwds, func(cwd string) bool { return slices.Contains(others, cwd) })
-	}); err != nil {
-		return err
-	}
-	for _, main := range []string{unit.Main, manager.sessionsMain(unit)} {
-		// Main's own changes before the move are not changes to a read-only copy.
-		if err := manager.forgetMirror(main); err != nil {
-			return err
-		}
-	}
-	for _, sessions := range []bool{false, true} {
-		if err := manager.startMirror(ctx, worker, unit, sessions); err != nil {
-			return err
-		}
-	}
-	return manager.waitForMirrors(ctx, worker, unit)
-}
-
-// Return brings the repository that holds folder back from its worker: it stops everything that the repository's
-// sessions run there, and takes the last changes of the repository and of its sessions. stop is as in Move. When main
-// has lost the worker, or cannot reach it, the repository continues on this machine as main's copies have it, once the
-// worker must have stopped its sessions.
-func (manager *Manager) Return(ctx context.Context, folder string, stop func(inRepository func(folder string) bool) error) error {
-	placement, placed := manager.options.Placements.Find(folder)
-	if !placed {
-		return refuse("%s is not on a worker", folder)
-	}
-	unit := placement.Unit
-	done, err := manager.startMoving(unit)
-	if err != nil {
-		return err
-	}
-	defer done()
-	if err := stop(unit.Contains); err != nil {
-		return err
-	}
-	if state := manager.Status(placement.Worker).State; state == Unreachable || state == Gone {
-		return manager.continueOnMain(ctx, placement, fmt.Errorf("worker %s is unreachable", placement.Worker))
-	}
-	worker, err := manager.connect(ctx, placement.Worker, "")
-	if err != nil {
-		return manager.continueOnMain(ctx, placement, err)
-	}
-	// connect leaves the mirrors of a moving unit alone, so that they don't start again during the return.
-	if err := manager.runMirrors(ctx, worker, unit); err != nil {
-		return err
-	}
-	conn, err := manager.connection(worker)
-	if err != nil {
-		return err
-	}
-	manager.mu.Lock()
-	var ids []string
-	for id, session := range manager.sessions {
-		if session.worker == worker.name && unit.Contains(session.cwd) {
-			ids = append(ids, id)
-		}
-	}
-	manager.mu.Unlock()
-	// Nothing that the sessions started may change the repository after the last barrier.
-	for _, id := range ids {
-		if err := conn.ReleaseSession(ctx, id); err != nil {
-			return err
-		}
-		manager.mu.Lock()
-		delete(manager.sessions, id)
-		manager.mu.Unlock()
-	}
-	mains := []string{unit.Main, manager.sessionsMain(unit)}
-	for _, main := range mains {
-		if err := manager.stopMirror(ctx, worker, main); err != nil {
-			return err
-		}
-	}
-	if err := manager.options.Placements.Remove(unit.Main); err != nil {
-		return err
-	}
-	for _, main := range mains {
-		if err := manager.forgetMirror(main); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// continueOnMain brings back the repository of a placement from a worker that main lost, or cannot reach, without the
-// worker: main's copies of the repository and of its sessions' folders are as the last barriers left them, which is
-// consistent. It refuses with unreachable while the worker may still run the repository's sessions, whose Pi must
-// never run again. The worker's copy may have changes that main never got, which the next move to the worker saves
-// aside there.
-func (manager *Manager) continueOnMain(ctx context.Context, placement Placement, unreachable error) error {
-	unit := placement.Unit
-	if goneAt, now := manager.goneAt(placement.Worker), manager.options.Clock(); now.Before(goneAt) {
-		return refuse("%w; it may still run the sessions of %s until %s, so they can continue on this machine from then (in %s)",
-			unreachable, unit.Main, goneAt.Local().Format(time.TimeOnly), goneAt.Sub(now).Round(time.Second))
-	}
-	if err := manager.waitForTeardown(ctx, placement.Worker); err != nil {
-		return err
-	}
-	mains := []string{unit.Main, manager.sessionsMain(unit)}
-	for _, main := range mains {
-		// Opening main's copy finishes a barrier that a crash interrupted.
-		if _, err := mirror.NewDestination(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
-			return err
-		}
-	}
-	if err := manager.updateWorkerCopy(unit.Main, placement.Worker, func(kept *workerCopy) { kept.Stale = true }); err != nil {
-		return err
-	}
-	if err := manager.options.Placements.Remove(unit.Main); err != nil {
-		return err
-	}
-	for _, main := range mains {
-		if err := manager.forgetMirror(main); err != nil {
-			return err
-		}
-	}
-	log.Printf("%s continues on this machine without worker %s, as of the last changes that this machine got", unit.Main, placement.Worker)
-	return nil
-}
-
-// workerCopy is what a worker keeps of a repository that was on it.
-type workerCopy struct {
-	// Stale is set when the repository continued on main without the worker, whose copies of the repository and of its
-	// sessions may have changes that main never got.
-	Stale bool `json:"stale,omitempty"`
-	// SessionCwds are folders that the repository's sessions on the worker started in, whose session folders the
-	// worker has. The next move there brings those folders up to date, also those whose sessions were deleted here
-	// meanwhile, while they are the repository's, and keeps the worker's copies of the others aside.
-	SessionCwds []string `json:"session_cwds,omitempty"`
-}
-
-// workerCopies returns what workers keep of the repository whose main folder is main, by the workers' names.
-func (manager *Manager) workerCopies(main string) (map[string]workerCopy, error) {
-	copies := map[string]workerCopy{}
-	contents, found, err := state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Read()
-	if err == nil && found {
-		err = json.Unmarshal(contents, &copies)
-	}
-	return copies, err
-}
-
-// updateWorkerCopy changes what the worker of a name keeps of the repository whose main folder is main.
-func (manager *Manager) updateWorkerCopy(main, name string, update func(kept *workerCopy)) error {
-	manager.copiesMu.Lock()
-	defer manager.copiesMu.Unlock()
-	copies, err := manager.workerCopies(main)
-	if err != nil {
-		return err
-	}
-	kept := copies[name]
-	update(&kept)
-	copies[name] = kept
-	contents, err := json.Marshal(copies)
-	if err != nil {
-		return err
-	}
-	return state.NewFile(filepath.Join(manager.mirrorFolder(main), "workers.json")).Write(contents)
-}
-
-// rememberSessions records that the worker of a name has, or is getting, the session folders of cwds, folders that
-// sessions of the repository whose main folder is main started in.
-func (manager *Manager) rememberSessions(main, name string, cwds []string) error {
-	return manager.updateWorkerCopy(main, name, func(kept *workerCopy) {
-		for _, cwd := range cwds {
-			if !slices.Contains(kept.SessionCwds, cwd) {
-				kept.SessionCwds = append(kept.SessionCwds, cwd)
-			}
-		}
-	})
-}
-
-// owns reports whether the sessions that started in cwd are a unit's: cwd is in the unit, and in no other unit on a
-// worker.
-func (manager *Manager) owns(unit mirror.Unit, cwd string) bool {
-	return unit.Contains(cwd) && !slices.ContainsFunc(manager.options.Placements.All(), func(other Placement) bool {
-		return other.Unit.Main != unit.Main && other.Unit.Contains(cwd)
-	})
-}
-
-// ownedOn reports whether a unit other than unit that is on the worker of a name, or on its way there, owns a session
-// folder, so that the worker's copy of the folder is that unit's.
-func (manager *Manager) ownedOn(name string, unit mirror.Unit, folder string) (bool, error) {
-	var others []mirror.Unit
-	for _, placement := range manager.options.Placements.All() {
-		if placement.Worker == name {
-			others = append(others, placement.Unit)
-		}
-	}
-	manager.mu.Lock()
-	for _, copying := range manager.copying {
-		if copying.worker == name {
-			others = append(others, copying.unit)
-		}
-	}
-	manager.mu.Unlock()
-	for _, other := range others {
-		if other.Main == unit.Main {
-			continue
-		}
-		owned, err := manager.ownedSessionFolders(other, name)
-		if err != nil {
-			return false, err
-		}
-		if slices.Contains(owned, folder) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // goneAt is when the worker of a name must have stopped the sessions of every connection that main lost, including
@@ -1526,54 +731,6 @@ func (manager *Manager) goneAt(name string) time.Time {
 	return goneAt
 }
 
-// sessionFolders are Pi's folders of the sessions in a unit on the worker of a name, the main folder's first, with a
-// folder that sessions in each started in at the same index of cwds: one for each of the unit's worktrees, one for
-// each other folder in it that a session started in or is starting in, and one for each that the worker has from
-// earlier and that is still the unit's.
-func (manager *Manager) sessionFolders(unit mirror.Unit, worker string) (folders, cwds []string) {
-	add := func(cwd string) {
-		if folder := sessionFolder(manager.options.SessionsRoot, cwd); !slices.Contains(folders, folder) {
-			folders, cwds = append(folders, folder), append(cwds, cwd)
-		}
-	}
-	for _, root := range append([]string{unit.Main}, unit.Worktrees...) {
-		add(root)
-	}
-	if sessions, err := manager.options.Store.Sessions(); err == nil {
-		for _, session := range sessions {
-			if unit.Contains(session.CWD) {
-				add(session.CWD)
-			}
-		}
-	}
-	if copies, err := manager.workerCopies(unit.Main); err == nil {
-		for _, cwd := range copies[worker].SessionCwds {
-			// Another repository's sessions may have started there since, whose copies on main only it may write.
-			if manager.owns(unit, cwd) {
-				add(cwd)
-			}
-		}
-	}
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	for _, session := range manager.sessions {
-		if unit.Contains(session.cwd) {
-			add(session.cwd)
-		}
-	}
-	for _, cwd := range manager.launches {
-		if unit.Contains(cwd) {
-			add(cwd)
-		}
-	}
-	return folders, cwds
-}
-
-// sessionFolder is where Pi keeps the sessions started in cwd, as Pi names it.
-func sessionFolder(root, cwd string) string {
-	return filepath.Join(root, "--"+strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(strings.TrimPrefix(cwd, "/"))+"--")
-}
-
 // Placement says what is on the worker of a name, for the gripi commands that run there.
 func (manager *Manager) Placement(name string) WorkerPlacement {
 	return WorkerPlacement{manager: manager, worker: name}
@@ -1585,35 +742,8 @@ type WorkerPlacement struct {
 	worker  string
 }
 
-// Folder reports whether sessions started in a folder run on the worker.
-func (placement WorkerPlacement) Folder(path string) bool {
-	found, placed := placement.manager.options.Placements.Find(path)
-	return placed && found.Worker == placement.worker
-}
-
-// Session reports whether a session runs on the worker. A new session has no file on main yet, but its key is a
-// path in the session folder of the folder that it started in.
+// Session reports whether a session runs on the worker.
 func (placement WorkerPlacement) Session(key string) bool {
-	if session, found := placement.manager.options.Store.Session(key); found {
-		return placement.Folder(session.CWD)
-	}
-	folder := filepath.Dir(key)
-	for _, found := range placement.manager.options.Placements.All() {
-		if found.Worker != placement.worker {
-			continue
-		}
-		for _, root := range append([]string{found.Unit.Main}, found.Unit.Worktrees...) {
-			if sessionFolder(placement.manager.options.SessionsRoot, root) == folder {
-				return true
-			}
-		}
-	}
-	placement.manager.mu.Lock()
-	defer placement.manager.mu.Unlock()
-	for _, session := range placement.manager.sessions {
-		if session.worker == placement.worker && sessionFolder(placement.manager.options.SessionsRoot, session.cwd) == folder {
-			return true
-		}
-	}
-	return false
+	found, placed := placement.manager.options.Placements.Find(key)
+	return placed && found.Worker == placement.worker
 }

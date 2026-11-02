@@ -5,8 +5,8 @@ package mirror
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -513,56 +513,6 @@ func TestFinishingAnInterruptedBarrierReportsWhatItRewroteBefore(t *testing.T) {
 	}
 }
 
-// Main writes only into the folders it allows, also when the worker adds a worktree.
-func TestTheDestinationRefusesFoldersItDoesntAllow(t *testing.T) {
-	unit := newRepo(t)
-	refuse := func(refused string) *rig {
-		dst := t.TempDir()
-		r := &rig{unit: unit, dst: dst, state: filepath.Join(dst, "state")}
-		var err error
-		if r.d, err = NewMovedDestination(r.state, "/", dst); err != nil {
-			t.Fatal(err)
-		}
-		r.d.AllowRoot = func(root string) error {
-			if root == refused {
-				return errors.New("not on this worker")
-			}
-			return nil
-		}
-		return r
-	}
-	failed := func(r *rig) {
-		t.Helper()
-		select {
-		case err := <-r.ran:
-			if err == nil || !strings.Contains(err.Error(), "not on this worker") {
-				t.Fatalf("Run = %v", err)
-			}
-		case <-time.After(30 * time.Second):
-			t.Fatal("the mirror went on")
-		}
-		if err := <-r.served; err == nil {
-			t.Fatal("Serve succeeded")
-		}
-	}
-
-	r := refuse(unit.Worktrees[1])
-	r.launch(t, nil)
-	failed(r)
-	if _, err := os.Lstat(r.dst + unit.Main); err == nil {
-		t.Fatal("main got files of a unit with a refused folder")
-	}
-
-	added := filepath.Join(filepath.Dir(unit.Worktrees[0]), "added")
-	r = refuse(added)
-	r.start(t, nil)
-	git(t, unit.Main, "worktree", "add", "-q", "-b", "added", added)
-	failed(r)
-	if _, err := os.Lstat(r.dst + added); err == nil {
-		t.Fatal("main got the refused worktree")
-	}
-}
-
 // stop stops the source, as when the worker's helper restarts or loses main.
 func (r *rig) stop() {
 	r.conn.Close()
@@ -589,4 +539,52 @@ func inodeOf(t *testing.T, path string) uint64 {
 		t.Fatal(err)
 	}
 	return info.Sys().(*syscall.Stat_t).Ino
+}
+
+// Main's copy of a unit that it keeps elsewhere, such as a moved session's shadow, never follows a link that the
+// source made there out of it, also not to a folder of the unit below the link.
+func TestAMovedDestinationNeverWritesThroughTheSourcesLinks(t *testing.T) {
+	outside := t.TempDir()
+	writeFile(t, outside, "x/precious", "main's\n")
+	dst := t.TempDir()
+	d, err := NewMovedDestination(t.TempDir(), "/", dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, destination := net.Pipe()
+	served := make(chan error, 1)
+	go func() { served <- d.Serve(context.Background(), destination, t.TempDir()) }()
+	c := newConn(source)
+	unit := "/work/app"
+	if err := c.send(&frame{Kind: kindHello, Version: version, Roots: []string{unit}}); err != nil || c.flush() != nil {
+		t.Fatal(err)
+	}
+	if manifest, err := c.receive(); err != nil || manifest.Kind != kindManifest {
+		t.Fatalf("manifest = %+v, %v", manifest, err)
+	}
+	for _, f := range []*frame{
+		{Kind: kindSymlink, Path: unit + "/link", Target: outside},
+		{Kind: kindRoots, Roots: []string{unit, unit + "/link/x"}},
+		{Kind: kindDelete, Path: unit + "/link/x"},
+		{Kind: kindMkdir, Path: unit + "/link/x/new", Mode: 0o755},
+		{Kind: kindBarrier, N: 1},
+	} {
+		if err := c.send(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.flush()
+	if ack, err := c.receive(); err != nil || ack.Kind != kindAck || !strings.Contains(ack.Error, "link") {
+		t.Fatalf("ack = %+v, %v", ack, err)
+	}
+	source.Close()
+	if err := <-served; err == nil {
+		t.Fatal("Serve succeeded")
+	}
+	if contents, err := os.ReadFile(filepath.Join(outside, "x", "precious")); err != nil || string(contents) != "main's\n" {
+		t.Fatalf("the file outside the copy = %q, %v", contents, err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "x", "new")); !os.IsNotExist(err) {
+		t.Fatalf("the folder made outside the copy: %v", err)
+	}
 }

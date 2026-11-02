@@ -1,28 +1,29 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	gripi "github.com/melounvitek/gripi"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
-// workerPlacement stands in for the gateway's record of what is on a worker.
-type workerPlacement struct{ sessions, folders []string }
+// workerPlacement stands in for the gateway's record of which sessions are on a worker.
+type workerPlacement struct {
+	sessions []string
+}
 
 func (placement workerPlacement) Session(key string) bool {
 	return slices.Contains(placement.sessions, key)
-}
-
-func (placement workerPlacement) Folder(path string) bool {
-	return slices.Contains(placement.folders, path)
 }
 
 func workerHandler(handler http.Handler, placement gateway.WorkerPlacement) http.Handler {
@@ -51,9 +52,12 @@ func command(target http.Handler, method, route string, fields url.Values, heade
 }
 
 func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
-	handler, alpha, beta, project := fakePiGateway(t)
+	cfg, alpha, beta, project := fakePiConfig(t)
+	// Beta started in a folder on main.
+	writeLocalSession(t, beta, "beta-0002", t.TempDir(), "2026-01-02T00:00:0")
+	handler := startGateway(t, cfg)
 	local := localHandler(t, handler)
-	worker := workerHandler(handler, workerPlacement{sessions: []string{alpha}, folders: []string{project}})
+	worker := workerHandler(handler, workerPlacement{sessions: []string{alpha}})
 	if response := command(local, http.MethodPost, "/sessions/tags", url.Values{"session": {beta}, "tag": {"main-only"}, "assigned": {"true"}}); response.Code != http.StatusOK {
 		t.Fatalf("tag on main = %d %s", response.Code, response.Body.String())
 	}
@@ -80,19 +84,18 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 		{http.MethodPost, "/sessions/pin", url.Values{"session": {beta}, "pinned": {"true"}}},
 		{http.MethodPost, "/sessions/tags", url.Values{"session": {beta}, "tag": {"main-only"}, "assigned": {"false"}}},
 		{http.MethodPost, "/sessions/delete", url.Values{"session": {beta}}},
-		{http.MethodPost, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "fork_from": {beta}}},
 	} {
 		if response := command(worker, request.method, request.route, request.fields); response.Code != http.StatusNotFound {
 			t.Fatalf("%s %s %v on a session on main = %d %s", request.method, request.route, request.fields, response.Code, response.Body.String())
 		}
 	}
-	if response := command(worker, http.MethodPost, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}}); response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "worker") {
-		t.Fatalf("new session in a folder on main = %d %s", response.Code, response.Body.String())
-	}
 	for _, request := range []struct {
 		route  string
 		fields url.Values
 	}{
+		// New sessions would start on main.
+		{"/sessions/new_at_cwd", url.Values{"cwd": {project}}},
+		{"/sessions/new_at_cwd", url.Values{"cwd": {project}, "fork_from": {alpha}}},
 		{"/sudo", url.Values{"session": {alpha}, "cwd": {project}, "argv": {"true"}}},
 		{"/sudo/askpass", url.Values{"token": {"any"}}},
 		{"/sessions/claim", url.Values{"session": {alpha}}},
@@ -123,7 +126,6 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 		{"/sessions/tags", url.Values{"session": {alpha}, "tag": {"on-worker"}, "assigned": {"true"}}},
 		{"/prompt", url.Values{"session": {alpha}, "message": {"Show the deterministic browser response"}}},
 		{"/abort", url.Values{"session": {alpha}}},
-		{"/sessions/new_at_cwd", url.Values{"cwd": {project}}},
 	} {
 		response := command(worker, http.MethodPost, request.route, request.fields)
 		if response.Code != http.StatusOK && response.Code != http.StatusAccepted {
@@ -136,6 +138,46 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 	session := waitForLocalSession(t, worker, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
 	if session.Name != "Renamed by the worker" || !session.Pinned || !slices.Contains(session.Tags, "on-worker") {
 		t.Fatalf("session on the worker = %+v", session)
+	}
+}
+
+// Only Pi's sessions move to workers, so a Hermes session that started in the folder of a session on a worker stays on
+// main, where only main's gripi commands reach it.
+func TestWorkerCommandsReachNoHermesSession(t *testing.T) {
+	project := t.TempDir()
+	cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": project, "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
+	if err := os.MkdirAll(cfg.SessionsRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pi := filepath.Join(cfg.SessionsRoot, "pi.jsonl")
+	writeLocalSession(t, pi, "pi-chat", project, "2026-02-01T10:00:0")
+	handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	local := localHandler(t, handler)
+	worker := workerHandler(handler, workerPlacement{sessions: []string{pi}})
+	for key, tag := range map[string]string{pi: "pi-tag", "hermes:hermes-chat": "hermes-tag"} {
+		if response := command(local, http.MethodPost, "/sessions/tags", url.Values{"session": {key}, "tag": {tag}, "assigned": {"true"}}); response.Code != http.StatusOK {
+			t.Fatalf("tag %s on main = %d %s", key, response.Code, response.Body.String())
+		}
+	}
+
+	if listed := localSessions(t, local, ""); len(listed) != 2 {
+		t.Fatalf("main's sessions = %+v", listed)
+	}
+	if tags := command(local, http.MethodGet, "/tags", nil); !strings.Contains(tags.Body.String(), "hermes-tag") {
+		t.Fatalf("main's tags = %d %s", tags.Code, tags.Body.String())
+	}
+	if listed := localSessions(t, worker, ""); len(listed) != 1 || listed[0].Path != pi {
+		t.Fatalf("worker's sessions = %+v", listed)
+	}
+	if listed := localSessions(t, worker, "?session=hermes:hermes-chat"); len(listed) != 0 {
+		t.Fatalf("worker's listing of the Hermes session = %+v", listed)
+	}
+	if tags := command(worker, http.MethodGet, "/tags", nil); !strings.Contains(tags.Body.String(), "pi-tag") || strings.Contains(tags.Body.String(), "hermes-tag") {
+		t.Fatalf("worker's tags = %d %s", tags.Code, tags.Body.String())
 	}
 }
 

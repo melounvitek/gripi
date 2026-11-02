@@ -101,8 +101,9 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	defer releasePrompt()
-	// Deletion may have completed after actionSessionPath validated the request.
-	if !app.commandSessionAvailable(path) {
+	// Deletion, or a return from a worker that held the prompt, may have completed after actionSessionPath validated the
+	// request.
+	if !app.commandSessionAvailable(path) || !reachesSession(request, path) {
 		http.NotFound(response, request)
 		return
 	}
@@ -487,7 +488,17 @@ func (app *application) compactSession(response http.ResponseWriter, request *ht
 	if !ok {
 		return
 	}
-	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
+	// A compaction waits like a prompt while a move to a worker or back holds the session's prompts.
+	path, releasePrompt, err := app.promptAdmissions.prompt(request.Context(), func() (string, error) {
+		resolved, _, err := app.resolveOwnedPendingPath(request, path)
+		return resolved, err
+	})
+	if err != nil {
+		app.writeActionRPCError(response, err)
+		return
+	}
+	defer releasePrompt()
+	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		compacter, err := capability[agent.Compacter](client)
 		if err != nil {
 			return err
@@ -644,10 +655,6 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		}
 		return
 	}
-	if !reachesFolder(request, cwd) {
-		writeJSONStatus(response, http.StatusForbidden, map[string]any{"valid": false, "error": "a worker can start sessions only in the repositories on it"})
-		return
-	}
 	forkFrom := ""
 	if raw := request.FormValue("fork_from"); raw != "" {
 		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so Pi forks the session into the
@@ -789,7 +796,7 @@ func (app *application) deleteSessionBlockReason(currentPath, targetPath string)
 	}
 	if app.workers != nil && app.agentOf(targetPath) != "hermes" {
 		// Main's copy would come back from the worker without what the gateway keeps about the session.
-		if location, found := app.workers.Location(app.currentSessionCWD(targetPath)); found {
+		if location, found := app.workers.Location(targetPath); found {
 			return fmt.Sprintf("Cannot delete a session that runs on worker %s; continue on main first", location.Worker)
 		}
 	}
@@ -1328,6 +1335,13 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		return
 	}
 	defer unlock()
+	if app.workers != nil {
+		// The worker mirrors only the session's own file to this machine.
+		if location, found := app.workers.Location(resolved); found {
+			app.writeRequestError(response, request, http.StatusConflict, fmt.Sprintf("The session runs on worker %s, where it can't start another one; continue on main first", location.Worker))
+			return
+		}
+	}
 	app.pendingRemapMu.Lock()
 	defer app.pendingRemapMu.Unlock()
 	previous = resolved
@@ -1699,7 +1713,7 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 	if app.writeRPCError(response, err) {
 		return true
 	}
-	// The workers refuse to start a session on this machine in a session folder of a repository on a worker, for one.
+	// The workers refuse to start a session that is moving, or whose return has not finished, for one.
 	if refused(err) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": err.Error()})
 		return true

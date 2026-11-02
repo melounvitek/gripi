@@ -64,7 +64,10 @@ func startInCgroup(command *exec.Cmd, cgroup string) error {
 		return err
 	}
 	defer unix.Close(descriptor)
-	command.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: descriptor}
+	if command.SysProcAttr == nil {
+		command.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	command.SysProcAttr.UseCgroupFD, command.SysProcAttr.CgroupFD = true, descriptor
 	return command.Start()
 }
 

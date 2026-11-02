@@ -16,7 +16,7 @@ import (
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
 	remote "github.com/melounvitek/gripi/internal/worker"
-	"github.com/melounvitek/gripi/internal/worker/mirror"
+	"github.com/melounvitek/gripi/internal/worker/reconcile"
 )
 
 // fakeSSHScript stands in for ssh. It records its arguments, then fails as ssh does with FAKE_SSH_ERROR, answers
@@ -38,7 +38,8 @@ HOME=$FAKE_SSH_HOME exec sh -c "$command"
 `
 
 // fakeSSH puts fakeSSHScript on PATH as ssh, and a systemd-run that succeeds, gives the test a home that the
-// worker shares and a workers file, and returns the file with ssh's arguments.
+// worker shares and a workers file, and returns the file with ssh's arguments. The worker's private views, which
+// this machine may block, work and show its files as they are.
 func fakeSSH(t *testing.T) (arguments string) {
 	t.Helper()
 	isolateSettings(t)
@@ -61,6 +62,13 @@ func fakeSSH(t *testing.T) (arguments string) {
 	t.Setenv("FAKE_SSH_SHARED", "")
 	arguments = filepath.Join(directory, "arguments")
 	t.Setenv("FAKE_SSH_ARGUMENTS", arguments)
+	viewScripts = func(_ context.Context, options remote.Options) (func(string, ...string) (string, error), error) {
+		return func(script string, arguments ...string) (string, error) {
+			output, err := exec.Command("ssh", "-o", "BatchMode=yes", "--", options.Destination, remote.ShellQuote(append([]string{"sh", "-c", script, "sh"}, arguments...)...)).Output()
+			return string(output), err
+		}, nil
+	}
+	t.Cleanup(func() { viewScripts = remote.ViewScripts })
 	return arguments
 }
 
@@ -179,10 +187,10 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 		otherSystem = "Linux"
 	}
 	for _, test := range []struct{ name, answer, reason string }{
-		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\nsystemd\nagent\n", "no Git"},
-		{"no systemd", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nagent\n", "systemd"},
-		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n", "same operating system and architecture"},
-		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n", "same operating system and architecture"},
+		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\nsystemd\n", "no Git"},
+		{"no systemd", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\n", "systemd"},
+		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
+		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fakeSSH(t)
@@ -199,12 +207,15 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 
 func TestWorkerAddFailsWhenTheWorkerCannotCreatePisAgentFolder(t *testing.T) {
 	fakeSSH(t)
-	system, machine := thisSystem(t)
-	home := os.Getenv("HOME")
-	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n"+home+"\ngit\nsystemd\n")
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	agentDir := filepath.Join(file, "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
 
 	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
-	if code != 1 || stdout != "" || !strings.Contains(stderr, "cannot create Pi's folder "+filepath.Join(home, ".pi", "agent")) {
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "cannot create Pi's folder "+agentDir) {
 		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	assertNoWorkersFile(t)
@@ -259,47 +270,75 @@ func buildGripi(t *testing.T, gripi string) {
 	}
 }
 
-// A worker user with another home folder needs no setup: what runs there with main's paths sees the user's home
-// folder at main's, in a private view of unprivileged user namespaces, which add checks with the helper.
-func TestWorkerAddChecksThePrivateViewOfAWorkerUserWithAnotherHomeFolder(t *testing.T) {
+// privateViews reports whether this system lets gripi make private views, which Ubuntu blocks by default.
+func privateViews(t *testing.T) bool {
+	t.Helper()
+	code, _, _ := runCLI("worker", "enter", "--home", filepath.Join(t.TempDir(), "alice"), "--", "true")
+	return code == 0
+}
+
+// A worker user needs no setup, but the worker needs unprivileged user namespaces, which add checks with the helper:
+// each moved session runs in a private view of its copy, and with another home folder, what runs there with main's
+// paths sees that home folder at main's in a view too.
+func TestWorkerAddChecksThePrivateViews(t *testing.T) {
 	gripi := filepath.Join(t.TempDir(), "gripi")
 	buildGripi(t, gripi)
-	fakeSSH(t)
-	workerHome := t.TempDir()
-	t.Setenv("FAKE_SSH_HOME", workerHome)
-	// The worker is this machine as another user, which would see main's files outside the view.
-	t.Setenv("FAKE_SSH_SHARED", "1")
-	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".pi", "agent"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	workerHelper = remote.Options{Executable: gripi}
-	t.Cleanup(func() { workerHelper = remote.Options{} })
+	views := privateViews(t)
+	for name, anotherHome := range map[string]bool{"another home folder": true, "main's home folder": false} {
+		t.Run(name, func(t *testing.T) {
+			fakeSSH(t)
+			viewScripts = remote.ViewScripts
+			workerHome := os.Getenv("HOME")
+			if anotherHome {
+				workerHome = t.TempDir()
+				t.Setenv("FAKE_SSH_HOME", workerHome)
+				// The worker is this machine as another user, which would see main's files outside the view.
+				t.Setenv("FAKE_SSH_SHARED", "1")
+			}
+			if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".pi", "agent"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			workerHelper = remote.Options{Executable: gripi}
+			t.Cleanup(func() { workerHelper = remote.Options{} })
 
-	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
-	if code != 0 {
-		// This system blocks unprivileged user namespaces, as Ubuntu does by default.
-		if code != 1 || !strings.Contains(stderr, workerHome) || !strings.Contains(stderr, "sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0") {
-			t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
-		}
-		assertNoWorkersFile(t)
-		return
-	}
-	if info, err := os.Stat(filepath.Join(workerHome, ".pi", "agent")); err != nil || !info.IsDir() {
-		t.Fatalf("Pi's agent folder in the worker user's home folder = %v, %v", info, err)
-	}
-	if workers := listedWorkers(t); len(workers) != 1 || workers[0]["name"] != "beelink" {
-		t.Fatalf("workers = %v", workers)
+			code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
+			if !views {
+				if code != 1 || !strings.Contains(stderr, workerHome) || !strings.Contains(stderr, "sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0") {
+					t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
+				}
+				assertNoWorkersFile(t)
+				return
+			}
+			if code != 0 {
+				t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+			if info, err := os.Stat(filepath.Join(workerHome, ".pi", "agent")); err != nil || !info.IsDir() {
+				t.Fatalf("Pi's agent folder in the worker user's home folder = %v, %v", info, err)
+			}
+			if workers := listedWorkers(t); len(workers) != 1 || workers[0]["name"] != "beelink" {
+				t.Fatalf("workers = %v", workers)
+			}
+		})
 	}
 }
 
-// Main runs worker commands that use its paths through enter, which runs them as they are when the worker user's
-// home folder is main's.
-func TestWorkerEnterRunsACommandAsItIsWithMainsHomeFolder(t *testing.T) {
+// Main runs its checks of a worker through enter, in a private view also when the worker user's home folder is main's,
+// because each moved session runs in a view of its own there.
+func TestWorkerEnterRunsACommandInAPrivateViewAlsoWithMainsHomeFolder(t *testing.T) {
+	views := privateViews(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	namespace, err := os.Readlink("/proc/self/ns/user")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	code, stdout, stderr := runCLI("worker", "enter", "--home", home, "--", "sh", "-c", `echo "$HOME"; exit 3`)
-	if code != 3 || stdout != home+"\n" || stderr != "" {
+	code, stdout, stderr := runCLI("worker", "enter", "--home", home, "--", "sh", "-c", `echo "$HOME"; readlink /proc/self/ns/user; exit 3`)
+	if !views {
+		if code != 1 || !strings.Contains(stderr, "sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0") {
+			t.Fatalf("gripi worker enter where views are blocked = %d, stdout %q, stderr %q", code, stdout, stderr)
+		}
+	} else if lines := strings.Split(stdout, "\n"); code != 3 || len(lines) != 3 || lines[0] != home || lines[1] == namespace || stderr != "" {
 		t.Fatalf("gripi worker enter = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	if code, _, stderr := runCLI("worker", "enter", "--home", home); code != 2 || !strings.Contains(stderr, "command") {
@@ -361,26 +400,26 @@ func TestThePiAdapterExtractsTheExtensionsToTheSameFolderAfterARestart(t *testin
 	}
 }
 
-// recordedWorkers notes the repositories that the gateway was asked to move.
+// recordedWorkers notes the sessions that the gateway was asked to move.
 type recordedWorkers struct{ moves []string }
 
-func (workers *recordedWorkers) Move(_ context.Context, folder, worker string, _ func(func(string) bool) error) error {
-	workers.moves = append(workers.moves, folder+" to "+worker)
+func (workers *recordedWorkers) Move(_ context.Context, key, _, worker string, _ func(context.Context, func(string) bool) (func(), error)) error {
+	workers.moves = append(workers.moves, key+" to "+worker)
 	return nil
 }
 
-func (workers *recordedWorkers) Return(_ context.Context, folder string, _ func(func(string) bool) error) error {
-	workers.moves = append(workers.moves, folder+" back")
+func (workers *recordedWorkers) Return(_ context.Context, key string, _ func(context.Context, func(string) bool) (func(), error)) error {
+	workers.moves = append(workers.moves, key+" back")
 	return nil
 }
 
-func (workers *recordedWorkers) Forward(_ context.Context, folder string, port int) (int, error) {
-	workers.moves = append(workers.moves, fmt.Sprintf("%s forwards %d", folder, port))
+func (workers *recordedWorkers) Forward(_ context.Context, key string, port int) (int, error) {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s forwards %d", key, port))
 	return port + 1, nil
 }
 
-func (workers *recordedWorkers) Unforward(folder string, port int) error {
-	workers.moves = append(workers.moves, fmt.Sprintf("%s unforwards %d", folder, port))
+func (workers *recordedWorkers) Unforward(key string, port int) error {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s unforwards %d", key, port))
 	return nil
 }
 
@@ -390,28 +429,28 @@ func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) 
 	return gateway.WorkerLocation{}, false
 }
 
-func (workers *recordedWorkers) Repository(folder string) (string, []string, error) {
-	return folder, nil, nil
+func (workers *recordedWorkers) Placed() map[string]string { return nil }
+
+func (workers *recordedWorkers) Selection(_, cwd string) (string, []string, error) {
+	return cwd, []string{cwd}, nil
 }
 
 func (workers *recordedWorkers) Notices(string) []gateway.WorkerNotice { return nil }
 
-func (workers *recordedWorkers) DismissNotices(string) {}
+func (workers *recordedWorkers) DismissNotices(context.Context, string) error { return nil }
 
-func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
+func TestWorkerMoveAndReturnTakeASession(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	workers := &recordedWorkers{}
 	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
-	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
 
-	if code, stdout, stderr := runCLI("worker", "move", "0a1-alpha", "beelink"); code != 0 || !strings.Contains(stdout, "beelink") {
-		t.Fatalf("worker move <session> = %d %q %q", code, stdout, stderr)
+	if code, stdout, stderr := runCLI("worker", "move", "0a1-alpha", "beelink"); code != 0 || !strings.Contains(stdout, "0a1-alpha runs on beelink") {
+		t.Fatalf("worker move = %d %q %q", code, stdout, stderr)
 	}
-	t.Chdir(filepath.Dir(project))
-	if code, stdout, stderr := runCLI("worker", "return", "project"); code != 0 || stdout == "" {
-		t.Fatalf("worker return <folder> = %d %q %q", code, stdout, stderr)
+	if code, stdout, stderr := runCLI("worker", "return", alpha); code != 0 || !strings.Contains(stdout, "0a1-alpha runs on this machine") {
+		t.Fatalf("worker return = %d %q %q", code, stdout, stderr)
 	}
-	if expected := []string{project + " to beelink", project + " back"}; !reflect.DeepEqual(workers.moves, expected) {
+	if expected := []string{alpha + " to beelink", alpha + " back"}; !reflect.DeepEqual(workers.moves, expected) {
 		t.Fatalf("moves = %q, want %q", workers.moves, expected)
 	}
 	if code, _, stderr := runCLI("worker", "move", "no-such-session", "beelink"); code != 1 || !strings.Contains(stderr, "no session matches") {
@@ -419,29 +458,28 @@ func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	}
 }
 
-func TestWorkerForwardAndUnforwardTakeASessionOrAFolderAndAPort(t *testing.T) {
+func TestWorkerForwardAndUnforwardTakeASessionAndAPort(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	workers := &recordedWorkers{}
 	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
-	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
 
 	if code, stdout, stderr := runCLI("worker", "forward", "0a1-alpha", "5173"); code != 0 || stdout != "Port 5173 of the worker is at localhost:5174.\n" {
 		t.Fatalf("worker forward = %d %q %q", code, stdout, stderr)
 	}
-	if code, stdout, stderr := runCLI("worker", "unforward", project, "5173"); code != 0 || !strings.Contains(stdout, "5173") {
+	if code, stdout, stderr := runCLI("worker", "unforward", alpha, "5173"); code != 0 || !strings.Contains(stdout, "5173") {
 		t.Fatalf("worker unforward = %d %q %q", code, stdout, stderr)
 	}
-	if expected := []string{project + " forwards 5173", project + " unforwards 5173"}; !reflect.DeepEqual(workers.moves, expected) {
+	if expected := []string{alpha + " forwards 5173", alpha + " unforwards 5173"}; !reflect.DeepEqual(workers.moves, expected) {
 		t.Fatalf("asked the gateway: %q, want %q", workers.moves, expected)
 	}
-	for _, arguments := range [][]string{{"forward", project}, {"forward", project, "0"}, {"unforward", project, "web"}} {
+	for _, arguments := range [][]string{{"forward", alpha}, {"forward", alpha, "0"}, {"unforward", alpha, "web"}} {
 		if code, _, stderr := runCLI(append([]string{"worker"}, arguments...)...); code != 2 {
 			t.Fatalf("worker %q = %d %q", arguments, code, stderr)
 		}
 	}
 }
 
-func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
+func TestWorkerRemoveRefusesAWorkerThatHasSessions(t *testing.T) {
 	fakeSSH(t)
 	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
 		t.Fatalf("worker add: %s", stderr)
@@ -450,19 +488,19 @@ func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := placements.Add(remote.Placement{Worker: "beelink", Unit: mirror.Unit{Main: "/work/project"}}); err != nil {
+	if err := placements.Add(remote.Placement{Session: "/sessions/a.jsonl", Move: "m1", Worker: "beelink"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if code, _, stderr := runCLI("worker", "remove", "beelink"); code != 1 || !strings.Contains(stderr, "/work/project") || !strings.Contains(stderr, "gripi worker return") {
-		t.Fatalf("worker remove of a worker with a repository = %d %q", code, stderr)
+	if code, _, stderr := runCLI("worker", "remove", "beelink"); code != 1 || !strings.Contains(stderr, "/sessions/a.jsonl") || !strings.Contains(stderr, "gripi worker return") {
+		t.Fatalf("worker remove of a worker with a session = %d %q", code, stderr)
 	}
 	if workers := listedWorkers(t); len(workers) != 1 {
 		t.Fatalf("workers = %v", workers)
 	}
 }
 
-func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
+func TestTheGatewaySeesTheSavedWorkersAndWhereSessionsRun(t *testing.T) {
 	fakeSSH(t)
 	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
 		t.Fatalf("worker add: %s", stderr)
@@ -471,7 +509,16 @@ func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := placements.Add(remote.Placement{Worker: "beelink", Unit: mirror.Unit{Main: "/work/project"}}); err != nil {
+	if err := placements.Add(remote.Placement{Session: "/sessions/a.jsonl", Move: "m1", Worker: "beelink", Repository: "/work/project/.git"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := placements.Add(remote.Placement{Session: "/sessions/b.jsonl", Move: "m2", Worker: "beelink", Repository: "/work/project/.git"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := placements.Finish("/sessions/b.jsonl", &remote.Notice{
+		Session: "/sessions/b.jsonl", Worker: "beelink", Repository: "/work/project", Recovery: "/state/returns/m2",
+		Result: reconcile.Result{Aside: []reconcile.Item{{Path: "/work/project/README", Reason: "both changed it"}}, Notice: "Main kept its own version."},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	workers := gatewayWorkers{remote.NewManager(remote.ManagerOptions{Placements: placements}), os.Getenv("GRIPI_WORKERS_PATH")}
@@ -479,10 +526,16 @@ func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
 	if list, err := workers.List(); err != nil || !reflect.DeepEqual(list, []gateway.Worker{{Name: "beelink", Destination: "gripi@beelink", State: "disconnected"}}) {
 		t.Fatalf("workers = %+v, %v", list, err)
 	}
-	if location, found := workers.Location("/work/project/src"); !found || !reflect.DeepEqual(location, gateway.WorkerLocation{Worker: "beelink", State: "disconnected", Repository: "/work/project", Ports: []gateway.WorkerPort{}}) {
+	if location, found := workers.Location("/sessions/a.jsonl"); !found || !reflect.DeepEqual(location, gateway.WorkerLocation{Worker: "beelink", State: "disconnected", Repository: "/work/project", Ports: []gateway.WorkerPort{}}) {
 		t.Fatalf("location = %+v, %v", location, found)
 	}
-	if _, found := workers.Location("/work/other"); found {
-		t.Fatal("a folder on main runs on a worker")
+	if _, found := workers.Location("/sessions/b.jsonl"); found {
+		t.Fatal("a session on main runs on a worker")
+	}
+	if notices := workers.Notices("/sessions/b.jsonl"); !reflect.DeepEqual(notices, []gateway.WorkerNotice{{
+		Repository: "/work/project", Worker: "beelink", Aside: "/state/returns/m2/worker", Paths: []string{"/work/project/README"},
+		Items: []gateway.WorkerNoticeItem{{Path: "/work/project/README", Reason: "both changed it"}}, Refs: []string{}, Text: "Main kept its own version.",
+	}}) {
+		t.Fatalf("notices = %+v", notices)
 	}
 }

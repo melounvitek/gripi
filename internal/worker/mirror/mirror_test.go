@@ -126,14 +126,8 @@ func TestMirrorsGitOperations(t *testing.T) {
 			writeFile(t, featC, "src/d14/f1.txt", "in feat-c\n")
 			git(t, featC, "commit", "-qam", "feat-c change")
 			r.verify(t)
-			if !r.src.Contains(filepath.Join(featC, "src")) {
-				t.Error("the source doesn't count the new worktree as the unit's")
-			}
 			git(t, main, "worktree", "remove", "--force", featB)
 			r.verify(t)
-			if r.src.Contains(featB) {
-				t.Error("the source counts the removed worktree as the unit's")
-			}
 			if _, err := os.Lstat(r.dst + featB); err == nil {
 				t.Errorf("the removed worktree is still on main")
 			}
@@ -496,9 +490,6 @@ func TestAFolderInAnotherRepositoryKeepsToItselfWhenTheSourceRescans(t *testing.
 	r := newRig(t, Unit{Main: folder})
 	writeFile(t, folder, ".gitignore", "*.tmp\n") // which makes the source rescan
 	r.barrier(t)
-	if !r.src.Contains(folder) || r.src.Contains(other.Worktrees[0]) {
-		t.Fatal("the source took the other repository's worktrees for its folders")
-	}
 	for _, p := range []string{filepath.Join(folder, "s.jsonl"), filepath.Join(folder, ".gitignore")} {
 		if _, err := os.Lstat(r.dst + p); err != nil {
 			t.Errorf("main's copy of %s: %v", p, err)
@@ -725,21 +716,6 @@ func TestOptionsIncludeAndExcludePaths(t *testing.T) {
 	}
 }
 
-func TestDiscover(t *testing.T) {
-	unit := newRepo(t)
-	got, err := Discover(filepath.Join(unit.Worktrees[0], "src"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Main != unit.Main || got.GitDir != filepath.Join(unit.Main, ".git") || !slices.Equal(got.Worktrees, unit.Worktrees) || len(got.Worktrees) != 2 {
-		t.Fatalf("Discover from a worktree = %+v, want %+v", got, unit)
-	}
-	plain := t.TempDir()
-	if got, err := Discover(plain); err != nil || got.Main != plain || got.GitDir != "" || got.Worktrees != nil {
-		t.Fatalf("Discover outside Git = %+v, %v", got, err)
-	}
-}
-
 // rig mirrors a unit to main's copy under dst, in one process.
 type rig struct {
 	unit    Unit
@@ -843,10 +819,7 @@ func checkCopy(t *testing.T, unit Unit, dst string) {
 // has the same status on both sides.
 func checkGit(t *testing.T, unit Unit, dst string) {
 	t.Helper()
-	unit, err := Discover(unit.Main)
-	if err != nil {
-		t.Fatal(err)
-	}
+	unit = discover(t, unit.Main)
 	fsck(t, dst+unit.GitDir)
 	for _, wt := range append([]string{unit.Main}, unit.Worktrees...) {
 		want := gitStatus(t, wt, nil)
@@ -868,10 +841,7 @@ func checkGit(t *testing.T, unit Unit, dst string) {
 // checkFiles checks that the mirrored files match.
 func checkFiles(t *testing.T, unit Unit, dst string) {
 	t.Helper()
-	unit, err := Discover(unit.Main)
-	if err != nil {
-		t.Fatal(err)
-	}
+	unit = discover(t, unit.Main)
 	want, got := sourceManifest(t, unit), destinationManifest(t, unit, dst)
 	if !slices.Equal(want, got) {
 		t.Errorf("main's files differ from the worker's (- worker, + main):\n%s", lineDiff(want, got))
@@ -913,10 +883,7 @@ func sourceManifest(t *testing.T, unit Unit) []string {
 }
 
 func destinationManifest(t *testing.T, unit Unit, dst string) []string {
-	unit, err := Discover(unit.Main)
-	if err != nil {
-		t.Fatal(err)
-	}
+	unit = discover(t, unit.Main)
 	roots := unit.roots()
 	var lines []string
 	for _, root := range roots {
@@ -1005,11 +972,22 @@ func newRepo(t *testing.T) Unit {
 	for _, name := range []string{"feat-a", "feat-b"} {
 		git(t, main, "worktree", "add", "-q", "-b", name, filepath.Join(base, ".worktrees", "proj", name))
 	}
-	unit, err := Discover(main)
+	return discover(t, main)
+}
+
+// discover returns the unit of the folder dir: the repository that holds it with all its worktrees, or the folder alone
+// outside Git.
+func discover(t *testing.T, dir string) Unit {
+	t.Helper()
+	gitDir, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		return Unit{Main: dir}
+	}
+	worktrees, err := listWorktrees(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return unit
+	return Unit{Main: worktrees[0], Worktrees: worktrees[1:], GitDir: filepath.Clean(strings.TrimSpace(string(gitDir)))}
 }
 
 func randomText(seed, size int) string {

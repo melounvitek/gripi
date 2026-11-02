@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -54,131 +53,9 @@ func extensionRequest(t *testing.T, runtimeDir, session, kind string) helper.Res
 	return answer
 }
 
-// attachMain connects a copy on main, which keeps what the worker has under from under to, to the helper's mirror of
-// the unit whose main folder is main. It returns the channel, and what the copy's Serve and the channel return.
-func attachMain(t *testing.T, unit *unitHelper, main, from, to string) (*exec.Cmd, <-chan error) {
-	t.Helper()
-	state, aside := t.TempDir(), t.TempDir()
-	destination, err := mirror.NewMovedDestination(state, from, to)
-	if err != nil {
-		t.Fatal(err)
-	}
-	channel := exec.Command(buildGripi(t), "worker", "mirror", "--runtime-dir", unit.runtimeDir, main, unit.instance)
-	channel.Stderr = os.Stderr
-	input, _ := channel.StdinPipe()
-	output, _ := channel.StdoutPipe()
-	if err := channel.Start(); err != nil {
-		t.Fatal(err)
-	}
-	served := make(chan error, 1)
-	go func() {
-		err := destination.Serve(context.Background(), struct {
-			io.Reader
-			io.Writer
-		}{output, input}, aside)
-		input.Close()
-		served <- errors.Join(err, channel.Wait())
-	}()
-	return channel, served
-}
-
-func TestMirrorSendsTheUnitToMainAndAnswersTheBarriersOfItsSessions(t *testing.T) {
-	unit := startUnitHelper(t, helper.DefaultLease)
-	root := t.TempDir()
-	project := filepath.Join(root, "worker", "project")
-	if err := os.MkdirAll(project, 0755); err != nil {
-		t.Fatal(err)
-	}
-	git(t, project, "init", "-q", "-b", "main")
-	os.WriteFile(filepath.Join(project, "README.md"), []byte("first\n"), 0644)
-	git(t, project, "add", "-A")
-	git(t, project, "commit", "-qm", "first")
-	repository, err := mirror.Discover(project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pids := filepath.Join(root, "pids")
-	if response := unit.request(map[string]any{
-		"type": "session.create", "session": "s1", "cwd": filepath.Join(project), "args": []string{unit.pi, "--mode", "rpc"}, "env": []string{"FAKE_PI_PIDS=" + pids},
-	}); !response.OK {
-		t.Fatalf("session.create = %+v", response)
-	}
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "barrier"); answer.OK {
-		t.Fatal("a barrier passed before the unit was mirrored")
-	}
-
-	if response := unit.request(map[string]any{"type": "mirror.start", "unit": repository}); !response.OK {
-		t.Fatalf("mirror.start = %+v", response)
-	}
-	stranger := exec.Command(buildGripi(t), "worker", "mirror", "--runtime-dir", unit.runtimeDir, project, "0123456789abcdef")
-	if output, err := stranger.CombinedOutput(); err == nil || !strings.Contains(string(output), "not 0123456789abcdef") {
-		t.Fatalf("mirror for another helper = %v, %s", err, output)
-	}
-	mainCopy := filepath.Join(root, "main")
-	_, served := attachMain(t, unit, project, filepath.Join(root, "worker"), mainCopy)
-	// Main would lack the session's latest entries.
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "barrier"); answer.OK || !strings.Contains(answer.Error, "session's file") {
-		t.Fatalf("barrier while the session's file is not mirrored = %+v", answer)
-	}
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "health"); answer.OK {
-		t.Fatal("healthy while the session's file is not mirrored")
-	}
-	sessions := mirror.Unit{Main: filepath.Join(root, "worker", "sessions", "--project--")}
-	if response := unit.request(map[string]any{"type": "mirror.start", "unit": sessions, "sessions": true, "path": project}); !response.OK {
-		t.Fatalf("mirror.start of the sessions = %+v", response)
-	}
-	sessionsChannel, sessionsServed := attachMain(t, unit, sessions.Main, filepath.Join(root, "worker"), mainCopy)
-
-	os.WriteFile(filepath.Join(project, "tool.txt"), []byte("written by a tool\n"), 0644)
-	git(t, project, "add", "-A")
-	git(t, project, "commit", "-qm", "by a tool")
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "barrier"); !answer.OK {
-		t.Fatalf("barrier = %+v", answer)
-	}
-	if contents, _ := os.ReadFile(filepath.Join(mainCopy, "project", "tool.txt")); string(contents) != "written by a tool\n" {
-		t.Fatalf("main's copy of tool.txt = %q", contents)
-	}
-	if head := git(t, filepath.Join(mainCopy, "project"), "rev-parse", "HEAD"); head != git(t, project, "rev-parse", "HEAD") {
-		t.Fatalf("main's copy is at %s", head)
-	}
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "health"); !answer.OK {
-		t.Fatalf("health = %+v", answer)
-	}
-
-	// Main's copy of the sessions ends, as when it fails.
-	sessionsChannel.Process.Kill()
-	<-sessionsServed
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "barrier"); answer.OK {
-		t.Fatal("a barrier passed after the mirror of the sessions ended")
-	}
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "health"); answer.OK {
-		t.Fatal("healthy after the mirror of the sessions ended")
-	}
-
-	os.WriteFile(filepath.Join(project, "last.txt"), []byte("just before the move back\n"), 0644)
-	if response := unit.request(map[string]any{"type": "mirror.stop", "path": project}); !response.OK {
-		t.Fatalf("mirror.stop = %+v", response)
-	}
-	select {
-	case err := <-served:
-		if err != nil {
-			t.Fatalf("the destination stopped with %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the mirror still runs")
-	}
-	if _, err := os.Stat(filepath.Join(mainCopy, "project", "last.txt")); err != nil {
-		t.Fatalf("the change before mirror.stop: %v", err)
-	}
-	if answer := extensionRequest(t, unit.runtimeDir, "s1", "barrier"); answer.OK {
-		t.Fatal("a barrier passed after the mirror stopped")
-	}
-}
-
-// The helper's view shows what was next to main's home folder when the helper started. Copies and mirrors both see
-// that view, so a project in a folder made there later can't be copied, and its mirror fails rather than delete main's
-// copy of the project, which a copy in another view could have put there.
-func TestCopiesAndMirrorsSeeTheFoldersOfTheHelpersView(t *testing.T) {
+// The helper's view shows what was next to main's home folder when the helper started. Copies see that view, so a
+// folder made there later can't be copied.
+func TestCopiesSeeTheFoldersOfTheHelpersView(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home", "alice")
 	if err := os.MkdirAll(filepath.Dir(home), 0700); err != nil {
@@ -213,65 +90,5 @@ func TestCopiesAndMirrorsSeeTheFoldersOfTheHelpersView(t *testing.T) {
 	}{output, input}, mirror.Unit{Main: filepath.Join(mainCopy, "app")}, mirror.Options{})
 	if err := channel.Wait(); synced == nil || err == nil || !strings.Contains(stderr.String(), "read-only file system") {
 		t.Fatalf("a copy into a folder that the helper's view lacks = %v, %v %s", synced, err, stderr.String())
-	}
-
-	if response := unit.request(map[string]any{"type": "mirror.start", "unit": mirror.Unit{Main: project}}); !response.OK {
-		t.Fatalf("mirror.start = %+v", response)
-	}
-	_, served := attachMain(t, unit, project, filepath.Dir(project), mainCopy)
-	if err := <-served; err == nil || !strings.Contains(err.Error(), project) {
-		t.Fatalf("main's copy of a project that the helper's view lacks = %v", err)
-	}
-	if contents, _ := os.ReadFile(filepath.Join(mainCopy, "app", "README")); string(contents) != "main's project\n" {
-		t.Fatalf("main's copy of the project has %q", contents)
-	}
-}
-
-func TestASessionsMirrorMakesItsFoldersAndSendsChangesUnasked(t *testing.T) {
-	unit := startUnitHelper(t, helper.DefaultLease)
-	root := t.TempDir()
-	project, feature := filepath.Join(root, "worker", "sessions", "--project--"), filepath.Join(root, "worker", "sessions", "--project-feature--")
-	if err := os.MkdirAll(project, 0700); err != nil {
-		t.Fatal(err)
-	}
-	sessions := mirror.Unit{Main: project, Worktrees: []string{feature}}
-	if response := unit.request(map[string]any{"type": "mirror.start", "unit": sessions, "sessions": true, "path": filepath.Join(root, "worker", "project")}); !response.OK {
-		t.Fatalf("mirror.start = %+v", response)
-	}
-	if info, err := os.Stat(feature); err != nil || info.Mode().Perm() != 0700 {
-		t.Fatalf("the folder of the sessions in the feature: %v, %v", info, err)
-	}
-	mainCopy := filepath.Join(root, "main")
-	_, served := attachMain(t, unit, project, filepath.Join(root, "worker"), mainCopy)
-
-	// Pi is still writing the second line.
-	session := filepath.Join(feature, "session.jsonl")
-	os.WriteFile(session, []byte("{\"type\":\"session\"}\n{\"type\":\"mess"), 0600)
-	copied := filepath.Join(mainCopy, "sessions", "--project-feature--", "session.jsonl")
-	waitFor := func(want string) {
-		t.Helper()
-		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-			contents, _ := os.ReadFile(copied)
-			if string(contents) == want {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("main's copy of the session = %q, want %q", contents, want)
-			}
-		}
-	}
-	waitFor("{\"type\":\"session\"}\n")
-	file, err := os.OpenFile(session, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file.WriteString("age\"}\n")
-	file.Close()
-	waitFor("{\"type\":\"session\"}\n{\"type\":\"message\"}\n")
-	if response := unit.request(map[string]any{"type": "mirror.stop", "path": project}); !response.OK {
-		t.Fatalf("mirror.stop = %+v", response)
-	}
-	if err := <-served; err != nil {
-		t.Fatalf("the destination stopped with %v", err)
 	}
 }

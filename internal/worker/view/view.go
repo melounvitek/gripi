@@ -1,7 +1,7 @@
 // Package view lets processes on a worker see main's home folder as their user's own. When the worker user's home
 // folder has another path than main's, what Gripi runs there with main's paths, such as the helper with Pi and the
 // copies of main's folders, runs in a private view of the file system: main's home folder shows the worker user's
-// home folder, and everything else stays as it is.
+// home folder, and everything else stays as it is. Each moved session runs in a view of its own too, of its copy.
 package view
 
 import (
@@ -27,25 +27,49 @@ func Needed(home string) bool {
 
 // Run runs a command in the view of home, main's home folder, with the given input and outputs, and returns its exit
 // status. The command runs as this user, with HOME set to home, in the current folder if the view has it and in
-// home otherwise. When the view is not needed, the command runs as it is.
+// home otherwise. When home is this user's home folder, the view changes nothing, but the command still runs in
+// namespaces of its own, as a moved session's does.
 func Run(home string, command []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	if len(command) == 0 {
 		return 0, errors.New("no command to run")
 	}
-	process := exec.Command(command[0], command[1:]...)
-	needed := Needed(home)
-	if needed {
-		var err error
-		if process, err = viewCommand(home, command); err != nil {
-			return 0, err
-		}
+	process, err := viewCommand(home, command)
+	if err != nil {
+		return 0, err
 	}
 	process.Stdin, process.Stdout, process.Stderr = stdin, stdout, stderr
 	code, err := run(process)
-	if err != nil && needed && process.Process == nil {
+	if err != nil && process.Process == nil {
 		return 0, fmt.Errorf("cannot enter a private view that shows this user's home folder at %s (%w). It needs unprivileged user namespaces, which this system blocks; on Ubuntu, allow them with 'sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0', and in a file in /etc/sysctl.d to keep that after a restart", home, err)
 	}
 	return code, err
+}
+
+// Move is the view of a moved session's private copy of its repository: each of its private roots, folders directly
+// in main's home folder, shows the move's copy of it, and everything else stays as the process that starts the view
+// sees it, such as Pi's agent folder in the view of main's home folder.
+type Move struct {
+	Home    string   // main's home folder
+	Copy    string   // the move's copy, which holds the private roots under their names
+	Private []string // the private roots
+}
+
+// Command returns a command that runs command in the move's view, as this user with HOME set to main's home folder,
+// in the folder dir, which must exist there, and with env, or this process's environment when env is nil. It always
+// starts this executable again, which makes the view, also where this process sees main's home folder as its own.
+func (move Move) Command(dir string, command, env []string) (*exec.Cmd, error) {
+	if len(command) == 0 {
+		return nil, errors.New("no command to run")
+	}
+	if len(move.Private) == 0 {
+		return nil, errors.New("a move's view needs private roots")
+	}
+	for _, root := range move.Private {
+		if !filepath.IsAbs(root) || filepath.Clean(root) != root || filepath.Dir(root) != filepath.Clean(move.Home) {
+			return nil, fmt.Errorf("the private root %q is not a folder directly in main's home folder %q", root, move.Home)
+		}
+	}
+	return moveCommand(move, dir, command, env)
 }
 
 // run starts process, passes on the signals that would stop this process, and returns the process's exit status, or

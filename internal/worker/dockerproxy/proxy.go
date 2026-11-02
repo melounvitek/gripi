@@ -1,4 +1,4 @@
-// Package dockerproxy serves a Docker API endpoint that forwards to the real one and moves host paths between two
+// Package dockerproxy serves a Docker API endpoint that forwards to the real one and moves host paths between
 // folders, so that containers started from a private view of the file system bind the folders the view shows.
 package dockerproxy
 
@@ -23,11 +23,14 @@ import (
 type Options struct {
 	Listen   string // the Unix socket to serve, made private to the user; its folder must exist
 	Upstream string // the real Docker endpoint: unix:// or tcp:// without TLS
-	// From and To are absolute folders: paths at or under From reach Docker under To, and Docker's answers show
-	// paths under To under From again. The symbolic links in the paths of requests are followed first, as the
-	// process sees them, because Docker would follow them where it runs.
-	From, To string
+	// Mappings move the paths at or under each From to its To for Docker, by the longest From that holds a path, and
+	// the paths in Docker's answers back, by the longest To. The symbolic links in the paths of requests are followed
+	// first, as the process sees them, because Docker would follow them where it runs.
+	Mappings []Mapping
 }
+
+// Mapping names two absolute folders: From as the process sees it, and To as Docker does.
+type Mapping struct{ From, To string }
 
 // Serve forwards Docker API requests on options.Listen to options.Upstream until ctx ends, and returns ctx's error.
 func Serve(ctx context.Context, options Options) error {
@@ -35,16 +38,19 @@ func Serve(ctx context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
-	if !filepath.IsAbs(options.From) || !filepath.IsAbs(options.To) {
-		return fmt.Errorf("the folders to map must be absolute: %q, %q", options.From, options.To)
+	var toDocker, fromDocker mappings
+	for _, folders := range options.Mappings {
+		if !filepath.IsAbs(folders.From) || !filepath.IsAbs(folders.To) {
+			return fmt.Errorf("the folders to map must be absolute: %q, %q", folders.From, folders.To)
+		}
+		// Resolved paths have no symbolic links, so they match From only once it is resolved too.
+		from, err := resolve(folders.From)
+		if err != nil {
+			return fmt.Errorf("can't resolve %s: %w", folders.From, err)
+		}
+		toDocker = append(toDocker, mapping{from, filepath.Clean(folders.To)})
+		fromDocker = append(fromDocker, mapping{filepath.Clean(folders.To), filepath.Clean(folders.From)})
 	}
-	// Resolved paths have no symbolic links, so they match From only once it is resolved too.
-	from, err := resolve(options.From)
-	if err != nil {
-		return fmt.Errorf("can't resolve %s: %w", options.From, err)
-	}
-	toDocker := mapping{from, filepath.Clean(options.To)}
-	fromDocker := mapping{toDocker.to, filepath.Clean(options.From)}
 	hostPath := func(path string) (string, error) {
 		// Others name volumes, or devices such as tmpfs.
 		if !filepath.IsAbs(path) {

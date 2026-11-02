@@ -24,6 +24,23 @@ func TestMain(m *testing.M) {
 		relay(pidFile, os.Args[1], os.Args[2])
 		return
 	}
+	if folder := os.Getenv("GRIPI_TEST_MIRROR_SOURCE"); folder != "" {
+		runFakeMirrorSource(folder)
+		return
+	}
+	// Run from a Git hook or git rebase --exec, Git's variables would point the tests' git commands at that repository
+	// instead of their own.
+	for _, variable := range os.Environ() {
+		if name, _, _ := strings.Cut(variable, "="); strings.HasPrefix(name, "GIT_") {
+			os.Unsetenv(name)
+		}
+	}
+	for name, value := range map[string]string{
+		"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+	} {
+		os.Setenv(name, value)
+	}
 	code := m.Run()
 	if builds.folder != "" {
 		os.RemoveAll(builds.folder)

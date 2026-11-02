@@ -45,3 +45,10 @@ type Store interface {
 	// each again.
 	SaveCache() error
 }
+
+// ToolPathsReader is a Store that can say which paths the tool calls of a saved session named, such as the files it
+// read or edited and the folders that its shell commands worked in, with relative ones resolved against cwd and ~
+// against home. A session that isn't saved named none.
+type ToolPathsReader interface {
+	ToolPaths(key, cwd, home string) ([]string, error)
+}

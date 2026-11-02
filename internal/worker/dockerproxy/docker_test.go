@@ -61,7 +61,7 @@ func TestRealDocker(t *testing.T) {
 	}
 	otherUser := tree(t, session)
 	client, socket := serve(t, dockerproxy.Options{
-		Listen: filepath.Join(dir, "docker.sock"), Upstream: dockerproxy.Upstream(os.Environ()), From: session, To: worker,
+		Listen: filepath.Join(dir, "docker.sock"), Upstream: dockerproxy.Upstream(os.Environ()), Mappings: []dockerproxy.Mapping{{From: session, To: worker}},
 	})
 	name := "gripi-dockerproxy-test-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	// Cleanup goes to the daemon directly, so it works even when the proxy doesn't.

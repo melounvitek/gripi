@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 )
 
@@ -12,31 +14,32 @@ type Forwarded struct {
 	Port, Local int
 }
 
-// forwarded is a forward that a worker's connection runs, until cancel.
+// forwarded is a forward that a worker's connection runs, until cancel, for the sessions that asked for it.
 type forwarded struct {
-	local  int
-	cancel func() error
+	local    int
+	cancel   func() error
+	sessions []string
 }
 
 // freePorts is how many ports Forward tries, from the worker's port up, for one that is free on main.
 const freePorts = 100
 
-// Forward makes a port on the loopback of the worker that runs the repository of folder available on main's loopback,
-// at the same port or, when that is taken, at the next free one, which it returns. The forward lasts until Unforward
-// or until main's connection to the worker ends.
-func (manager *Manager) Forward(ctx context.Context, folder string, port int) (local int, err error) {
-	placement, placed := manager.options.Placements.Find(folder)
+// Forward makes a port on the loopback of the worker that runs a session available on main's loopback, at the same
+// port or, when that is taken, at the next free one, which it returns. The forward lasts until the sessions that
+// asked for it have unforwarded it or returned, or until main's connection to the worker ends.
+func (manager *Manager) Forward(ctx context.Context, key string, port int) (local int, err error) {
+	placement, placed := manager.options.Placements.Find(key)
 	if !placed {
-		return 0, refuse("%s is not on a worker", folder)
+		return 0, refuse("the session is not on a worker")
 	}
 	manager.mu.Lock()
 	worker := manager.workers[placement.Worker]
-	var conn *Conn
+	var conn link
 	if worker != nil {
 		conn = worker.conn
-		if forwarded, found := worker.forwards[port]; found {
-			manager.mu.Unlock()
-			return forwarded.local, nil
+		if existing := worker.forwards[port]; existing != nil {
+			defer manager.mu.Unlock()
+			return existing.local, manager.claim(existing, placement)
 		}
 	}
 	manager.mu.Unlock()
@@ -54,46 +57,81 @@ func (manager *Manager) Forward(ctx context.Context, folder string, port int) (l
 		if err != nil {
 			return 0, err
 		}
-		return manager.addForward(worker, conn, port, forwarded{local: local, cancel: cancel})
+		return manager.addForward(worker, conn, placement, port, &forwarded{local: local, cancel: cancel})
 	}
 	return 0, fmt.Errorf("no port from %d to %d is free on this machine", port, local-1)
 }
 
-// addForward records a forward that a worker's connection runs, unless the connection has ended meanwhile, or another
-// Forward of the port came first.
-func (manager *Manager) addForward(worker *remote, conn *Conn, port int, added forwarded) (int, error) {
+// addForward records a forward that a worker's connection runs for the session of a placement, unless the connection
+// has ended meanwhile, the session has returned, or another Forward of the port came first.
+func (manager *Manager) addForward(worker *remote, conn link, placement Placement, port int, added *forwarded) (int, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if worker.conn != conn {
+		added.cancel()
 		return 0, fmt.Errorf("worker %s disconnected", worker.name)
 	}
-	if existing, found := worker.forwards[port]; found {
+	if existing := worker.forwards[port]; existing != nil {
 		added.cancel()
-		return existing.local, nil
+		return existing.local, manager.claim(existing, placement)
+	}
+	if err := manager.claim(added, placement); err != nil {
+		added.cancel()
+		return 0, err
 	}
 	if worker.forwards == nil {
-		worker.forwards = map[int]forwarded{}
+		worker.forwards = map[int]*forwarded{}
 	}
 	worker.forwards[port] = added
 	return added.local, nil
 }
 
-// Unforward stops forwarding a port of the worker that runs the repository of folder.
-func (manager *Manager) Unforward(folder string, port int) error {
-	placement, placed := manager.options.Placements.Find(folder)
-	if !placed {
-		return refuse("%s is not on a worker", folder)
+// claim notes that the session of a placement asked for a forward, with manager.mu held, unless the session has
+// returned since, which drops its forwards after its placement.
+func (manager *Manager) claim(forward *forwarded, placement Placement) error {
+	if current, placed := manager.options.Placements.Find(placement.Session); !placed || current.Move != placement.Move {
+		return refuse("the session is not on a worker")
 	}
+	if !slices.Contains(forward.sessions, placement.Session) {
+		forward.sessions = append(forward.sessions, placement.Session)
+	}
+	return nil
+}
+
+// Unforward stops forwarding a port of the worker that runs a session for the session, and ends the forward when no
+// other session asked for it.
+func (manager *Manager) Unforward(key string, port int) error {
+	placement, placed := manager.options.Placements.Find(key)
+	if !placed {
+		return refuse("the session is not on a worker")
+	}
+	claimed, err := manager.unforward(placement.Worker, key, port)
+	if !claimed {
+		return refuse("the session doesn't forward port %d of worker %s", port, placement.Worker)
+	}
+	return err
+}
+
+// unforward forgets that a session on the worker of a name asked for the forwards of ports, or of all of them, ends
+// those that no other session asked for, and reports whether the session had asked for one.
+func (manager *Manager) unforward(name, key string, ports ...int) (claimed bool, err error) {
 	manager.mu.Lock()
-	var current forwarded
-	found := false
-	if worker := manager.workers[placement.Worker]; worker != nil {
-		current, found = worker.forwards[port]
-		delete(worker.forwards, port)
+	var ended []func() error
+	if worker := manager.workers[name]; worker != nil {
+		for port, existing := range worker.forwards {
+			if len(ports) > 0 && !slices.Contains(ports, port) || !slices.Contains(existing.sessions, key) {
+				continue
+			}
+			claimed = true
+			if existing.sessions = slices.DeleteFunc(existing.sessions, func(session string) bool { return session == key }); len(existing.sessions) == 0 {
+				delete(worker.forwards, port)
+				ended = append(ended, existing.cancel)
+			}
+		}
 	}
 	manager.mu.Unlock()
-	if !found {
-		return refuse("port %d of worker %s is not forwarded", port, placement.Worker)
+	for _, cancel := range ended {
+		err = errors.Join(err, cancel())
 	}
-	return current.cancel()
+	return claimed, err
 }

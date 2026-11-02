@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -104,9 +106,6 @@ func TestControlCallsTheHelper(t *testing.T) {
 	if err := control.CloseSession(ctx, "s1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := control.ReleaseSession(ctx, "s1"); err != nil {
-		t.Fatal(err)
-	}
 
 	control.Close()
 	select {
@@ -117,6 +116,48 @@ func TestControlCallsTheHelper(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("closing the control channel did not stop the helper")
+	}
+}
+
+func TestControlPreparesAndDeletesMoves(t *testing.T) {
+	home, data := filepath.Join(t.TempDir(), "alice"), t.TempDir()
+	link, err := linkHelper(t, "v1", helper.DefaultLease, helper.Options{Version: "v1", Home: home, DataDir: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	control := link.control
+	move := worker.Move{ID: "m1", Repository: home + "/Work/gripi/.git", Roots: []string{home + "/Work/gripi"}, Private: []string{home + "/Work"}}
+
+	copy, err := control.PrepareMove(ctx, move)
+	if err != nil || copy != filepath.Join(data, "copies", "m1") {
+		t.Fatalf("PrepareMove = %q, %v", copy, err)
+	}
+	if _, err := control.PrepareMove(ctx, worker.Move{ID: "m2", Roots: []string{home + "/Other"}, Private: move.Private}); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("PrepareMove of a folder outside the private roots = %v", err)
+	}
+	if err := control.SeedMove(ctx, "m1"); err != nil {
+		t.Fatalf("SeedMove without earlier copies = %v", err)
+	}
+	// Sessions and mirrors run in the move's view, which needs a cgroup.
+	if err := control.StartMoveMirror(ctx, "m1", ""); err == nil || !strings.Contains(err.Error(), "cgroup") {
+		t.Fatalf("StartMoveMirror without cgroups = %v", err)
+	}
+	if err := control.CreateSession(ctx, worker.Session{ID: "s1", Move: "m1", Cwd: home + "/Work/gripi", Args: []string{"pi"}}); err == nil || !strings.Contains(err.Error(), "cgroup") {
+		t.Fatalf("CreateSession in a move without cgroups = %v", err)
+	}
+	if barriers, err := control.ReleaseMove(ctx, "m1"); err != nil || barriers != (helper.Barriers{}) {
+		t.Fatalf("ReleaseMove of a move without mirrors = %+v, %v", barriers, err)
+	}
+	// Like a move that failed before its upload, the copy has no repository whose ignored folders could stay.
+	if err := control.DeleteMove(ctx, "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(copy); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the deleted copy: %v", err)
+	}
+	if _, err := control.ReleaseMove(ctx, "m1"); err == nil || !strings.Contains(err.Error(), "not prepared") {
+		t.Fatalf("ReleaseMove of a deleted move = %v", err)
 	}
 }
 
