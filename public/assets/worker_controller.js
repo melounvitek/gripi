@@ -252,10 +252,14 @@ export class WorkerController {
     const shown = notices.flatMap(({ repository, items }) => items.map(({ path }) => (path.startsWith(`${repository}/`) ? path.slice(repository.length + 1) : this.callbacks.homePath(path))));
     const folders = this.asideFolders();
     const workers = [...new Set(notices.map(({ worker }) => worker))];
-    notice.querySelector("[data-worker-notice-title]").textContent = `${shown.length} change${shown.length === 1 ? "" : "s"} from ${list(workers, 2)} kept aside.`;
-    notice.querySelector("[data-worker-notice-text]").textContent =
-      `Main kept its own ${list(shown, 3)}. The worker's versions, if any, are in ${list([...folders, ...notices.flatMap(({ refs }) => refs)], folders.length + 2)}.`;
-    notice.querySelector("[data-worker-notice-details]").textContent = notices.map(({ text }) => text).join("\n\n");
+    const show = (name, text) => {
+      const element = notice.querySelector(`[data-worker-notice-${name}]`);
+      // A poll that changes nothing keeps what the user selected there, such as a ref to copy.
+      if (element.textContent !== text) element.textContent = text;
+    };
+    show("title", `${shown.length} change${shown.length === 1 ? "" : "s"} from ${list(workers, 2)} kept aside.`);
+    show("text", `Main kept its own ${list(shown, 3)}. The worker's versions, if any, are in ${list([...folders, ...notices.flatMap(({ refs }) => refs)], folders.length + 2)}.`);
+    show("details", notices.map(({ text }) => text).join("\n\n"));
   }
 
   asideFolders() {

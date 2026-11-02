@@ -228,6 +228,13 @@ test("what a return kept aside shows above the editor, as the page renders it, u
   await expect(details).toBeHidden();
   await press(notice.getByText("details", { exact: true }), isMobile);
   await expect(details).toBeVisible();
+  // A poll keeps what the user selected there, such as a ref to copy.
+  const selected = () => page.evaluate(() => getSelection().toString());
+  await page.evaluate(() => getSelection().selectAllChildren(document.querySelector("[data-worker-notice-details]")));
+  expect(await selected()).toContain("changed on both sides");
+  await poll({ worker: connected });
+  await expect(footer(page)).toContainText("beelink connected");
+  expect(await selected()).toContain("changed on both sides");
 
   const dismiss = notice.getByRole("button", { name: "Dismiss" });
   const warnings = [];
