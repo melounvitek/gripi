@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -14,31 +15,27 @@ import (
 	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
-// fakePlacement stands in for the gateway's record of what is on a worker.
-type fakePlacement struct{ sessions, folders []string }
+// fakePlacement stands in for the gateway's record of which sessions are on a worker.
+type fakePlacement struct{ sessions []string }
 
 func (placement fakePlacement) Session(key string) bool {
 	return slices.Contains(placement.sessions, key)
 }
 
-func (placement fakePlacement) Folder(path string) bool {
-	return slices.Contains(placement.folders, path)
-}
-
-// Settings can put each of the gateway's files and folders anywhere, and none may move to a worker, whose copy would
-// replace it.
-func TestNoneOfTheGatewaysOwnFilesMovesToAWorker(t *testing.T) {
+// Settings can put each of the gateway's files and folders anywhere in the home folder, and no session may move to a
+// worker on a copy that would hide one there.
+func TestNoSessionMovesOnACopyThatHidesTheGatewaysOwnFiles(t *testing.T) {
 	isolateSettings(t)
-	root := t.TempDir()
-	t.Setenv("HOME", filepath.Join(root, "home"))
-	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "agent", "agent"))
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "agent", "agent"))
 	for _, name := range []string{
 		"GRIPI_ENV_PATH", "GRIPI_SESSIONS_ROOT", "GRIPI_ATTACHMENTS_ROOT", "GRIPI_WEB_PUSH_VAPID_PATH", "GRIPI_PUSH_SUBSCRIPTIONS_PATH",
 		"GRIPI_SESSION_CWDS_PATH", "GRIPI_READ_STATE_PATH", "GRIPI_PINNED_SESSIONS_PATH", "GRIPI_SESSION_TAGS_PATH", "GRIPI_ENVIRONMENT_PATH",
 		"GRIPI_BROWSER_ACCESS_PATH", "GRIPI_WORKSPACE_SECRET_PATH", "GRIPI_WORKSPACE_ACCESS_PATH", "GRIPI_WORKSPACE_OWNERSHIP_PATH",
 		"GRIPI_WORKERS_PATH", "GRIPI_WORKER_PLACEMENTS_PATH", "GRIPI_RESTART_PATH", "GRIPI_SOCKET_PATH",
 	} {
-		t.Setenv(name, filepath.Join(root, name, strings.ToLower(name)))
+		t.Setenv(name, filepath.Join(home, name, strings.ToLower(name)))
 	}
 	cfg, err := config.Load(os.Environ())
 	if err != nil {
@@ -53,21 +50,28 @@ func TestNoneOfTheGatewaysOwnFilesMovesToAWorker(t *testing.T) {
 	if err := saveWorkers(cfg.WorkersPath, []worker{{Name: "beelink", Destination: "gripi@beelink"}}); err != nil {
 		t.Fatal(err)
 	}
-	stop := func(func(string) bool) error { return errors.New("the move stopped the sessions") }
+	prepare := func(context.Context, func(string) bool) (func(), error) {
+		return nil, errors.New("the move stopped the sessions")
+	}
 
-	// Every file or folder that the settings name, but Hermes's program, lives in a folder of its own.
+	// Every file or folder that the settings name, but Hermes's program, lives in a folder of its own, which holds a
+	// repository too.
 	settings := reflect.ValueOf(cfg)
 	for i := range settings.NumField() {
 		name := settings.Type().Field(i).Name
 		if settings.Field(i).Kind() != reflect.String || name == "HermesPath" || !strings.HasSuffix(name, "Path") && !strings.HasSuffix(name, "Root") && !strings.HasSuffix(name, "Dir") {
 			continue
 		}
-		folder := filepath.Dir(settings.Field(i).String())
-		if err := os.MkdirAll(folder, 0700); err != nil {
+		repository := filepath.Join(filepath.Dir(settings.Field(i).String()), "repository")
+		if err := os.MkdirAll(repository, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := workers.Move(context.Background(), folder, "beelink", stop); !refused(err) || !strings.Contains(err.Error(), "on this machine") {
-			t.Errorf("moving the folder of %s = %v", name, err)
+		if output, err := exec.Command("git", "init", "-q", repository).CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v %s", err, output)
+		}
+		key := filepath.Join(home, "sessions", "session.jsonl")
+		if err := workers.Move(context.Background(), key, repository, "beelink", prepare); !refused(err) || !strings.Contains(err.Error(), "would hide") {
+			t.Errorf("moving a session in the folder of %s = %v", name, err)
 		}
 	}
 }
@@ -88,19 +92,10 @@ func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 		configured.ReadStatePath = filepath.Join(state, "read.json")
 		cfg = *configured
 	})
-	// Beta started in a folder on main.
-	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
-	contents, err := os.ReadFile(beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(beta, []byte(strings.ReplaceAll(string(contents), `"cwd":"`+project+`"`, `"cwd":"`+t.TempDir()+`"`)), 0600); err != nil {
-		t.Fatal(err)
-	}
 	if code, _, stderr := runCLI("tag", "0a1-beta", "main-only"); code != 0 {
 		t.Fatalf("gripi tag on main = %d, stderr %q", code, stderr)
 	}
-	socket, stop, err := startWorkerSocket(cfg, browser, "beelink", fakePlacement{sessions: []string{alpha}, folders: []string{project}})
+	socket, stop, err := startWorkerSocket(cfg, browser, "beelink", fakePlacement{sessions: []string{alpha}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -96,8 +96,9 @@ func RestartUnsavedSession(ctx context.Context, key string, moment time.Time, cl
 // StopUnsavedSession closes the idle client of a session that the agent has not saved yet, like RestartUnsavedSession
 // but for when no client may run the session for a while, such as while its folder moves to another computer. The
 // session keeps its pending key meanwhile, and the function that it returns starts a new client under the key, with
-// the model, thinking level and name chosen in the old one. If no client can start, the session is forgotten. With a
-// running client, it closes nothing and returns no function.
+// the model, thinking level and name chosen in the old one. If no client can start with them, the session keeps its
+// key without a client, and the function can run again. With a running client, it closes nothing and returns no
+// function.
 func StopUnsavedSession(ctx context.Context, key string, clients *Registry, pending *PendingSessionRegistry) (func(context.Context) error, error) {
 	var choices unsavedChoices
 	// The next client continues the old one's events, so a page's cursor stays valid.
@@ -120,8 +121,9 @@ func StopUnsavedSession(ctx context.Context, key string, clients *Registry, pend
 			}
 			return err
 		})
-		if !clients.Registered(key) {
-			pending.Forget(key)
+		if err != nil {
+			// A client without the choices would take their place at the next stop.
+			clients.CloseClientWithoutOperations(key)
 		}
 		return err
 	}, nil

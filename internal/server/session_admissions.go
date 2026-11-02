@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
@@ -25,6 +26,13 @@ type sessionAdmission struct {
 type sessionAdmissions struct {
 	mu       sync.Mutex
 	sessions map[string]*sessionAdmission
+	gates    []*promptGate
+}
+
+// promptGate holds the prompts of the sessions that holds passes until open is closed.
+type promptGate struct {
+	holds func(path string) bool
+	open  chan struct{}
 }
 
 // resolve must not call the RPC registry: remap commits hold its mutex before
@@ -45,8 +53,13 @@ func (admissions *sessionAdmissions) prompt(ctx context.Context, resolve func() 
 			admissions.mu.Unlock()
 			return "", nil, errSessionNavigating
 		}
+		done := (<-chan struct{})(nil)
 		if entry != nil && entry.idleDone != nil {
-			done := entry.idleDone
+			done = entry.idleDone
+		} else if i := slices.IndexFunc(admissions.gates, func(gate *promptGate) bool { return gate.holds(path) }); i >= 0 {
+			done = admissions.gates[i].open
+		}
+		if done != nil {
 			admissions.mu.Unlock()
 			select {
 			case <-done:
@@ -137,6 +150,30 @@ func (admissions *sessionAdmissions) navigate(resolve func() (string, error)) (s
 		defer admissions.mu.Unlock()
 		delete(admissions.sessions, path)
 	}, nil
+}
+
+// gate holds the new prompts of the sessions that holds passes until release, as a move to a worker or back does for
+// the other sessions of the moving one's repository. holds runs with the admissions' mutex held, so it must not call
+// the RPC registry either.
+func (admissions *sessionAdmissions) gate(holds func(path string) bool) (release func()) {
+	gate := &promptGate{holds: holds, open: make(chan struct{})}
+	admissions.mu.Lock()
+	defer admissions.mu.Unlock()
+	admissions.gates = append(admissions.gates, gate)
+	return func() {
+		admissions.mu.Lock()
+		defer admissions.mu.Unlock()
+		admissions.gates = slices.DeleteFunc(admissions.gates, func(other *promptGate) bool { return other == gate })
+		close(gate.open)
+	}
+}
+
+// handling reports whether a prompt of the session is being handled.
+func (admissions *sessionAdmissions) handling(path string) bool {
+	admissions.mu.Lock()
+	defer admissions.mu.Unlock()
+	entry := admissions.sessions[path]
+	return entry != nil && len(entry.prompts) > 0
 }
 
 func (admissions *sessionAdmissions) retireIdle(path string) (func(), bool) {

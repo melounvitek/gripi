@@ -54,19 +54,13 @@ The Docker proxy, which moves a worker session's paths to the worker user's home
 GRIPI_TEST_DOCKER=1 go test ./internal/worker/dockerproxy/ -run RealDocker -v
 ```
 
-The helper's test with the same variable runs `docker run` in a session of a helper that serves as it does in the view, with main's home folder at such a path:
-
-```sh
-GRIPI_TEST_DOCKER=1 go test ./internal/worker/helper/ -run RealDocker -v
-```
-
-An end-to-end test moves a repository with a worktree to a real worker and back, with a scripted model, so no real model is called. The gateway's home folder is `/tmp/gripi-e2e/home/vitek`, which the worker lacks, and its Pi folder, state and projects are in that home folder, so the worker's sessions see them in its user's own home folder through the private view. On the way, it checks that a project in a folder made next to main's home folder on the worker after the helper started can't move there, and stays whole on main, where its session runs, that main's copies of the sessions follow the worker's and outlive a gateway restart, that the worker's `auth.json` follows changes to main's without its refresh tokens, that a file edited on main is saved aside, and that a worktree made on the worker runs its sessions there. It then freezes the ssh master connection: a few seconds cost nothing, while half a lease ends the running step with an unknown outcome, and the repository continues on main once the worker is gone. The next move keeps aside on the worker what main never got, and after the master is killed, the next prompt of a session whose Pi ran there connects again and starts its Pi there. It needs another machine, because the worker must not share main's files:
+An end-to-end test moves single sessions to a real worker and back, with a scripted model, so no real model is called. The gateway's home folder is `/tmp/gripi-e2e/home/vitek`, which the worker lacks, and its Pi folder and state are in that home folder, in `gripi-e2e`, and the repository in `gripi-e2e-work`, so the worker's sessions see them in its user's own home folder through the private views. Of two sessions of the repository, one moves; on the worker, it makes a worktree with a commit on its own branch and edits a file in the main checkout, while the other session on main edits that file and another one. The test checks that the worker's `auth.json` follows changes to main's without its refresh tokens, that the moved session continues on the worker after a gateway restart, and that its return brings the worktree, the branch and the worker's files to main, keeps main's changes, and keeps the worker's version of the file that both changed in the recovery folder, with a notice. It then moves the session again, with that worktree, and freezes the ssh master connection: half a lease ends the running step with an unknown outcome, and once the worker is gone, the session continues on main with the changes that main had got. Last, it moves two sessions of the repository at once, one of them new and unsaved, which start on the worker on copies of their own. It needs another machine, because the worker must not share main's files:
 
 ```sh
 GRIPI_TEST_WORKER=gripi@beelink.example.ts.net go test ./cmd/gripi -run RealWorker -v
 ```
 
-It installs the helper in `~/gripi-e2e` on the worker, which also gets what the worker has of the gateway's home folder, and removes it and `/tmp/gripi-e2e` on both machines afterwards.
+It installs the helper in `~/gripi-e2e` on the worker, which also gets what the worker has of the gateway's home folder, and removes it, `~/gripi-e2e-work` and `/tmp/gripi-e2e` on both machines afterwards.
 
 ## Browser contract suite
 

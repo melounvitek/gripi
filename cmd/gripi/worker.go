@@ -20,6 +20,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/melounvitek/gripi/internal/config"
+	gateway "github.com/melounvitek/gripi/internal/server"
 	"github.com/melounvitek/gripi/internal/state"
 	remote "github.com/melounvitek/gripi/internal/worker"
 )
@@ -28,16 +29,18 @@ const workerHelp = `Usage:
   gripi worker add <user@host> [--name <name>]
   gripi worker list [--json]
   gripi worker remove <name>
-  gripi worker move <session or folder> <name>
-  gripi worker return <session or folder>
-  gripi worker forward <session or folder> <port>
-  gripi worker unforward <session or folder> <port>
+  gripi worker move <session> <name>
+  gripi worker return <session>
+  gripi worker forward <session> <port>
+  gripi worker unforward <session> <port>
 
 Internal, run by Gripi on a worker over SSH:
-  gripi worker serve [--lease <duration>] [--runtime-dir <folder>] [--home <folder>]
+  gripi worker serve [--lease <duration>] [--runtime-dir <folder>] [--home <folder>] [--data-dir <folder>]
   gripi worker attach [--runtime-dir <folder>] <session> <helper instance>
-  gripi worker receive [--runtime-dir <folder>] [--aside <folder>] <folder on main> <folder> <helper instance>
-  gripi worker mirror [--runtime-dir <folder>] <unit> <helper instance>
+  gripi worker receive [--runtime-dir <folder>] <folder on main> <folder> <helper instance>
+  gripi worker receive [--runtime-dir <folder>] --move <move> <folder on main> <helper instance>
+  gripi worker receive [--runtime-dir <folder>] --file <file> <helper instance>
+  gripi worker mirror [--runtime-dir <folder>] --move <move> [--file <file>] <helper instance>
   gripi worker enter [--home <folder>] -- <command>
 
 A worker is another computer that runs sessions for this gateway. Gripi
@@ -62,42 +65,44 @@ including logins; keeping it secure is up to you.
 
 list prints each worker's name and SSH destination.
 
-remove forgets a worker, unless repositories are on it. Files on the worker
-stay there.
+remove forgets a worker, unless sessions are on it. Files on the worker stay
+there.
 
-move runs a repository's sessions on a worker from now on: the repository of
-the folder, or of the session's folder, with all its worktrees, or the folder
-alone outside Git. It needs a running gateway, which stops the Pi of each
-session there, copies the repository and the sessions to the worker, and
-keeps copies of both here up to date. The copy of the repository here is
-read-only: what changes in it anyway is saved aside before the worker's
-changes replace it. move fails while one of the sessions is working. return
-brings the repository and its sessions back to this machine. When this
-machine has lost the worker, return waits until the worker must have stopped
-the sessions there, and says when that is; then the repository continues
-here as this machine last got it, and the next move to the worker keeps
-what the worker had beyond that aside there.
+move runs one session on a worker from now on, on a private copy of its
+repository there: the repository's Git folder, the worktree that the session
+started in and those that its tool calls worked in. The repository must be
+in your home folder. Its other sessions keep running on this machine. move
+needs a running gateway, which waits until those sessions have finished
+their steps, holding their new prompts meanwhile, copies the repository and
+the session to the worker, and keeps copies of both here up to date. move
+fails while the session itself is working. return brings the session back
+with what it changed there: what only the session changed comes back,
+changes to different lines of a text file are merged, and what this machine
+changed too stays as this machine has it, with the worker's version kept in
+Gripi's state folder, which the session's page names. When this machine has
+lost the worker, return waits until the worker must have stopped the
+session, and says when that is; then the session continues here with the
+changes that this machine last got from the worker.
 
-forward makes a port on the worker that runs the repository's sessions
-available on this machine, such as a dev server that a session started
-there: at the same port on localhost, or at the next free one, which it
-prints. Both ends listen only on localhost. The forward lasts until
-unforward, or until this machine's connection to the worker ends.
+forward makes a port on the worker that runs the session available on this
+machine, such as a dev server that the session started there: at the same
+port on localhost, or at the next free one, which it prints. Both ends
+listen only on localhost. The forward lasts until unforward, or until this
+machine's connection to the worker ends.
 
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. With --home, it runs in the private view
 of that folder, as enter does. attach connects to the Pi of a session.
 receive connects this machine's copy of a folder to the helper, which makes
-a folder a copy of it, or, given the same folder twice, a copy of its
-repository at the same paths, and keeps what it replaces or deletes in the
-folder of --aside first. mirror
-connects this machine's copy of a repository, or of its sessions, to the
-helper, which sends their changes. enter runs a command in a private view in
-which the folder of --home, this machine's home folder, shows the worker
-user's own home folder, unless that is the same folder.
+a folder a copy of it, a move's copy of this machine's shadow of the
+repository, or a copy of a session's file. mirror connects this machine's
+copy of a move's repository, or of its session's file, to the helper, which
+sends their changes. enter runs a command in a private view in which the
+folder of --home, this machine's home folder, shows the worker user's own
+home folder, unless that is the same folder.
 
 Gripi keeps the workers in ~/.pi/gripi/workers.json, or in the file named by
-GRIPI_WORKERS_PATH, and which repositories are on which worker in
+GRIPI_WORKERS_PATH, and which sessions are on which worker in
 ~/.pi/gripi/worker-placements.json, or in GRIPI_WORKER_PLACEMENTS_PATH.
 
 Arguments:
@@ -105,7 +110,6 @@ Arguments:
              your SSH configuration works too
   name       Name of a worker
   session    Session ID, a unique prefix of it, or the session file path
-  folder     A folder in the repository
   port       A port on the worker's localhost
 
 Flags:
@@ -116,7 +120,7 @@ Flags:
 
 Examples:
   gripi worker add gripi@beelink.example.ts.net
-  gripi worker move ~/Work/project beelink
+  gripi worker move 01a107aa beelink
   gripi worker return 01a107aa
   gripi worker forward 01a107aa 5173
   gripi worker remove beelink
@@ -124,9 +128,9 @@ Examples:
 Exit codes:
   0  success
   1  the worker cannot be reached or cannot run sessions, the name is taken,
-     no worker has the name, repositories are on the worker that remove
-     names, or the gateway refused or failed to move the repository or to
-     forward the port
+     no worker has the name, sessions are on the worker that remove names,
+     or the gateway refused or failed to move the session or to forward the
+     port
   2  usage error
 `
 
@@ -161,9 +165,9 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 	case "remove":
 		return removeWorker(arguments[1:], stdout, stderr)
 	case "move":
-		return moveRepository(arguments[1:], stdout, stderr)
+		return moveSession(arguments[1:], stdout, stderr)
 	case "return":
-		return returnRepository(arguments[1:], stdout, stderr)
+		return returnSession(arguments[1:], stdout, stderr)
 	case "forward", "unforward":
 		return forwardPort(arguments[0], arguments[1:], stdout, stderr)
 	case "serve":
@@ -334,7 +338,7 @@ func removeWorker(arguments []string, stdout, stderr io.Writer) int {
 	}
 	for _, placement := range placements.All() {
 		if placement.Worker == name {
-			return failure(stderr, "worker", fmt.Errorf("%s is on %s; move it back with 'gripi worker return %s' first", placement.Unit.Main, name, placement.Unit.Main))
+			return failure(stderr, "worker", fmt.Errorf("session %s is on %s; bring it back with 'gripi worker return %s' first", placement.Session, name, placement.Session))
 		}
 	}
 	if err := saveWorkers(cfg.WorkersPath, slices.Delete(workers, index, index+1)); err != nil {
@@ -344,39 +348,39 @@ func removeWorker(arguments []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func moveRepository(arguments []string, stdout, stderr io.Writer) int {
+func moveSession(arguments []string, stdout, stderr io.Writer) int {
 	if len(arguments) != 2 || arguments[0] == "" || arguments[1] == "" {
-		return usageError(stderr, "worker", "move takes a session or folder and a worker name")
+		return usageError(stderr, "worker", "move takes a session and a worker name")
 	}
-	folder, err := askAboutRepository("/workers/move", url.Values{"worker": {arguments[1]}}, arguments[0], &struct{}{})
+	session, err := askAboutSession("/workers/move", url.Values{"worker": {arguments[1]}}, arguments[0], &struct{}{})
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
-	fmt.Fprintf(stdout, "The sessions of the repository of %s run on %s now.\n", folder, arguments[1])
+	fmt.Fprintf(stdout, "Session %s runs on %s now, on a copy of its repository.\n", session.ID, arguments[1])
 	return 0
 }
 
-func returnRepository(arguments []string, stdout, stderr io.Writer) int {
+func returnSession(arguments []string, stdout, stderr io.Writer) int {
 	if len(arguments) != 1 || arguments[0] == "" {
-		return usageError(stderr, "worker", "return takes a session or folder")
+		return usageError(stderr, "worker", "return takes a session")
 	}
-	folder, err := askAboutRepository("/workers/return", url.Values{}, arguments[0], &struct{}{})
+	session, err := askAboutSession("/workers/return", url.Values{}, arguments[0], &struct{}{})
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
-	fmt.Fprintf(stdout, "The sessions of the repository of %s run on this machine now.\n", folder)
+	fmt.Fprintf(stdout, "Session %s runs on this machine now, with what it changed on the worker.\n", session.ID)
 	return 0
 }
 
 func forwardPort(subcommand string, arguments []string, stdout, stderr io.Writer) int {
 	if len(arguments) != 2 || arguments[0] == "" {
-		return usageError(stderr, "worker", subcommand+" takes a session or folder and a port")
+		return usageError(stderr, "worker", subcommand+" takes a session and a port")
 	}
 	if port, err := strconv.Atoi(arguments[1]); err != nil || port < 1 || port > 65535 {
 		return usageError(stderr, "worker", fmt.Sprintf("%q is not a port from 1 to 65535", arguments[1]))
 	}
 	var forwarded struct{ Port, Local int }
-	if _, err := askAboutRepository("/workers/"+subcommand, url.Values{"port": {arguments[1]}}, arguments[0], &forwarded); err != nil {
+	if _, err := askAboutSession("/workers/"+subcommand, url.Values{"port": {arguments[1]}}, arguments[0], &forwarded); err != nil {
 		return failure(stderr, "worker", err)
 	}
 	if subcommand == "unforward" {
@@ -387,28 +391,24 @@ func forwardPort(subcommand string, arguments []string, stdout, stderr io.Writer
 	return 0
 }
 
-// askAboutRepository asks the gateway to act on the repository of a folder, or of a session's folder, reads its
-// answer into result, and returns the folder. It waits as long as the gateway takes, such as to copy the repository.
-func askAboutRepository(route string, form url.Values, reference string, result any) (string, error) {
+// askAboutSession asks the gateway to act on where a session runs, reads its answer into result, and returns the
+// session. It waits as long as the gateway takes, such as to copy the session's repository.
+func askAboutSession(route string, form url.Values, reference string, result any) (gateway.LocalSession, error) {
 	client, err := newGatewayClient()
 	if err != nil {
-		return "", err
+		return gateway.LocalSession{}, err
 	}
-	folder, _ := filepath.Abs(reference)
-	if info, err := os.Stat(folder); err != nil || !info.IsDir() {
-		session, err := client.session(reference)
-		if err != nil {
-			return "", err
-		}
-		folder = session.CWD
+	session, err := client.session(reference)
+	if err != nil {
+		return gateway.LocalSession{}, err
 	}
-	form.Set("folder", folder)
+	form.Set("session", session.Path)
 	request, err := http.NewRequest(http.MethodPost, "http://gripi"+route, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return gateway.LocalSession{}, err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return folder, client.do(request, 0, result)
+	return session, client.do(request, 0, result)
 }
 
 func loadWorkers() (config.Config, []worker, error) {

@@ -16,7 +16,7 @@ import (
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
 	remote "github.com/melounvitek/gripi/internal/worker"
-	"github.com/melounvitek/gripi/internal/worker/mirror"
+	"github.com/melounvitek/gripi/internal/worker/reconcile"
 )
 
 // fakeSSHScript stands in for ssh. It records its arguments, then fails as ssh does with FAKE_SSH_ERROR, answers
@@ -361,26 +361,26 @@ func TestThePiAdapterExtractsTheExtensionsToTheSameFolderAfterARestart(t *testin
 	}
 }
 
-// recordedWorkers notes the repositories that the gateway was asked to move.
+// recordedWorkers notes the sessions that the gateway was asked to move.
 type recordedWorkers struct{ moves []string }
 
-func (workers *recordedWorkers) Move(_ context.Context, folder, worker string, _ func(func(string) bool) error) error {
-	workers.moves = append(workers.moves, folder+" to "+worker)
+func (workers *recordedWorkers) Move(_ context.Context, key, _, worker string, _ func(context.Context, func(string) bool) (func(), error)) error {
+	workers.moves = append(workers.moves, key+" to "+worker)
 	return nil
 }
 
-func (workers *recordedWorkers) Return(_ context.Context, folder string, _ func(func(string) bool) error) error {
-	workers.moves = append(workers.moves, folder+" back")
+func (workers *recordedWorkers) Return(_ context.Context, key string, _ func(context.Context, func(string) bool) (func(), error)) error {
+	workers.moves = append(workers.moves, key+" back")
 	return nil
 }
 
-func (workers *recordedWorkers) Forward(_ context.Context, folder string, port int) (int, error) {
-	workers.moves = append(workers.moves, fmt.Sprintf("%s forwards %d", folder, port))
+func (workers *recordedWorkers) Forward(_ context.Context, key string, port int) (int, error) {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s forwards %d", key, port))
 	return port + 1, nil
 }
 
-func (workers *recordedWorkers) Unforward(folder string, port int) error {
-	workers.moves = append(workers.moves, fmt.Sprintf("%s unforwards %d", folder, port))
+func (workers *recordedWorkers) Unforward(key string, port int) error {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s unforwards %d", key, port))
 	return nil
 }
 
@@ -390,28 +390,26 @@ func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) 
 	return gateway.WorkerLocation{}, false
 }
 
-func (workers *recordedWorkers) Repository(folder string) (string, []string, error) {
-	return folder, nil, nil
+func (workers *recordedWorkers) Selection(_, cwd string) (string, []string, error) {
+	return cwd, []string{cwd}, nil
 }
 
 func (workers *recordedWorkers) Notices(string) []gateway.WorkerNotice { return nil }
 
-func (workers *recordedWorkers) DismissNotices(string) {}
+func (workers *recordedWorkers) DismissNotices(context.Context, string) error { return nil }
 
-func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
+func TestWorkerMoveAndReturnTakeASession(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	workers := &recordedWorkers{}
 	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
-	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
 
-	if code, stdout, stderr := runCLI("worker", "move", "0a1-alpha", "beelink"); code != 0 || !strings.Contains(stdout, "beelink") {
-		t.Fatalf("worker move <session> = %d %q %q", code, stdout, stderr)
+	if code, stdout, stderr := runCLI("worker", "move", "0a1-alpha", "beelink"); code != 0 || !strings.Contains(stdout, "0a1-alpha runs on beelink") {
+		t.Fatalf("worker move = %d %q %q", code, stdout, stderr)
 	}
-	t.Chdir(filepath.Dir(project))
-	if code, stdout, stderr := runCLI("worker", "return", "project"); code != 0 || stdout == "" {
-		t.Fatalf("worker return <folder> = %d %q %q", code, stdout, stderr)
+	if code, stdout, stderr := runCLI("worker", "return", alpha); code != 0 || !strings.Contains(stdout, "0a1-alpha runs on this machine") {
+		t.Fatalf("worker return = %d %q %q", code, stdout, stderr)
 	}
-	if expected := []string{project + " to beelink", project + " back"}; !reflect.DeepEqual(workers.moves, expected) {
+	if expected := []string{alpha + " to beelink", alpha + " back"}; !reflect.DeepEqual(workers.moves, expected) {
 		t.Fatalf("moves = %q, want %q", workers.moves, expected)
 	}
 	if code, _, stderr := runCLI("worker", "move", "no-such-session", "beelink"); code != 1 || !strings.Contains(stderr, "no session matches") {
@@ -419,29 +417,28 @@ func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	}
 }
 
-func TestWorkerForwardAndUnforwardTakeASessionOrAFolderAndAPort(t *testing.T) {
+func TestWorkerForwardAndUnforwardTakeASessionAndAPort(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	workers := &recordedWorkers{}
 	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
-	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
 
 	if code, stdout, stderr := runCLI("worker", "forward", "0a1-alpha", "5173"); code != 0 || stdout != "Port 5173 of the worker is at localhost:5174.\n" {
 		t.Fatalf("worker forward = %d %q %q", code, stdout, stderr)
 	}
-	if code, stdout, stderr := runCLI("worker", "unforward", project, "5173"); code != 0 || !strings.Contains(stdout, "5173") {
+	if code, stdout, stderr := runCLI("worker", "unforward", alpha, "5173"); code != 0 || !strings.Contains(stdout, "5173") {
 		t.Fatalf("worker unforward = %d %q %q", code, stdout, stderr)
 	}
-	if expected := []string{project + " forwards 5173", project + " unforwards 5173"}; !reflect.DeepEqual(workers.moves, expected) {
+	if expected := []string{alpha + " forwards 5173", alpha + " unforwards 5173"}; !reflect.DeepEqual(workers.moves, expected) {
 		t.Fatalf("asked the gateway: %q, want %q", workers.moves, expected)
 	}
-	for _, arguments := range [][]string{{"forward", project}, {"forward", project, "0"}, {"unforward", project, "web"}} {
+	for _, arguments := range [][]string{{"forward", alpha}, {"forward", alpha, "0"}, {"unforward", alpha, "web"}} {
 		if code, _, stderr := runCLI(append([]string{"worker"}, arguments...)...); code != 2 {
 			t.Fatalf("worker %q = %d %q", arguments, code, stderr)
 		}
 	}
 }
 
-func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
+func TestWorkerRemoveRefusesAWorkerThatHasSessions(t *testing.T) {
 	fakeSSH(t)
 	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
 		t.Fatalf("worker add: %s", stderr)
@@ -450,19 +447,19 @@ func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := placements.Add(remote.Placement{Worker: "beelink", Unit: mirror.Unit{Main: "/work/project"}}); err != nil {
+	if err := placements.Add(remote.Placement{Session: "/sessions/a.jsonl", Move: "m1", Worker: "beelink"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if code, _, stderr := runCLI("worker", "remove", "beelink"); code != 1 || !strings.Contains(stderr, "/work/project") || !strings.Contains(stderr, "gripi worker return") {
-		t.Fatalf("worker remove of a worker with a repository = %d %q", code, stderr)
+	if code, _, stderr := runCLI("worker", "remove", "beelink"); code != 1 || !strings.Contains(stderr, "/sessions/a.jsonl") || !strings.Contains(stderr, "gripi worker return") {
+		t.Fatalf("worker remove of a worker with a session = %d %q", code, stderr)
 	}
 	if workers := listedWorkers(t); len(workers) != 1 {
 		t.Fatalf("workers = %v", workers)
 	}
 }
 
-func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
+func TestTheGatewaySeesTheSavedWorkersAndWhereSessionsRun(t *testing.T) {
 	fakeSSH(t)
 	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
 		t.Fatalf("worker add: %s", stderr)
@@ -471,7 +468,16 @@ func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := placements.Add(remote.Placement{Worker: "beelink", Unit: mirror.Unit{Main: "/work/project"}}); err != nil {
+	if err := placements.Add(remote.Placement{Session: "/sessions/a.jsonl", Move: "m1", Worker: "beelink", Repository: "/work/project/.git"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := placements.Add(remote.Placement{Session: "/sessions/b.jsonl", Move: "m2", Worker: "beelink", Repository: "/work/project/.git"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := placements.Finish("/sessions/b.jsonl", &remote.Notice{
+		Session: "/sessions/b.jsonl", Worker: "beelink", Repository: "/work/project", Recovery: "/state/returns/m2",
+		Result: reconcile.Result{Aside: []reconcile.Item{{Path: "/work/project/README", Reason: "both changed it"}}, Notice: "Main kept its own version."},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	workers := gatewayWorkers{remote.NewManager(remote.ManagerOptions{Placements: placements}), os.Getenv("GRIPI_WORKERS_PATH")}
@@ -479,10 +485,16 @@ func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
 	if list, err := workers.List(); err != nil || !reflect.DeepEqual(list, []gateway.Worker{{Name: "beelink", Destination: "gripi@beelink", State: "disconnected"}}) {
 		t.Fatalf("workers = %+v, %v", list, err)
 	}
-	if location, found := workers.Location("/work/project/src"); !found || !reflect.DeepEqual(location, gateway.WorkerLocation{Worker: "beelink", State: "disconnected", Repository: "/work/project", Ports: []gateway.WorkerPort{}}) {
+	if location, found := workers.Location("/sessions/a.jsonl"); !found || !reflect.DeepEqual(location, gateway.WorkerLocation{Worker: "beelink", State: "disconnected", Repository: "/work/project", Ports: []gateway.WorkerPort{}}) {
 		t.Fatalf("location = %+v, %v", location, found)
 	}
-	if _, found := workers.Location("/work/other"); found {
-		t.Fatal("a folder on main runs on a worker")
+	if _, found := workers.Location("/sessions/b.jsonl"); found {
+		t.Fatal("a session on main runs on a worker")
+	}
+	if notices := workers.Notices("/sessions/b.jsonl"); !reflect.DeepEqual(notices, []gateway.WorkerNotice{{
+		Repository: "/work/project", Worker: "beelink", Aside: "/state/returns/m2/worker", Paths: []string{"/work/project/README"},
+		Items: []gateway.WorkerNoticeItem{{Path: "/work/project/README", Reason: "both changed it"}}, Refs: []string{}, Text: "Main kept its own version.",
+	}}) {
+		t.Fatalf("notices = %+v", notices)
 	}
 }

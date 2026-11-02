@@ -3,7 +3,7 @@ package server
 import (
 	"html/template"
 	"net/http"
-	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -17,20 +17,23 @@ type Worker struct {
 	GoneAt time.Time `json:"gone_at,omitzero"`
 }
 
-// WorkerLocation is where the sessions of a folder run while its repository is on a worker, or is being copied to one.
+// WorkerLocation is where a session runs while it is on a worker, or is moving to one.
 type WorkerLocation struct {
 	Worker string `json:"worker"`
-	// State and GoneAt are as in Worker, but another repository being copied to the worker doesn't make it copying.
+	// State and GoneAt are as in Worker, but another session's copy being copied to the worker doesn't make it
+	// copying, and State is returning while the session comes back, or until a return that failed finishes.
 	State  string    `json:"state"`
 	GoneAt time.Time `json:"gone_at,omitzero"`
-	// Repository is the main folder of the folder's repository.
+	// Repository is the main checkout of the session's repository.
 	Repository string `json:"repository"`
-	// Copying is when the repository started being copied to the worker, which it is until its sessions run there.
-	Copying time.Time    `json:"copying,omitzero"`
+	// Copying is when the session started moving to the worker, which it is until it runs there.
+	Copying time.Time `json:"copying,omitzero"`
+	// Waiting names the session on this machine whose step a move or return of the session waits for.
+	Waiting string       `json:"waiting,omitempty"`
 	Ports   []WorkerPort `json:"ports"`
 }
 
-// Indicator is what a session's indicator shows: the worker's state, or copying while the repository is copied there.
+// Indicator is what a session's indicator shows: the worker's state, or copying while the session moves there.
 func (location WorkerLocation) Indicator() string {
 	if !location.Copying.IsZero() {
 		return "copying"
@@ -44,13 +47,27 @@ type WorkerPort struct {
 	Local int `json:"local"`
 }
 
-// WorkerNotice says that files of a repository on a worker changed on this machine, which keeps a read-only copy:
-// before the worker's versions replaced them, this machine's were saved in Aside, at their paths.
+// WorkerNotice says what a session's return from a worker kept as this machine had it, though the worker changed it
+// too: the worker's versions are in Aside, at their paths, and its commits under Refs, until the notice is dismissed.
 type WorkerNotice struct {
-	Repository string    `json:"repository"`
-	Aside      string    `json:"aside"`
-	Paths      []string  `json:"paths"`
-	Time       time.Time `json:"time"`
+	Repository string `json:"repository"`
+	Worker     string `json:"worker"`
+	Aside      string `json:"aside"`
+	// Paths are the files, worktrees and refs that this machine kept, which Items says more about.
+	Paths []string           `json:"paths"`
+	Items []WorkerNoticeItem `json:"items"`
+	Refs  []string           `json:"refs"`
+	// Text says it all, for the user.
+	Text string    `json:"text"`
+	Time time.Time `json:"time"`
+}
+
+// WorkerNoticeItem is something that a return kept as this machine had it, and why, with the ref of the worker's
+// commit if it kept one.
+type WorkerNoticeItem struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Ref    string `json:"ref,omitempty"`
 }
 
 func (app *application) registerWorkerRoutes(mux *http.ServeMux) {
@@ -62,10 +79,10 @@ func (app *application) registerWorkerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workers/dismiss_notices", app.dismissWorkerNotices)
 }
 
-// listWorkers lists the workers for the browser, with what would move to one with the session's repository: its main
-// folder, how many worktrees it has, and how many sessions.
+// listWorkers lists the workers for the browser, with what would move to one with the session: the main checkout of
+// its repository, the worktrees that its copy gets, and how many of them are linked worktrees.
 func (app *application) listWorkers(response http.ResponseWriter, request *http.Request) {
-	folder, ok := app.workerFolder(response, request)
+	key, ok := app.workerSession(response, request)
 	if !ok {
 		return
 	}
@@ -74,50 +91,42 @@ func (app *application) listWorkers(response http.ResponseWriter, request *http.
 		writeInternalError(response, "list the workers", err)
 		return
 	}
-	main, worktrees, err := app.workers.Repository(folder)
+	main, worktrees, err := app.workers.Selection(key, app.currentSessionCWD(key))
 	if err != nil {
-		writeInternalError(response, "find the repository of a session", err)
+		writeWorkersError(response, "find what moves with a session", err)
 		return
 	}
-	saved, err := app.sessionStore.Sessions()
-	if err != nil {
-		writeInternalError(response, "list the sessions", err)
-		return
-	}
-	sessions := 0
-	for _, session := range saved {
-		for _, root := range append([]string{main}, worktrees...) {
-			if relative, err := filepath.Rel(root, session.CWD); err == nil && filepath.IsLocal(relative) {
-				sessions++
-				break
-			}
-		}
-	}
-	writeJSON(response, map[string]any{"workers": workers, "repository": map[string]any{"main": main, "worktrees": len(worktrees), "sessions": sessions}})
+	linked := len(slices.DeleteFunc(slices.Clone(worktrees), func(worktree string) bool { return worktree == main }))
+	writeJSON(response, map[string]any{"workers": workers, "repository": map[string]any{"main": main, "roots": worktrees, "worktrees": linked, "sessions": 1}})
 }
 
 func (app *application) dismissWorkerNotices(response http.ResponseWriter, request *http.Request) {
-	folder, ok := app.workerFolder(response, request)
+	key, ok := app.workerSession(response, request)
 	if !ok {
 		return
 	}
-	app.workers.DismissNotices(folder)
+	if err := app.workers.DismissNotices(request.Context(), key); err != nil {
+		writeInternalError(response, "dismiss the notices of a session's return", err)
+		return
+	}
 	writeJSON(response, map[string]bool{"ok": true})
 }
 
-// sessionWorker returns where the sessions of a session's folder run while its repository is on a worker, or nil, and
-// the notices about the repository's files that changed on this machine.
+// sessionWorker returns where a session runs while it is on a worker, or nil, and the notices of its returns.
 func (app *application) sessionWorker(path string) (*WorkerLocation, []WorkerNotice) {
 	notices := []WorkerNotice{}
 	if app.workers == nil || app.agentOf(path) == "hermes" {
 		return nil, notices
 	}
-	folder := app.currentSessionCWD(path)
-	notices = append(notices, app.workers.Notices(folder)...)
-	if location, found := app.workers.Location(folder); found {
-		return &location, notices
+	notices = append(notices, app.workers.Notices(path)...)
+	location, found := app.workers.Location(path)
+	if !found {
+		return nil, notices
 	}
-	return nil, notices
+	app.workerWaitsMu.Lock()
+	location.Waiting = app.workerWaits[path]
+	app.workerWaitsMu.Unlock()
+	return &location, notices
 }
 
 // serverIcon marks what runs on a worker.

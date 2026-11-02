@@ -28,7 +28,7 @@
 - Notifications when replies finish, including Web Push on phones.
 - A [`gripi` command](#command-line) that lets scripts and agents list sessions, send messages, and wait for replies.
 - Saved [environment variables](docs/configuration.md#environment-variables) for Pi and every command it runs, such as your own GitHub token on a shared gateway.
-- [Workers](#workers): other computers that run a repository’s sessions over SSH, while the gateway keeps a copy.
+- [Workers](#workers): other computers that run chosen sessions over SSH, each on a copy of its repository, while the gateway keeps a copy of their changes.
 
 ## Install
 
@@ -114,26 +114,26 @@ Other commands start a session (`new`), stop what one is working on (`stop`), co
 
 An agent in a Gripi session can also [run a command as root](docs/configuration.md#running-commands-as-root) with `gripi sudo -- <command>`, once you enter your password in Gripi.
 
-[`gripi worker`](#workers) adds workers and moves repositories to them.
+[`gripi worker`](#workers) adds workers and moves sessions to them.
 
 When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
 
 ## Workers
 
-A worker is another computer that runs the sessions of chosen repositories over SSH, for example a faster machine or one that stays on. The gateway keeps the interface and an up-to-date copy of each repository and its sessions, so losing a worker loses at most the step that was running there.
+A worker is another computer that runs chosen sessions over SSH, for example a faster machine or one that stays on. Each session there works on a private copy of its repository, while the repository’s other sessions keep working on the gateway machine, and its changes come back when it returns. The gateway keeps the interface and an up-to-date copy of what the session changed, so losing a worker loses at most the step that was running there.
 
 ```sh
 gripi worker add gripi@beelink.example.ts.net  # check the worker and add it as beelink
-gripi worker move ~/Work/project beelink       # run the repository’s sessions there
+gripi worker move 01a107aa beelink             # run the session there
 gripi worker forward 01a107aa 5173             # reach a dev server there at localhost:5173
-gripi worker return 01a107aa                   # bring the repository back
+gripi worker return 01a107aa                   # bring the session back with its changes
 ```
 
-`gripi worker list` lists the workers, `remove` forgets one, and `unforward` stops forwarding a port. `add`, `list` and `remove` need no running gateway. In Gripi, **Run on worker…**, **Forward a port…** and **Continue on main** are in the Ctrl+K palette. A repository moves with all its worktrees and sessions, and its copy on the gateway machine is read-only while it is on a worker.
+`gripi worker list` lists the workers, `remove` forgets one, and `unforward` stops forwarding a port. `add`, `list` and `remove` need no running gateway. In Gripi, **Run on worker…**, **Forward a port…** and **Continue on main** are in the Ctrl+K palette. A session moves with the worktrees that it uses, which must be in your home folder. When it returns, what the gateway machine changed too stays as it is there, with the worker’s version kept aside.
 
-The gateway machine and the worker must run Linux on the same architecture, and the gateway machine Pi 0.99.0 or later. The worker also needs a systemd user manager with cgroup v2, Git, and the projects’ own tools. `ssh` must log in there without a prompt, best as a dedicated user, which can have any name and home folder and needs no setup. When its home folder has another path than yours on the gateway machine, what Gripi runs there sees it at yours, in a private view that needs unprivileged user namespaces; Ubuntu blocks them unless you run `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`. Projects outside your home folder need the same paths there. Gripi copies Node, Pi and Pi’s configuration there itself. See [workers](docs/configuration.md#workers) for the setup, what happens when the connection is lost, and the limits.
+The gateway machine and the worker must run Linux on the same architecture, and the gateway machine Pi 0.99.0 or later. The worker also needs a systemd user manager with cgroup v2, Git, and the projects’ own tools. `ssh` must log in there without a prompt, best as a dedicated user, which can have any name and home folder and needs no setup. What Gripi runs there sees that home folder at yours, and each moved session its copy, in private views that need unprivileged user namespaces; Ubuntu blocks them unless you run `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`. Gripi copies Node, Pi and Pi’s configuration there itself. See [workers](docs/configuration.md#workers) for the setup, what happens when the connection is lost, and the limits.
 
-A worker holds a copy of Pi’s configuration, including API keys and short-lived login tokens, and anyone who can use Gripi can run commands there. Gripi trusts the worker fully: a repository’s `.git/config` and Git hooks come back from it as they are, and Git on the gateway machine runs them the next time it runs in the repository. Secure a worker as you would the gateway machine.
+A worker holds a copy of Pi’s configuration, including API keys and short-lived login tokens, and anyone who can use Gripi can run commands there. Gripi trusts the worker with the sessions’ work: their commits and files come back from it, and the gateway machine runs what they change, such as scripts and dependencies. Secure a worker as you would the gateway machine.
 
 ## Updating
 

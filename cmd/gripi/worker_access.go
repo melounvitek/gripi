@@ -13,8 +13,8 @@ import (
 	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
-// newWorkers runs the sessions of the repositories placed on workers there, with Pi's adapter's launcher. It connects
-// to workers with the options of connection, in the view of the gateway user's home folder.
+// newWorkers runs the sessions placed on workers there, with Pi's adapter's launcher. It connects to workers with the
+// options of connection, in the view of the gateway user's home folder.
 func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, connection remote.Options) (*remote.Manager, error) {
 	connection.Home = cfg.Home
 	placements, err := remote.LoadPlacements(cfg.WorkerPlacementsPath)
@@ -46,8 +46,7 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, 
 		},
 		Pi:              remote.Pi{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, ExtensionDir: filepath.Dir(tree)},
 		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, SocketPath: cfg.SocketPath, Store: piAdapter.Store(),
-		Rewritten:    handler.(interface{ Guard() agent.Guard }).Guard().Rewritten,
-		StopSessions: handler.(interface{ StopSessions(func(string) bool) error }).StopSessions,
+		Rewritten: handler.(interface{ Guard() agent.Guard }).Guard().Rewritten,
 		ServeSocket: func(name string, placement remote.WorkerPlacement) (string, func() error, error) {
 			return startWorkerSocket(cfg, handler, name, placement)
 		},
@@ -56,7 +55,7 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, 
 }
 
 // startWorkerSocket serves the gripi commands of a connected worker on a socket of its own, in a private folder under
-// the gateway's state folder, where they reach only what placement says is on the worker. Forward the socket to the
+// the gateway's state folder, where they reach only the sessions that placement says are on the worker. Forward the socket to the
 // worker at cfg.SocketPath, where gripi looks for it: worker.Forward{Remote: true, ListenSocket: cfg.SocketPath,
 // ConnectSocket: socket}. stop closes the socket.
 func startWorkerSocket(cfg config.Config, handler http.Handler, name string, placement gateway.WorkerPlacement) (socket string, stop func() error, err error) {
@@ -90,8 +89,8 @@ func (workers gatewayWorkers) List() ([]gateway.Worker, error) {
 	return list, err
 }
 
-func (workers gatewayWorkers) Location(folder string) (gateway.WorkerLocation, bool) {
-	location, found := workers.Manager.Location(folder)
+func (workers gatewayWorkers) Location(key string) (gateway.WorkerLocation, bool) {
+	location, found := workers.Manager.Location(key)
 	ports := make([]gateway.WorkerPort, 0, len(location.Forwards))
 	for _, forwarded := range location.Forwards {
 		ports = append(ports, gateway.WorkerPort(forwarded))
@@ -102,10 +101,18 @@ func (workers gatewayWorkers) Location(folder string) (gateway.WorkerLocation, b
 	}, found
 }
 
-func (workers gatewayWorkers) Notices(folder string) []gateway.WorkerNotice {
+func (workers gatewayWorkers) Notices(key string) []gateway.WorkerNotice {
 	var notices []gateway.WorkerNotice
-	for _, notice := range workers.Manager.Notices(folder) {
-		notices = append(notices, gateway.WorkerNotice{Repository: notice.Repository.Main, Aside: notice.Aside, Paths: notice.Paths, Time: notice.Time})
+	for _, notice := range workers.Manager.Notices(key) {
+		shown := gateway.WorkerNotice{
+			Repository: notice.Repository, Worker: notice.Worker, Aside: filepath.Join(notice.Recovery, "worker"),
+			Paths: []string{}, Items: []gateway.WorkerNoticeItem{}, Refs: append([]string{}, notice.Result.Refs...), Text: notice.Result.Notice, Time: notice.Time,
+		}
+		for _, item := range notice.Result.Aside {
+			shown.Paths = append(shown.Paths, item.Path)
+			shown.Items = append(shown.Items, gateway.WorkerNoticeItem(item))
+		}
+		notices = append(notices, shown)
 	}
 	return notices
 }

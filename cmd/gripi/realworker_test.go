@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -24,14 +23,15 @@ import (
 )
 
 // realWorkerRoot holds everything of the test gateway: its executable, the helper's sockets, which the worker gets at
-// the same path, and its home folder, which the worker lacks. Pi's folder, Gripi's state and the projects are in that
-// home folder, which the worker's sessions see as the worker user's own.
+// the same path, and its home folder, which the worker lacks. Pi's folder and Gripi's state are in that home folder,
+// in gripi-e2e, and the repository in gripi-e2e-work, which the worker's sessions see in its user's own home folder.
 const realWorkerRoot = "/tmp/gripi-e2e"
 
 // Set GRIPI_TEST_WORKER to a worker that ssh reaches without a prompt, such as gripi@beelink.example.ts.net, to move
-// a repository there and back with a scripted model. The test removes /tmp/gripi-e2e on both machines and
-// ~/gripi-e2e on the worker afterwards, which has the helper and what the worker got of main's home folder.
-func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
+// sessions there and back with a scripted model. The test removes /tmp/gripi-e2e on both machines, and ~/gripi-e2e
+// and ~/gripi-e2e-work on the worker afterwards, which have the helper, the moves' copies and what the worker got of
+// main's home folder.
+func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 	destination := os.Getenv("GRIPI_TEST_WORKER")
 	if destination == "" {
 		t.Skip("set GRIPI_TEST_WORKER to a worker that ssh reaches without a prompt")
@@ -44,7 +44,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	}
 	removeEverything := func() {
 		os.RemoveAll(realWorkerRoot)
-		if output, err := onWorker("rm -rf " + realWorkerRoot + " ~/gripi-e2e"); err != nil {
+		if output, err := onWorker("rm -rf " + realWorkerRoot + " ~/gripi-e2e ~/gripi-e2e-work"); err != nil {
 			t.Errorf("clean the worker: %v %s", err, output)
 		}
 	}
@@ -59,10 +59,10 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	if output, err := onWorker("mkdir -p " + filepath.Dir(home) + " && test ! -e " + home); err != nil {
 		t.Fatalf("the worker has main's home folder %s: %v %s", home, err, output)
 	}
-	// What the worker gets of main's home folder is in its gripi-e2e, which the worker has in its own home folder, next to
-	// the helper's folder.
 	shared := filepath.Join(home, "gripi-e2e")
 	agentDir := filepath.Join(shared, "agent")
+	repository, feature := filepath.Join(home, "gripi-e2e-work", "repo"), filepath.Join(home, "gripi-e2e-work", "repo-feature")
+	readme := filepath.Join(repository, "README")
 	connection := remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run")}
 	workerHelper = connection
 	t.Cleanup(func() { workerHelper = remote.Options{} })
@@ -85,7 +85,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	for path, contents := range map[string]string{
 		filepath.Join(agentDir, "settings.json"):                  `{"defaultProvider": "fake", "defaultModel": "fake-1"}`,
 		filepath.Join(agentDir, "extensions", "fake_provider.ts"): string(provider),
-		filepath.Join(shared, "projects", "repo", "README"):       "A project\n",
+		readme: "first line\nsecond line\n",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
@@ -94,7 +94,6 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	project, feature := filepath.Join(shared, "projects", "repo"), filepath.Join(shared, "projects", "repo-feature")
 	gitIn := func(dir string, arguments ...string) string {
 		t.Helper()
 		output, err := exec.Command("git", append([]string{"-C", dir}, arguments...)...).CombinedOutput()
@@ -103,10 +102,9 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		}
 		return strings.TrimSpace(string(output))
 	}
-	gitIn(project, "init", "-q", "-b", "main")
-	gitIn(project, "add", "-A")
-	gitIn(project, "commit", "-qm", "First")
-	gitIn(project, "worktree", "add", "-q", "-b", "feature", feature)
+	gitIn(repository, "init", "-q", "-b", "main")
+	gitIn(repository, "add", "-A")
+	gitIn(repository, "commit", "-qm", "First")
 
 	if code, _, stderr := runCLI("worker", "add", destination, "--name", "beelink"); code != 0 {
 		t.Fatalf("worker add: %s", stderr)
@@ -165,19 +163,20 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		}
 		return replies
 	}
-	// repliesSoon waits a moment for main's copy of a session on the worker to have count replies.
-	repliesSoon := func(id string, count int) []string {
+	// run has a session run a shell command and returns the reply with its output, once main's copy of the session's
+	// file has it.
+	run := func(id, command string) string {
 		t.Helper()
-		started := time.Now()
-		for {
-			if got := replies(id); len(got) >= count {
-				t.Logf("main had reply %d of %s %s after the turn ended", count, id, time.Since(started).Round(time.Millisecond))
-				return got
+		before := len(replies(id))
+		cli("send", id, `RUN [[{"name":"bash","arguments":{"command":`+quote(command)+`}}]]`)
+		cli("wait", id, "--timeout", "60")
+		for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			if got := replies(id); len(got) > before {
+				return got[len(got)-1]
 			}
-			if time.Since(started) > 3*time.Second {
-				t.Fatalf("main's copy of %s has no reply %d", id, count)
+			if time.Now().After(deadline) {
+				t.Fatalf("main's copy of %s has no reply to %q", id, command)
 			}
-			time.Sleep(50 * time.Millisecond)
 		}
 	}
 	// noTakeOver fails when the guard of the sessions' files took the mirror for another program.
@@ -193,146 +192,122 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 			}
 		}
 	}
-	session := decodeSession(t, cli("new", feature, "--json"))
-	cli("send", session.ID, "Hello from main")
-	cli("wait", session.ID, "--timeout", "60")
-	// Pi has not saved a blank session, which only its Pi has, so the move starts it again on the worker.
-	blank := decodeSession(t, cli("new", project, "--json"))
-
-	started := time.Now()
-	cli("worker", "move", session.ID, "beelink")
-	t.Logf("moved in %s", time.Since(started).Round(time.Millisecond))
+	// copies lists the worker's copies of moves.
+	copies := func() []string {
+		t.Helper()
+		output, err := onWorker("cd gripi-e2e/copies 2>/dev/null && ls -d -- */ 2>/dev/null | tr -d /")
+		if err != nil {
+			t.Fatalf("list the worker's copies: %v %s", err, output)
+		}
+		return strings.Fields(output)
+	}
 	workerHost, err := onWorker("hostname")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cli("send", blank.Path, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
-	cli("wait", blank.Path, "--timeout", "60")
-	if got := repliesSoon(blank.Path, 1); !strings.Contains(got[0], `"text":"`+workerHost+`\n"`) {
-		t.Fatalf("the blank session started before the move replied %q", got[0])
+	localHost, _ := os.Hostname()
+	onHost := func(host string) string { return `"text":"` + host + `\n` }
+
+	// Two sessions of the repository on main; one of them moves.
+	moved := decodeSession(t, cli("new", repository, "--json"))
+	cli("send", moved.ID, "Hello from main")
+	cli("wait", moved.ID, "--timeout", "60")
+	stays := decodeSession(t, cli("new", repository, "--json"))
+	cli("send", stays.ID, "Hello from main too")
+	cli("wait", stays.ID, "--timeout", "60")
+	started := time.Now()
+	cli("worker", "move", moved.ID, "beelink")
+	t.Logf("moved in %s", time.Since(started).Round(time.Millisecond))
+	if location, found := workers.Location(moved.Path); !found || location.Worker != "beelink" || location.State != remote.Connected {
+		t.Fatalf("the moved session's location = %+v, %v", location, found)
 	}
-	// The worker's copy is in the worker user's own home folder, and main's home folder exists only in the view.
-	if output, err := onWorker("test -d gripi-e2e/projects/repo/.git && test -f gripi-e2e/agent/settings.json && test ! -e " + home + " && echo ok"); err != nil || output != "ok" {
+	if _, found := workers.Location(stays.Path); found {
+		t.Fatal("the other session of the repository moved too")
+	}
+	// The copy is in the worker user's own home folder, which the view shows at the repository's own path.
+	if output, err := onWorker("test -d gripi-e2e/copies/*/gripi-e2e-work/repo/.git && test ! -e gripi-e2e-work/repo && test ! -e " + home + " && echo ok"); err != nil || output != "ok" {
 		t.Fatalf("the worker's copy is not in its user's home folder: %q %v", output, err)
 	}
-	// A session that starts on the worker has its file on main, which outlives the gateway.
-	fresh := decodeSession(t, cli("new", project, "--json"))
-	cli("send", fresh.ID, "Hello on the worker")
-	cli("wait", fresh.ID, "--timeout", "60")
-	repliesSoon(fresh.ID, 1)
-	// The helper's view shows what was next to main's home folder when it started. A move copies in that view, as the
-	// mirrors see the files, so a project in a folder made there later can't move, and stays whole on main.
-	localHost, _ := os.Hostname()
-	beside := filepath.Join(filepath.Dir(home), "projects", "app")
-	if output, err := onWorker("mkdir " + filepath.Dir(beside)); err != nil {
-		t.Fatalf("make a folder next to main's home folder on the worker: %v %s", err, output)
+
+	// On the worker, the session makes a worktree with a commit on its own branch, and edits files in the main checkout,
+	// which main gets only when it returns; meanwhile, the other session on main edits a file of its own and one of them.
+	onWorkerRun := `git worktree add -q -b feature ../repo-feature && cd ../repo-feature && echo made on the worker > feature.txt && git add -A && git commit -qm "On the worker" && ` +
+		`cd ../repo && printf 'first line\nsecond line by the worker\n' > README && echo by the worker > worker.txt && hostname`
+	if reply := run(moved.ID, onWorkerRun); !strings.Contains(reply, onHost(workerHost)) || !strings.Contains(reply, `"isError":false`) {
+		t.Fatalf("the moved session replied %q", reply)
 	}
-	if err := os.MkdirAll(beside, 0700); err != nil {
-		t.Fatal(err)
+	if reply := run(stays.ID, `printf 'first line\nsecond line by main\n' > README && echo by main > main.txt && hostname`); !strings.Contains(reply, onHost(localHost)) {
+		t.Fatalf("the session on main replied %q", reply)
 	}
-	if err := os.WriteFile(filepath.Join(beside, "README"), []byte("next to home\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	besideSession := decodeSession(t, cli("new", beside, "--json"))
-	cli("send", besideSession.ID, "Hello next to home")
-	cli("wait", besideSession.ID, "--timeout", "60")
-	if code, _, stderr := runCLI("worker", "move", beside, "beelink"); code == 0 || !strings.Contains(stderr, "read-only file system") || !strings.Contains(stderr, "private view") {
-		t.Fatalf("move of a project in a folder that the helper doesn't see = %d %s", code, stderr)
-	}
-	if output, err := onWorker("test ! -e " + beside + " && echo absent"); err != nil || output != "absent" {
-		t.Fatalf("the worker got the project in a folder that its helper doesn't see: %q %v", output, err)
-	}
-	cli("send", besideSession.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && cat README"}}]]`)
-	cli("wait", besideSession.ID, "--timeout", "60")
-	if got := replies(besideSession.ID); len(got) != 2 || !strings.Contains(got[1], localHost+`\nnext to home\n`) {
-		t.Fatalf("the session of the project that stayed on main replied %q", got)
+	if _, err := os.Stat(feature); !os.IsNotExist(err) {
+		t.Fatalf("main's worktree of the moved session before it returned: %v", err)
 	}
 	// The worker's logins follow main's while it is connected, without main's refresh tokens.
-	workerLogins := func(key string) {
-		t.Helper()
-		authJSON := filepath.Join(agentDir, "auth.json")
-		logins := `{"openai": {"type": "api_key", "key": "` + key + `"}, "anthropic": {"type": "oauth", "access": "access", "refresh": "main's refresh", "expires": 4102444800000}}`
-		if err := os.WriteFile(authJSON, []byte(logins), 0600); err != nil {
-			t.Fatal(err)
-		}
-		started := time.Now()
-		for {
-			copied, err := inView("cat " + authJSON)
-			if err == nil && strings.Contains(copied, key) {
-				if strings.Contains(copied, "main's refresh") || !strings.Contains(copied, "gripi:refresh-on-main") {
-					t.Fatalf("the worker's auth.json: %s", copied)
-				}
-				t.Logf("the worker had main's changed logins after %s", time.Since(started).Round(time.Millisecond))
-				return
-			}
-			if time.Since(started) > 15*time.Second {
-				t.Fatalf("the worker's auth.json never got %s: %s %v", key, copied, err)
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-	}
-	workerLogins("sk-changed-on-main")
-	// A new gateway connects to the worker once a session needs it.
-	stopGateway()
-	startGateway()
-	if got := replies(fresh.ID); !slices.Equal(got, []string{"plain reply"}) {
-		t.Fatalf("after a restart, the replies of the session that started on the worker are %q", got)
-	}
-
-	// Main's copy is read-only, so what changes there is saved aside before the worker's version replaces it. Git's
-	// index doesn't count, which a plain git status on main rewrites.
-	if err := os.WriteFile(filepath.Join(feature, "README"), []byte("edited on main\n"), 0600); err != nil {
+	authJSON := filepath.Join(agentDir, "auth.json")
+	logins := `{"openai": {"type": "api_key", "key": "sk-changed-on-main"}, "anthropic": {"type": "oauth", "access": "access", "refresh": "main's refresh", "expires": 4102444800000}}`
+	if err := os.WriteFile(authJSON, []byte(logins), 0600); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(feature, "status", "--porcelain")
-	// gripi on the worker reaches main and sees the sessions there.
-	commit := `echo written on the worker > worker.txt && echo changed on the worker > README && git add -A && git commit -qm "From the worker" && hostname && gripi list --json | grep -c '"id"'`
-	started = time.Now()
-	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":`+quote(commit)+`}}],[{"name":"bash","arguments":{"command":"sleep 10"}}]]`)
-	// The tool result waits until main has the commit, so main has it while the next step still runs.
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		if _, err := os.Stat(filepath.Join(feature, "worker.txt")); err == nil {
-			t.Logf("main had the commit %s after the prompt", time.Since(started).Round(time.Millisecond))
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		copied, err := inView("cat " + authJSON)
+		if err == nil && strings.Contains(copied, "sk-changed-on-main") {
+			if strings.Contains(copied, "main's refresh") || !strings.Contains(copied, "gripi:refresh-on-main") {
+				t.Fatalf("the worker's auth.json: %s", copied)
+			}
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("main never got the file written on the worker")
+			t.Fatalf("the worker's auth.json never got main's change: %s %v", copied, err)
 		}
 	}
-	if subject := gitIn(feature, "log", "-1", "--format=%s"); subject != "From the worker" {
-		t.Fatalf("main's latest commit = %q", subject)
+	// A new gateway connects to the worker once the session needs it, and its copy is as the session left it.
+	stopGateway()
+	startGateway()
+	if reply := run(moved.ID, "hostname && cat worker.txt"); !strings.Contains(reply, onHost(workerHost)+`by the worker\n`) {
+		t.Fatalf("after a restart, the moved session replied %q", reply)
 	}
-	gitIn(project, "fsck", "--strict", "--no-dangling")
-	if state := eventually(t, session.ID, func(gateway.LocalSession) bool { return true }).State; state != "working" {
-		t.Fatalf("the session is %s, not still working on its next step", state)
+	noTakeOver()
+
+	// The return brings the worktree, the branch and the file that only the worker changed, keeps main's changes, and
+	// keeps aside the worker's version of the file that both changed.
+	started = time.Now()
+	cli("worker", "return", moved.ID)
+	t.Logf("returned in %s", time.Since(started).Round(time.Millisecond))
+	for path, want := range map[string]string{
+		filepath.Join(feature, "feature.txt"): "made on the worker\n", filepath.Join(repository, "worker.txt"): "by the worker\n",
+		filepath.Join(repository, "main.txt"): "by main\n", readme: "first line\nsecond line by main\n",
+	} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Errorf("main's %s = %q, %v; want %q", path, got, err, want)
+		}
 	}
-	cli("wait", session.ID, "--timeout", "60")
-	if got := repliesSoon(session.ID, 2); !strings.Contains(got[1], `"isError":false,"text":"`+workerHost+`\n3\n"`) {
-		t.Fatalf("main's copy of the session has the reply %q", got[1])
+	if subject := gitIn(repository, "log", "-1", "--format=%s", "feature"); subject != "On the worker" {
+		t.Fatalf("main's feature branch is at %q", subject)
 	}
-	notices := workers.Notices(feature)
-	if len(notices) != 1 || !slices.Equal(notices[0].Paths, []string{filepath.Join(feature, "README")}) {
+	gitIn(repository, "fsck", "--strict", "--no-dangling")
+	notices := workers.Notices(moved.Path)
+	if len(notices) != 1 || len(notices[0].Result.Aside) != 1 || notices[0].Result.Aside[0].Path != readme || !strings.Contains(notices[0].Result.Notice, notices[0].Recovery) {
 		t.Fatalf("notices = %+v", notices)
 	}
-	if saved, _ := os.ReadFile(filepath.Join(notices[0].Aside, feature, "README")); string(saved) != "edited on main\n" {
-		t.Fatalf("main's version saved aside = %q", saved)
+	if kept, _ := os.ReadFile(filepath.Join(notices[0].Recovery, "worker") + readme); string(kept) != "first line\nsecond line by the worker\n" {
+		t.Fatalf("the worker's version kept aside = %q", kept)
 	}
-	if readme, _ := os.ReadFile(filepath.Join(feature, "README")); string(readme) != "changed on the worker\n" {
-		t.Fatalf("main's README = %q", readme)
+	if reply := run(moved.ID, "hostname && git log -1 --format=%s feature"); !strings.Contains(reply, onHost(localHost)+`On the worker\n`) {
+		t.Fatalf("the returned session replied %q", reply)
 	}
-
-	// A worktree made on the worker runs its sessions there too.
-	second := filepath.Join(shared, "projects", "repo-second")
-	cli("send", fresh.ID, `RUN [[{"name":"bash","arguments":{"command":"git worktree add -q -b second ../repo-second"}}]]`)
-	cli("wait", fresh.ID, "--timeout", "60")
-	if _, err := os.Stat(filepath.Join(second, "README")); err != nil {
-		t.Fatalf("the worktree made on the worker: %v", err)
+	for deadline := time.Now().Add(30 * time.Second); len(copies()) != 0; time.Sleep(500 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the worker keeps the copies %q", copies())
+		}
 	}
-	inSecond := decodeSession(t, cli("new", second, "--json"))
-	cli("send", inSecond.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
-	cli("wait", inSecond.ID, "--timeout", "60")
-	if got := repliesSoon(inSecond.ID, 1); !strings.Contains(got[0], `"text":"`+workerHost+`\n"`) {
-		t.Fatalf("the session in the new worktree replied %q", got[0])
+	if err := workers.DismissNotices(context.Background(), moved.Path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(notices[0].Recovery); !os.IsNotExist(err) {
+		t.Fatalf("the recovery folder after the dismissal: %v", err)
+	}
+	if refs := gitIn(repository, "for-each-ref", "refs/gripi"); refs != "" {
+		t.Fatalf("refs after the dismissal: %s", refs)
 	}
 	noTakeOver()
 
@@ -350,38 +325,10 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 			}
 		}
 	}
-	// A short stall costs nothing.
-	cli("send", fresh.ID, `RUN [[{"name":"bash","arguments":{"command":"sleep 4 && echo after the stall > stall.txt"}}]]`)
-	time.Sleep(time.Second)
-	signalMasters(syscall.SIGSTOP)
-	time.Sleep(3 * time.Second)
-	signalMasters(syscall.SIGCONT)
-	cli("wait", fresh.ID, "--timeout", "60")
-	if got := repliesSoon(fresh.ID, 3); !strings.Contains(got[2], `"isError":false`) {
-		t.Fatalf("the step that the stall held up replied %q", got[2])
-	}
-	if _, err := os.Stat(filepath.Join(project, "stall.txt")); err != nil {
-		t.Fatalf("main lacks what the worker wrote after the stall: %v", err)
-	}
-	if status := workers.Status("beelink"); status.State != remote.Connected {
-		t.Fatalf("after a short stall, the worker is %+v", status)
-	}
-
-	// A link that hangs for half a lease loses the worker, which ends the running step, whose outcome is unknown.
-	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"echo before > before.txt"}}],[{"name":"bash","arguments":{"command":"echo during > during.txt && sleep 120"}}]]`)
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		if _, err := os.Stat(filepath.Join(feature, "before.txt")); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("main never got the file of the first step")
-		}
-	}
 	// events returns the live events of a session after a cursor, as the browser gets them, and the last event's number.
-	events := func(id string, after int64) ([]map[string]any, int64) {
+	events := func(session string, after int64) ([]map[string]any, int64) {
 		t.Helper()
-		target := fmt.Sprintf("http://127.0.0.1:4567/events?after=%d&session=%s", after, url.QueryEscape(eventually(t, id, func(gateway.LocalSession) bool { return true }).Path))
-		request := httptest.NewRequest(http.MethodGet, target, nil)
+		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:4567/events?after=%d&session=%s", after, url.QueryEscape(session)), nil)
 		request.Header.Set("Accept", "application/json")
 		request.RemoteAddr = "127.0.0.1:40000"
 		response := httptest.NewRecorder()
@@ -395,14 +342,29 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		}
 		return batch.Events, batch.LastSeq
 	}
+	// The session moves again, with the worktree that it used now.
+	cli("worker", "move", moved.ID, "beelink")
+	if output, err := onWorker("test -f gripi-e2e/copies/*/gripi-e2e-work/repo-feature/feature.txt && echo ok"); err != nil || output != "ok" {
+		t.Fatalf("the second copy lacks the worktree that the session used: %q %v", output, err)
+	}
+	// A link that hangs for half a lease loses the worker, which ends the running step, whose outcome is unknown.
+	cli("send", moved.ID, `RUN [[{"name":"bash","arguments":{"command":"echo before > before.txt"}}],[{"name":"bash","arguments":{"command":"echo during > during.txt && sleep 120"}}]]`)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if shadowed, _ := filepath.Glob(filepath.Join(stateDir(cfg), "moves", "*", "shadow") + filepath.Join(repository, "before.txt")); len(shadowed) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("main never got the file of the first step")
+		}
+	}
 	// The worker writes during.txt and sends it, but no barrier makes main take it.
 	time.Sleep(time.Second)
-	_, cursor := events(session.ID, 0)
+	_, cursor := events(moved.Path, 0)
 	signalMasters(syscall.SIGSTOP)
 	hung := time.Now()
-	cli("wait", session.ID, "--timeout", "90")
+	cli("wait", moved.ID, "--timeout", "90")
 	t.Logf("the running step ended %s after the link hung", time.Since(hung).Round(time.Millisecond))
-	if ended, _ := events(session.ID, cursor); !slices.ContainsFunc(ended, func(event map[string]any) bool {
+	if ended, _ := events(moved.Path, cursor); !slices.ContainsFunc(ended, func(event map[string]any) bool {
 		return event["type"] == "agent_settled" && event["error"] == "Lost the connection to worker beelink. The outcome of the running step is unknown."
 	}) {
 		t.Fatalf("the running step ended without saying that its outcome is unknown: %v", ended)
@@ -411,59 +373,59 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	if status.State != remote.Unreachable {
 		t.Fatalf("the lost worker is %+v", status)
 	}
-	if code, _, stderr := runCLI("worker", "return", project); code == 0 || !strings.Contains(stderr, "unreachable") || !strings.Contains(stderr, status.GoneAt.Local().Format(time.TimeOnly)) {
+	if code, _, stderr := runCLI("worker", "return", moved.ID); code == 0 || !strings.Contains(stderr, "unreachable") || !strings.Contains(stderr, status.GoneAt.Local().Format(time.TimeOnly)) {
 		t.Fatalf("return before the worker is gone = %d %s", code, stderr)
 	}
 	time.Sleep(time.Until(status.GoneAt))
 	if output, _ := onWorker("systemctl --user is-active gripi-e2e; pgrep -af " + realWorkerRoot); output != "inactive" {
 		t.Fatalf("still running on the gone worker: %s", output)
 	}
-	// The repository continues here as main's copy was at the last barrier.
-	cli("worker", "return", project)
-	if _, err := os.Stat(filepath.Join(feature, "during.txt")); !errors.Is(err, os.ErrNotExist) {
+	// The session continues on main with what main got of its changes.
+	cli("worker", "return", moved.ID)
+	if _, err := os.Stat(filepath.Join(repository, "during.txt")); !os.IsNotExist(err) {
 		t.Fatalf("main has the file of the step whose outcome is unknown: %v", err)
 	}
-	gitIn(project, "fsck", "--strict", "--no-dangling")
-	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && cat before.txt"}}]]`)
-	cli("wait", session.ID, "--timeout", "60")
-	if got := replies(session.ID); !strings.Contains(got[len(got)-1], localHost+`\nbefore\n`) {
-		t.Fatalf("the session continued on main with %q", got[len(got)-1])
+	gitIn(repository, "fsck", "--strict", "--no-dangling")
+	if reply := run(moved.ID, "hostname && cat before.txt"); !strings.Contains(reply, onHost(localHost)+`before\n`) {
+		t.Fatalf("the session continued on main with %q", reply)
 	}
 	noTakeOver()
 
-	// The next move to the worker keeps aside there what the worker had that main never got.
-	cli("worker", "move", project, "beelink")
-	if output, err := inView("cat " + filepath.Join(filepath.Dir(project), ".repo.gripi-aside") + "/*/main/*" + feature + "/during.txt; test ! -e " + feature + "/during.txt"); err != nil || output != "during" {
-		t.Fatalf("the worker's file that main never got: %q %v", output, err)
+	// Two sessions of the repository move at once, each on a copy of its own: one of them new, which Pi has not saved
+	// yet, so it starts again on the worker. The worker's stale copy goes once main reaches the worker again.
+	blank := decodeSession(t, cli("new", repository, "--json"))
+	answers := make(chan string, 2)
+	for _, session := range []string{moved.Path, blank.Path} {
+		go func() {
+			code, _, stderr := runCLI("worker", "move", session, "beelink")
+			answers <- fmt.Sprintf("%d %s", code, stderr)
+		}()
 	}
-
-	// A master that dies loses the worker at once, and the next prompt of a session whose Pi ran there connects again
-	// and starts its Pi there.
-	again := decodeSession(t, cli("new", project, "--json"))
-	cli("send", again.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
-	cli("wait", again.ID, "--timeout", "60")
-	signalMasters(syscall.SIGKILL)
-	for deadline := time.Now().Add(5 * time.Second); workers.Status("beelink").State != remote.Unreachable; time.Sleep(50 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("after its master died, the worker is %+v", workers.Status("beelink"))
+	for range 2 {
+		if answer := <-answers; answer != "0 " {
+			t.Fatalf("a move of two at once = %s", answer)
 		}
 	}
-	started = time.Now()
-	cli("send", again.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
-	cli("wait", again.ID, "--timeout", "90")
-	t.Logf("reconnected and ran a step in %s", time.Since(started).Round(time.Millisecond))
-	if got := repliesSoon(again.ID, 2); !strings.Contains(got[1], `"text":"`+workerHost+`\n"`) {
-		t.Fatalf("the session after the reconnect replied %q", got[1])
+	for deadline := time.Now().Add(30 * time.Second); len(copies()) != 2; time.Sleep(500 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the worker has the copies %q", copies())
+		}
 	}
-	workerLogins("sk-changed-after-the-reconnect")
-
-	started = time.Now()
-	cli("worker", "return", project)
-	t.Logf("returned in %s", time.Since(started).Round(time.Millisecond))
-	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && git log -1 --format=%s"}}]]`)
-	cli("wait", session.ID, "--timeout", "60")
-	if got := replies(session.ID); !strings.Contains(got[len(got)-1], localHost+`\nFrom the worker`) {
-		t.Fatalf("replies = %q", got)
+	if reply := run(blank.Path, "hostname && echo blank > blank.txt"); !strings.Contains(reply, onHost(workerHost)) {
+		t.Fatalf("the new session moved to the worker replied %q", reply)
+	}
+	if reply := run(moved.ID, "hostname && test ! -e blank.txt && echo separate"); !strings.Contains(reply, onHost(workerHost)+`separate\n`) {
+		t.Fatalf("the other session on the worker replied %q", reply)
+	}
+	cli("worker", "return", blank.Path)
+	cli("worker", "return", moved.ID)
+	if got, _ := os.ReadFile(filepath.Join(repository, "blank.txt")); string(got) != "blank\n" {
+		t.Fatalf("main's blank.txt = %q", got)
+	}
+	for deadline := time.Now().Add(30 * time.Second); len(copies()) != 0; time.Sleep(500 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the worker keeps the copies %q", copies())
+		}
 	}
 	noTakeOver()
 

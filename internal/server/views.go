@@ -317,7 +317,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			view.SidebarActivity[session.Path] = activity
 		}
 		if app.workers != nil && session.Agent != "hermes" {
-			if location, found := app.workers.Location(session.CWD); found {
+			if location, found := app.workers.Location(session.Path); found {
 				view.WorkerLocations[session.Path] = &location
 			}
 		}
