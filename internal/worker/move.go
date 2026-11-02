@@ -344,11 +344,11 @@ func (manager *Manager) abandon(placement Placement) {
 	}
 }
 
-// Return brings the session whose key is key back from its worker, which releases the move, and brings what the
-// session changed there to main's folders, keeping aside what main changed too. prepare is as in Move, and runs before
-// the worker releases the move. When main has lost the worker, or cannot reach it, the session's changes come from main's copies
-// as their last barriers left them, once the worker must have stopped the session. A return that failed or was
-// interrupted finishes when it runs again.
+// Return brings the session whose key is key back from its worker, which releases the move, and brings what the session
+// changed there to main's folders, keeping aside the worker's version of what main changed too. prepare is as in Move,
+// and runs before the worker releases the move. When main has lost the worker, or cannot reach it, the session's
+// changes come from main's copies as their last barriers left them, once the worker must have stopped the session. A
+// return that failed or was interrupted finishes when it runs again.
 func (manager *Manager) Return(ctx context.Context, key string, prepare func(ctx context.Context, inRepository func(folder string) bool) (release func(), err error)) error {
 	placement, placed := manager.options.Placements.Find(key)
 	if !placed {

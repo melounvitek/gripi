@@ -349,7 +349,7 @@ test("Run on worker lists the workers with their state and what moves, and moves
     "copy", "storefront and ~/Work/.worktrees/storefront/coupons",
     "ignored", "files up to 10 MB; folders such as node_modules/ come from the worker's earlier copies",
     "on main", "storefront's other sessions keep running",
-    "return", "brings its changes back; what main changed too is kept aside"
+    "return", "brings its changes back; main keeps what it changed too, and the worker's version is kept aside"
   ]);
   // The connected worker comes first under the cursor.
   assert.equal(rows[1].getAttribute("aria-selected"), "true");

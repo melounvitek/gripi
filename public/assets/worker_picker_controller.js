@@ -70,7 +70,7 @@ export class WorkerPickerController {
       ["copy", roots.includes(main) ? listed : `${listed}, with ${name}'s Git folder`],
       ["ignored", "files up to 10 MB; folders such as node_modules/ come from the worker's earlier copies"],
       ["on main", `${name}'s other sessions keep running`],
-      ["return", "brings its changes back; what main changed too is kept aside"]
+      ["return", "brings its changes back; main keeps what it changed too, and the worker's version is kept aside"]
     ]);
     this.go.hidden = false;
     this.choose(Math.max(0, this.workers.findIndex((worker) => worker.state === "connected")));

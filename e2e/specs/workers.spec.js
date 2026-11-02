@@ -118,7 +118,7 @@ test("Run on worker says that only this session moves, and the editor's place sh
   await expect(card).toContainText("this session only, to a private copy of storefront");
   await expect(card).toContainText("storefront and /work/.worktrees/storefront/coupons");
   await expect(card).toContainText("storefront's other sessions keep running");
-  await expect(card).toContainText("brings its changes back; what main changed too is kept aside");
+  await expect(card).toContainText("brings its changes back; main keeps what it changed too, and the worker's version is kept aside");
   // The first tap points at a worker; the move has its own button.
   await press(other, isMobile);
   await expect(other).toHaveAttribute("aria-selected", "true");
