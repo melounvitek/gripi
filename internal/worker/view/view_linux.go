@@ -22,7 +22,7 @@ const variable = "GRIPI_VIEW"
 type entry struct {
 	Home string `json:"home"` // main's home folder
 	// Parent is the folder that holds main's home folder, with links resolved, which the view replaces with a copy of
-	// it whose entries show the original ones.
+	// it whose entries show the original ones, unless main's home folder is this user's.
 	Parent string `json:"parent,omitempty"`
 	Own    string `json:"own,omitempty"` // this user's home folder, with links resolved
 	// Binds make a move's view instead: each Target shows its Source.
@@ -48,24 +48,24 @@ func viewCommand(home string, command []string) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, fmt.Errorf("a private view needs the folder of main's home folder %s here: %w", home, err)
 	}
-	if parent == "/" {
-		return nil, fmt.Errorf("main's home folder %s is in /, which a private view cannot replace", home)
-	}
 	if own, err = filepath.EvalSymlinks(own); err != nil {
 		return nil, err
-	}
-	shown := filepath.Join(parent, filepath.Base(home))
-	if shown == own {
-		return exec.Command(command[0], command[1:]...), nil
-	}
-	if within(own, shown) || within(shown, own) {
-		return nil, fmt.Errorf("main's home folder %s and this user's home folder %s are inside each other, which a private view cannot show", home, own)
 	}
 	dir, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	return startAgain(entry{Home: home, Parent: parent, Own: own, Dir: dir, UID: os.Getuid(), GID: os.Getgid()}, command, os.Environ())
+	view := entry{Home: home, Dir: dir, UID: os.Getuid(), GID: os.Getgid()}
+	if shown := filepath.Join(parent, filepath.Base(home)); shown != own {
+		if parent == "/" {
+			return nil, fmt.Errorf("main's home folder %s is in /, which a private view cannot replace", home)
+		}
+		if within(own, shown) || within(shown, own) {
+			return nil, fmt.Errorf("main's home folder %s and this user's home folder %s are inside each other, which a private view cannot show", home, own)
+		}
+		view.Parent, view.Own = parent, own
+	}
+	return startAgain(view, command, os.Environ())
 }
 
 func moveCommand(move Move, dir string, command, env []string) (*exec.Cmd, error) {
@@ -137,8 +137,10 @@ func (view entry) enter(command []string) (int, error) {
 			return 0, fmt.Errorf("%s is not a folder in the move's view", dir)
 		}
 	} else {
-		if err := view.showOwnHome(); err != nil {
-			return 0, err
+		if view.Parent != "" {
+			if err := view.showOwnHome(); err != nil {
+				return 0, err
+			}
 		}
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			dir = view.Home

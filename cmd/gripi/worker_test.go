@@ -38,7 +38,8 @@ HOME=$FAKE_SSH_HOME exec sh -c "$command"
 `
 
 // fakeSSH puts fakeSSHScript on PATH as ssh, and a systemd-run that succeeds, gives the test a home that the
-// worker shares and a workers file, and returns the file with ssh's arguments.
+// worker shares and a workers file, and returns the file with ssh's arguments. The worker's private views, which
+// this machine may block, work and show its files as they are.
 func fakeSSH(t *testing.T) (arguments string) {
 	t.Helper()
 	isolateSettings(t)
@@ -61,6 +62,13 @@ func fakeSSH(t *testing.T) (arguments string) {
 	t.Setenv("FAKE_SSH_SHARED", "")
 	arguments = filepath.Join(directory, "arguments")
 	t.Setenv("FAKE_SSH_ARGUMENTS", arguments)
+	viewScripts = func(_ context.Context, options remote.Options) (func(string, ...string) (string, error), error) {
+		return func(script string, arguments ...string) (string, error) {
+			output, err := exec.Command("ssh", "-o", "BatchMode=yes", "--", options.Destination, remote.ShellQuote(append([]string{"sh", "-c", script, "sh"}, arguments...)...)).Output()
+			return string(output), err
+		}, nil
+	}
+	t.Cleanup(func() { viewScripts = remote.ViewScripts })
 	return arguments
 }
 
@@ -179,10 +187,10 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 		otherSystem = "Linux"
 	}
 	for _, test := range []struct{ name, answer, reason string }{
-		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\nsystemd\nagent\n", "no Git"},
-		{"no systemd", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nagent\n", "systemd"},
-		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n", "same operating system and architecture"},
-		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n", "same operating system and architecture"},
+		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\nsystemd\n", "no Git"},
+		{"no systemd", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\n", "systemd"},
+		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
+		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fakeSSH(t)
@@ -199,12 +207,15 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 
 func TestWorkerAddFailsWhenTheWorkerCannotCreatePisAgentFolder(t *testing.T) {
 	fakeSSH(t)
-	system, machine := thisSystem(t)
-	home := os.Getenv("HOME")
-	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n"+home+"\ngit\nsystemd\n")
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	agentDir := filepath.Join(file, "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
 
 	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
-	if code != 1 || stdout != "" || !strings.Contains(stderr, "cannot create Pi's folder "+filepath.Join(home, ".pi", "agent")) {
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "cannot create Pi's folder "+agentDir) {
 		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	assertNoWorkersFile(t)
@@ -259,47 +270,75 @@ func buildGripi(t *testing.T, gripi string) {
 	}
 }
 
-// A worker user with another home folder needs no setup: what runs there with main's paths sees the user's home
-// folder at main's, in a private view of unprivileged user namespaces, which add checks with the helper.
-func TestWorkerAddChecksThePrivateViewOfAWorkerUserWithAnotherHomeFolder(t *testing.T) {
+// privateViews reports whether this system lets gripi make private views, which Ubuntu blocks by default.
+func privateViews(t *testing.T) bool {
+	t.Helper()
+	code, _, _ := runCLI("worker", "enter", "--home", filepath.Join(t.TempDir(), "alice"), "--", "true")
+	return code == 0
+}
+
+// A worker user needs no setup, but the worker needs unprivileged user namespaces, which add checks with the helper:
+// each moved session runs in a private view of its copy, and with another home folder, what runs there with main's
+// paths sees that home folder at main's in a view too.
+func TestWorkerAddChecksThePrivateViews(t *testing.T) {
 	gripi := filepath.Join(t.TempDir(), "gripi")
 	buildGripi(t, gripi)
-	fakeSSH(t)
-	workerHome := t.TempDir()
-	t.Setenv("FAKE_SSH_HOME", workerHome)
-	// The worker is this machine as another user, which would see main's files outside the view.
-	t.Setenv("FAKE_SSH_SHARED", "1")
-	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".pi", "agent"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	workerHelper = remote.Options{Executable: gripi}
-	t.Cleanup(func() { workerHelper = remote.Options{} })
+	views := privateViews(t)
+	for name, anotherHome := range map[string]bool{"another home folder": true, "main's home folder": false} {
+		t.Run(name, func(t *testing.T) {
+			fakeSSH(t)
+			viewScripts = remote.ViewScripts
+			workerHome := os.Getenv("HOME")
+			if anotherHome {
+				workerHome = t.TempDir()
+				t.Setenv("FAKE_SSH_HOME", workerHome)
+				// The worker is this machine as another user, which would see main's files outside the view.
+				t.Setenv("FAKE_SSH_SHARED", "1")
+			}
+			if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".pi", "agent"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			workerHelper = remote.Options{Executable: gripi}
+			t.Cleanup(func() { workerHelper = remote.Options{} })
 
-	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
-	if code != 0 {
-		// This system blocks unprivileged user namespaces, as Ubuntu does by default.
-		if code != 1 || !strings.Contains(stderr, workerHome) || !strings.Contains(stderr, "sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0") {
-			t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
-		}
-		assertNoWorkersFile(t)
-		return
-	}
-	if info, err := os.Stat(filepath.Join(workerHome, ".pi", "agent")); err != nil || !info.IsDir() {
-		t.Fatalf("Pi's agent folder in the worker user's home folder = %v, %v", info, err)
-	}
-	if workers := listedWorkers(t); len(workers) != 1 || workers[0]["name"] != "beelink" {
-		t.Fatalf("workers = %v", workers)
+			code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
+			if !views {
+				if code != 1 || !strings.Contains(stderr, workerHome) || !strings.Contains(stderr, "sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0") {
+					t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
+				}
+				assertNoWorkersFile(t)
+				return
+			}
+			if code != 0 {
+				t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+			if info, err := os.Stat(filepath.Join(workerHome, ".pi", "agent")); err != nil || !info.IsDir() {
+				t.Fatalf("Pi's agent folder in the worker user's home folder = %v, %v", info, err)
+			}
+			if workers := listedWorkers(t); len(workers) != 1 || workers[0]["name"] != "beelink" {
+				t.Fatalf("workers = %v", workers)
+			}
+		})
 	}
 }
 
-// Main runs worker commands that use its paths through enter, which runs them as they are when the worker user's
-// home folder is main's.
-func TestWorkerEnterRunsACommandAsItIsWithMainsHomeFolder(t *testing.T) {
+// Main runs its checks of a worker through enter, in a private view also when the worker user's home folder is main's,
+// because each moved session runs in a view of its own there.
+func TestWorkerEnterRunsACommandInAPrivateViewAlsoWithMainsHomeFolder(t *testing.T) {
+	views := privateViews(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	namespace, err := os.Readlink("/proc/self/ns/user")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	code, stdout, stderr := runCLI("worker", "enter", "--home", home, "--", "sh", "-c", `echo "$HOME"; exit 3`)
-	if code != 3 || stdout != home+"\n" || stderr != "" {
+	code, stdout, stderr := runCLI("worker", "enter", "--home", home, "--", "sh", "-c", `echo "$HOME"; readlink /proc/self/ns/user; exit 3`)
+	if !views {
+		if code != 1 || !strings.Contains(stderr, "sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0") {
+			t.Fatalf("gripi worker enter where views are blocked = %d, stdout %q, stderr %q", code, stdout, stderr)
+		}
+	} else if lines := strings.Split(stdout, "\n"); code != 3 || len(lines) != 3 || lines[0] != home || lines[1] == namespace || stderr != "" {
 		t.Fatalf("gripi worker enter = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	if code, _, stderr := runCLI("worker", "enter", "--home", home); code != 2 || !strings.Contains(stderr, "command") {

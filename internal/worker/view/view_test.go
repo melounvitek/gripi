@@ -136,30 +136,35 @@ func TestTheViewKeepsWhatIsNextToMainsHome(t *testing.T) {
 func TestTheViewKeepsTheCommandsExitStatus(t *testing.T) {
 	main, own := homes(t)
 	run(t, main, "true")
-	for _, home := range []string{main, own, ""} {
+	for _, home := range []string{main, own} {
 		if code, err := view.Run(home, []string{"sh", "-c", "exit 3"}, nil, os.Stdout, os.Stderr); err != nil || code != 3 {
 			t.Fatalf("view.Run(%q) of exit 3 = %d, %v", home, code, err)
 		}
 	}
 }
 
-func TestACommandRunsAsItIsWhenItsHomeFolderIsMains(t *testing.T) {
+// The helper needs no view when its user's home folder is main's, but what main checks there runs in namespaces of its
+// own, as each moved session does, where the view then changes nothing.
+func TestTheViewOfTheUsersOwnHomeFolderChangesNothing(t *testing.T) {
 	_, own := homes(t)
+	for _, home := range []string{own, ""} {
+		if view.Needed(home) {
+			t.Fatalf("Needed(%q)", home)
+		}
+	}
 	namespace, err := os.Readlink("/proc/self/ns/user")
 	if err != nil {
 		t.Skip(err)
 	}
-	for _, home := range []string{own, ""} {
-		var output strings.Builder
-		if code, err := view.Run(home, []string{"sh", "-c", `echo "$HOME"; readlink /proc/self/ns/user`}, nil, &output, os.Stderr); err != nil || code != 0 {
-			t.Fatalf("view.Run(%q) = %d, %v", home, code, err)
-		}
-		if output.String() != own+"\n"+namespace+"\n" {
-			t.Fatalf("view.Run(%q) printed %q", home, output.String())
-		}
-		if view.Needed(home) {
-			t.Fatalf("Needed(%q)", home)
-		}
+	if err := os.WriteFile(filepath.Join(own, "notes"), []byte("the worker's\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(own)
+
+	output := run(t, own, `echo "$HOME"; pwd -P; id -u; cat notes; readlink /proc/self/ns/user`)
+	expected := strings.Join([]string{own, own, strconv.Itoa(os.Getuid()), "the worker's"}, "\n") + "\n"
+	if !strings.HasPrefix(output, expected) || strings.HasSuffix(output, "\n"+namespace+"\n") {
+		t.Fatalf("in the view of the user's own home folder:\n%s\nwant:\n%s<another user namespace than %s>", output, expected, namespace)
 	}
 }
 
