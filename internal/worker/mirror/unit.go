@@ -1,7 +1,6 @@
 package mirror
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -27,35 +26,6 @@ type Unit struct {
 	// exist: a source that lacks it never deletes it on the destination, and the folder's other files are never
 	// listed, sent or changed.
 	File string `json:"file,omitempty"`
-}
-
-// Discover finds the unit of the folder dir: the repository it belongs to with
-// all its worktrees, or the folder alone outside Git.
-func Discover(dir string) (Unit, error) {
-	dir, err := filepath.Abs(dir)
-	if err != nil {
-		return Unit{}, err
-	}
-	out, err := exec.Command("git", "--no-optional-locks", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir", "--is-bare-repository").Output()
-	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			return Unit{Main: dir}, nil
-		}
-		return Unit{}, err
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) != 2 {
-		return Unit{}, fmt.Errorf("git rev-parse: unexpected output %q", out)
-	}
-	if lines[1] == "true" {
-		return Unit{}, fmt.Errorf("%s is a bare repository, which can't be mirrored", dir)
-	}
-	worktrees, err := listWorktrees(dir)
-	if err != nil {
-		return Unit{}, err
-	}
-	return Unit{Main: worktrees[0], Worktrees: worktrees[1:], GitDir: filepath.Clean(lines[0])}, nil
 }
 
 // listWorktrees lists the existing worktrees of the repository at dir, the

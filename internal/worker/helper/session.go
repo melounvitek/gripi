@@ -19,7 +19,6 @@ import (
 // another one later. Only session.release kills them.
 type session struct {
 	cgroup    string
-	cwd       string         // Pi's folder
 	move      string         // the move that the session runs in, if any
 	listeners []net.Listener // the attach and extension sockets
 
@@ -99,7 +98,6 @@ func (s *server) create(request Message, inMove *move) error {
 	if current.move != moveID {
 		return fmt.Errorf("session %s runs in another move", id)
 	}
-	current.cwd = request.Cwd
 
 	environment := append(append(os.Environ(), request.Env...), "GRIPI_WORKER_SOCKET="+current.listeners[1].Addr().String())
 	if inMove != nil {
