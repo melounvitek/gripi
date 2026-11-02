@@ -263,6 +263,9 @@ type Location struct {
 	Repository string
 	// Copying is when the session started moving to the worker, which it is until it runs there.
 	Copying time.Time
+	// Returning is when the session started coming back, while it does. A return that stopped before it finished
+	// leaves the state Returning without it.
+	Returning time.Time
 	// Forwards are the worker's ports that main forwards for the session, by port.
 	Forwards []Forwarded
 }
@@ -290,6 +293,9 @@ func (manager *Manager) Location(key string) (Location, bool) {
 	switch {
 	case placed && (placement.Stage != "" || moving != nil && moving.returning):
 		location.State = Returning
+		if moving != nil && moving.returning {
+			location.Returning = moving.since
+		}
 	case location.Copying.IsZero() && location.State == Copying:
 		// The worker is getting another session's copy, while it runs this one.
 		location.State = Connected

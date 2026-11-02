@@ -28,6 +28,9 @@ type WorkerLocation struct {
 	Repository string `json:"repository"`
 	// Copying is when the session started moving to the worker, which it is until it runs there.
 	Copying time.Time `json:"copying,omitzero"`
+	// Returning is when the session started coming back, while it does: without it, State returning is a return that
+	// stopped before it finished.
+	Returning time.Time `json:"returning,omitzero"`
 	// Waiting names the session on this machine whose step a move or return of the session waits for.
 	Waiting string       `json:"waiting,omitempty"`
 	Ports   []WorkerPort `json:"ports"`

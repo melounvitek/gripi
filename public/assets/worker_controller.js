@@ -1,6 +1,7 @@
-// Owns what the page shows about the worker that runs the session's repository: the marks in the header and the
-// editor's footer, the block that takes the editor's place while the repository is copied there or the worker is lost,
-// and the notice about main's files saved aside. It also moves the repository, which that block shows.
+// Owns what the page shows about the worker that runs the session on a private copy of its repository: the marks in
+// the header and the editor's footer, the block that takes the editor's place while the session moves there or back or
+// the worker is lost, and the notice about what its returns kept aside. It also moves the session, which that block
+// shows.
 export class WorkerController {
   constructor(document, window, callbacks) {
     this.document = document;
@@ -55,8 +56,8 @@ export class WorkerController {
     return !!this.mode();
   }
 
-  // The state that the marks show: copying while the repository is copied there, gone once an unreachable worker must
-  // have stopped its sessions, or null on this machine.
+  // The state that the marks show: copying while the session moves there, returning while it comes back, gone once an
+  // unreachable worker must have stopped it, or null on this machine.
   indicator() {
     const location = this.location;
     if (!location) return null;
@@ -67,9 +68,12 @@ export class WorkerController {
 
   mode() {
     const state = this.indicator();
+    // The gateway names the session that a move or return waits for only while it waits.
+    if (this.location?.waiting) return "waiting";
     if (this.pending) return this.pending.action === "move" ? "copying" : "returning";
     if (this.failure) return "failed";
     if (state === "copying") return "copying";
+    if (state === "returning") return this.location.returning ? "returning" : "unfinished";
     if (state === "unreachable") return "unreachable";
     if (state === "gone" && this.waited !== this.goneKey()) return "gone";
     return null;
@@ -94,7 +98,7 @@ export class WorkerController {
     badge.hidden = !state;
     if (!state) return;
     badge.dataset.workerState = state;
-    badge.title = `Runs on ${this.location.worker} · ${state} · main's copy of ${this.repositoryName()} is read-only`;
+    badge.title = `Runs on ${this.location.worker} · ${state} · on a private copy of ${this.repositoryName()}`;
     badge.querySelector("[data-worker-badge-name]").textContent = this.location.worker;
     // Quiet while all is well.
     badge.querySelector("[data-worker-badge-state]").textContent = ["connected", "disconnected"].includes(state) ? "" : state;
@@ -150,41 +154,53 @@ export class WorkerController {
     const repository = this.repositoryName();
     const parts = (name) => prompt.querySelector(`[data-worker-prompt-${name}]`);
     const goneAt = location?.gone_at ? new Date(location.gone_at) : null;
+    const returning = this.pending ? this.pending.action === "return" : !location?.copying;
     const facts = {
-      copying: [
-        ["moves", `${repository}, with its worktrees and sessions`],
-        ["now", this.copyingStage()],
-        ["on main", `${repository} stays read-only while it runs there`]
+      waiting: [
+        ["then", returning ? `this session comes back from ${worker} with its changes` : `this session moves to ${worker}, on a private copy of ${repository}`],
+        ["on main", `new prompts to ${repository}'s sessions wait meanwhile`]
       ],
-      returning: [["now", `stopping what its sessions run there and taking their last changes`]],
+      copying: [
+        ["copy", `a private copy of ${repository}, for this session only`],
+        ["now", this.copyingStage()],
+        ["on main", `${repository}'s other sessions keep running`]
+      ],
+      returning: [
+        ["now", `stopping it there, then bringing its changes to ${repository} on main`],
+        ["clashes", `main keeps what it changed too; ${worker}'s version is kept aside`]
+      ],
+      unfinished: [["now", "it doesn't start until its return finishes"], ["next", "continue on main finishes it"]],
       failed: [["error", this.failure?.message]],
       unreachable: [
         ["steps", "any step that was running there ends with an unknown outcome"],
-        ["next", `if it doesn't come back, Pi there stops by itself by ${clock(goneAt)}; then ${repository} can continue on main`]
+        ["next", `if it doesn't come back, Pi there stops by itself by ${clock(goneAt)}; then this session can continue on main`]
       ],
       gone: [
         ["stopped", `Pi and everything it started there stopped by ${clock(goneAt)}`],
-        ["on main", `${repository} and its sessions up to the last finished step`]
+        ["on main", "this session, with its changes up to the last step that main confirmed"]
       ]
     }[mode];
     parts("title").textContent = {
-      copying: `Copying ${repository} to ${worker}`,
-      returning: `Bringing ${repository} back from ${worker}`,
-      failed: this.failure?.action === "return" ? `Could not bring ${repository} back` : `Could not move ${repository}`,
+      waiting: `Waiting for “${shortName(location?.waiting)}” to finish`,
+      copying: `Moving this session to ${worker}`,
+      returning: `Bringing this session back from ${worker}`,
+      unfinished: `Bringing this session back from ${worker} didn't finish`,
+      failed: this.failure?.action === "return" ? "Could not bring this session back" : "Could not move this session",
       unreachable: `${worker} is not answering`,
       gone: `${worker} is gone`
     }[mode];
     parts("facts").replaceChildren(...facts.flatMap(([term, text]) => [this.element("dt", "", term), this.element("dd", "", text)]));
-    parts("progress").hidden = !["copying", "returning"].includes(mode);
+    const running = ["waiting", "copying", "returning"].includes(mode);
+    parts("progress").hidden = !running || mode === "waiting";
     const proceed = prompt.querySelector("[data-worker-continue]");
     const wait = prompt.querySelector("[data-worker-wait]");
-    // Copying has nothing to answer; a failure only needs to be seen.
-    prompt.querySelector("[data-worker-prompt-actions]").hidden = ["copying", "returning"].includes(mode);
+    // A move or return that runs has nothing to answer; a failure only needs to be seen.
+    prompt.querySelector("[data-worker-prompt-actions]").hidden = running;
     proceed.hidden = mode === "failed";
     wait.textContent = mode === "failed" ? "ok" : "keep waiting";
-    wait.hidden = mode === "unreachable";
+    wait.hidden = ["unreachable", "unfinished"].includes(mode);
     parts("separator").hidden = mode !== "gone";
-    parts("hint").textContent = mode === "gone" ? "enter continue · esc keep waiting" : mode === "failed" ? "esc ok" : "";
+    parts("hint").textContent = { gone: "enter continue · esc keep waiting", unfinished: "enter continue", failed: "esc ok" }[mode] || "";
     const tick = () => {
       if (mode === "unreachable") {
         const left = Math.ceil((goneAt - Date.now()) / 1000);
@@ -194,8 +210,8 @@ export class WorkerController {
         }
         proceed.disabled = true;
         proceed.replaceChildren("continue on main in ", this.element("strong", "", duration(left)));
-      } else if (["copying", "returning"].includes(mode)) {
-        const since = Date.parse(location?.copying || "") || this.pending?.since || Date.now();
+      } else if (running) {
+        const since = Date.parse(location?.copying || location?.returning || "") || this.pending?.since || Date.now();
         parts("time").textContent = duration(Math.max(0, Math.floor((Date.now() - since) / 1000)));
       }
     };
@@ -203,23 +219,21 @@ export class WorkerController {
     proceed.replaceChildren("continue on main");
     parts("time").textContent = "";
     tick();
-    if (["unreachable", "copying", "returning"].includes(mode)) this.ticker = setInterval(tick, 1000);
+    if (running || mode === "unreachable") this.ticker = setInterval(tick, 1000);
     // Enter answers the block, as it would the editor that it replaced.
     if (this.focusedMode !== mode) {
       this.focusedMode = mode;
-      const target = mode === "gone" ? proceed : mode === "failed" ? wait : null;
+      const target = ["gone", "unfinished"].includes(mode) ? proceed : mode === "failed" ? wait : null;
       if (target && this.callbacks.canFocus()) target.focus({ preventScroll: true });
     }
   }
 
+  // The worker's state says how far a move has got only while it connects to the worker or copies there.
   copyingStage() {
-    const worker = this.location?.worker || this.pending?.worker;
-    if (!this.location?.copying) return "stopping the repository's sessions here";
     return {
-      connecting: `connecting to ${worker}, and copying Pi there the first time`,
-      copying: "copying the repository and its sessions",
-      connected: "starting to mirror it back to main"
-    }[this.location.state] || this.location.state;
+      connecting: `connecting to ${this.location?.worker}, and copying Pi there the first time`,
+      copying: `copying the session and its copy of ${this.repositoryName()} there`
+    }[this.location?.copying && this.location.state] || "preparing the copy";
   }
 
   repositoryName() {
@@ -227,24 +241,30 @@ export class WorkerController {
     return path.split("/").filter(Boolean).pop() || "the repository";
   }
 
+  // What the session's returns kept aside, where main kept its own version: the worker's files in the latest return's
+  // folder, and its commits under recovery refs.
   renderNotice() {
     const { notice } = this.elements;
     if (!notice) return;
     const notices = this.notices;
     notice.hidden = !notices.length;
     if (!notices.length) return;
-    const paths = [...new Set(notices.flatMap((each) => each.paths || []))];
-    const repository = notices[0].repository || "";
-    const name = repository.split("/").filter(Boolean).pop() || "the repository";
-    const worker = this.location?.worker || "the worker";
-    const shown = paths.slice(0, 3).map((path) => (path.startsWith(`${repository}/`) ? path.slice(repository.length + 1) : this.callbacks.homePath(path)));
-    if (paths.length > shown.length) shown.push(`${paths.length - shown.length} more`);
-    const latest = notices[notices.length - 1];
-    notice.querySelector("[data-worker-notice-title]").textContent =
-      `${paths.length} file${paths.length === 1 ? "" : "s"} changed on main while ${name} ran on ${worker}.`;
-    notice.querySelector("[data-worker-notice-text]").textContent =
-      `${worker}'s version replaced ${paths.length === 1 ? "it" : "them"}. Main's version of ${shown.slice(0, -1).join(", ")}${shown.length > 1 ? " and " : ""}${shown.at(-1)} ` +
-      `is saved in ${this.callbacks.homePath(latest.aside)}${notices.length > 1 ? ` and ${notices.length - 1} earlier folder${notices.length > 2 ? "s" : ""} beside it` : ""}, at ${paths.length === 1 ? "its path" : "their paths"}.`;
+    const items = notices.flatMap((each) => (each.items || []).map((item) => ({ ...item, repository: each.repository })));
+    const refs = items.filter((item) => item.ref).map((item) => item.ref);
+    const files = items.length - refs.length;
+    const worker = notices.at(-1).worker;
+    const shown = items.map(({ path, repository }) => (path.startsWith(`${repository}/`) ? path.slice(repository.length + 1) : this.callbacks.homePath(path)));
+    const where = [
+      files && `${worker}'s version${files === 1 ? " is" : "s are"} in ${this.asideFolders()}, at ${files === 1 ? "its path" : "their paths"}`,
+      refs.length && `its commit${refs.length === 1 ? " is" : "s are"} kept as ${list(refs, 2)}`
+    ].filter(Boolean);
+    notice.querySelector("[data-worker-notice-title]").textContent = `${items.length} change${items.length === 1 ? "" : "s"} from ${worker} kept aside.`;
+    notice.querySelector("[data-worker-notice-text]").textContent = `Main kept its own ${list(shown, 3)}. ${where.join("; ")}.`;
+  }
+
+  asideFolders() {
+    const earlier = this.notices.length - 1;
+    return `${this.callbacks.homePath(this.notices.at(-1).aside)}${earlier ? ` and the folder${earlier === 1 ? "" : "s"} of ${earlier} earlier return${earlier === 1 ? "" : "s"}` : ""}`;
   }
 
   keydown(event) {
@@ -300,6 +320,8 @@ export class WorkerController {
   }
 
   async dismissNotices() {
+    const { worker } = this.notices.at(-1);
+    if (!this.window.confirm(`Dismissing also deletes what the return kept aside: ${worker}'s versions in ${this.asideFolders()} and the refs that keep its commits. Main's files stay as they are.`)) return;
     const message = await this.post("/workers/dismiss_notices", { session: this.callbacks.sessionPath() });
     if (message) {
       this.callbacks.failed(message);
@@ -329,6 +351,18 @@ export class WorkerController {
     element.textContent = text;
     return element;
   }
+}
+
+// Names a session, such as by its first message, in a line.
+function shortName(name = "") {
+  const line = name.replace(/\s+/g, " ").trim();
+  return line.length > 48 ? `${line.slice(0, 48).trimEnd()}…` : line;
+}
+
+// Lists the first of some names, and how many more there are: "a, b and 2 more".
+function list(names, shown) {
+  const listed = names.length > shown ? [...names.slice(0, shown), `${names.length - shown} more`] : names;
+  return listed.length > 1 ? `${listed.slice(0, -1).join(", ")} and ${listed.at(-1)}` : listed[0];
 }
 
 function duration(seconds) {

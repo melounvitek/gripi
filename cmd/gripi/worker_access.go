@@ -97,7 +97,7 @@ func (workers gatewayWorkers) Location(key string) (gateway.WorkerLocation, bool
 	}
 	return gateway.WorkerLocation{
 		Worker: location.Worker, State: string(location.State), GoneAt: location.GoneAt, Repository: location.Repository,
-		Copying: location.Copying, Ports: ports,
+		Copying: location.Copying, Returning: location.Returning, Ports: ports,
 	}, found
 }
 

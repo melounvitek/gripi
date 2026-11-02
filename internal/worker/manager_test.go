@@ -626,15 +626,20 @@ func TestAFailedReleaseFinishesWhenTheReturnRunsAgain(t *testing.T) {
 	if err := rig.manager.Return(context.Background(), rig.key, rig.prepare); err == nil || !strings.Contains(err.Error(), "isn't connected") {
 		t.Fatalf("Return = %v", err)
 	}
-	// The worker released the move, which takes no new sessions.
-	if location, _ := rig.manager.Location(rig.key); location.State != Returning {
+	// The worker released the move, which takes no new sessions, and nothing brings the session back now.
+	if location, _ := rig.manager.Location(rig.key); location.State != Returning || !location.Returning.IsZero() {
 		t.Fatalf("location = %+v", location)
 	}
 	if _, _, err := rig.manager.Launch(agent.Process{Key: rig.key}); !refused(err) || !strings.Contains(err.Error(), "coming back") {
 		t.Fatalf("Launch of a session that is coming back = %v", err)
 	}
 	rig.fail("release", nil)
-	if err := rig.manager.Return(context.Background(), rig.key, rig.prepare); err != nil {
+	if err := rig.manager.Return(context.Background(), rig.key, func(ctx context.Context, inRepository func(string) bool) (func(), error) {
+		if location, _ := rig.manager.Location(rig.key); location.State != Returning || !location.Returning.Equal(rig.now) {
+			t.Errorf("location of a session coming back = %+v", location)
+		}
+		return rig.prepare(ctx, inRepository)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, filepath.Join(rig.feature, "new.txt")); got != "new\n" {
