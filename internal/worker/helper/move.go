@@ -377,8 +377,8 @@ func (s *server) startMoveMirror(id, file string) error {
 	return err
 }
 
-// hostOf returns the host of the move of a session, and whether the session is a move's.
-func (s *server) hostOf(session string) (*hostProcess, bool) {
+// hostOf returns the host of the move of a session, which runs the mirrors that its barriers need.
+func (s *server) hostOf(session string) (*hostProcess, error) {
 	s.mu.Lock()
 	current := s.sessions[session]
 	var m *move
@@ -387,11 +387,14 @@ func (s *server) hostOf(session string) (*hostProcess, bool) {
 	}
 	s.mu.Unlock()
 	if m == nil {
-		return nil, false
+		return nil, errors.New("nothing mirrors this session's folder to main")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.host, true
+	if m.host == nil {
+		return nil, errors.New("nothing mirrors this session's folder to main")
+	}
+	return m.host, nil
 }
 
 // hostProcess is a move's host, `gripi worker move-host`, which runs in the move's view (Host).

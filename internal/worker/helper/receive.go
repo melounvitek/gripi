@@ -56,7 +56,7 @@ func (s *server) receive(ctx context.Context, connection net.Conn) {
 		state = filepath.Join(filepath.Dir(to), "."+filepath.Base(to)+".gripi-receive")
 		if err == nil {
 			defer os.RemoveAll(state)
-			destination, err = newCopy(state, from, to, hello.Aside != "")
+			destination, err = newCopy(state, from, to)
 		}
 		if err == nil {
 			destination.File = hello.File
@@ -65,10 +65,7 @@ func (s *server) receive(ctx context.Context, connection net.Conn) {
 	if !replyHello(connection, err) {
 		return
 	}
-	aside := hello.Aside
-	if aside == "" {
-		aside = filepath.Join(state, "aside")
-	}
+	aside := filepath.Join(state, "aside")
 	stream := struct {
 		io.Reader
 		io.Writer
@@ -79,9 +76,8 @@ func (s *server) receive(ctx context.Context, connection net.Conn) {
 }
 
 // newCopy returns the destination that makes the folder to a copy of the other side's folder from, with its state in
-// the folder state. When from and to are the same, the copy keeps the other side's paths, also for the other folders
-// of from's unit, such as linked worktrees. With saveAside, what the copy replaces or deletes is saved aside.
-func newCopy(state, from, to string, saveAside bool) (*mirror.Destination, error) {
+// the folder state. When from and to are the same, the copy keeps the other side's paths.
+func newCopy(state, from, to string) (*mirror.Destination, error) {
 	// What an interrupted copy left there is sent again, because the sender compares what the folder has.
 	if err := os.RemoveAll(state); err != nil {
 		return nil, err
@@ -93,20 +89,13 @@ func newCopy(state, from, to string, saveAside bool) (*mirror.Destination, error
 	if errors.Is(err, syscall.EROFS) {
 		return nil, fmt.Errorf("%w; a folder made next to main's home folder after the gateway connected to the worker is missing from the worker's private view until the gateway connects again", err)
 	}
-	if err != nil {
-		return nil, err
-	}
-	if saveAside {
-		destination.SaveAsideReplaced()
-	}
-	return destination, nil
+	return destination, err
 }
 
 // AttachReceive passes stdin and stdout through to the helper, if it is instance, which makes the folder to a copy of
-// main's folder from, as `gripi worker receive` does. With aside, a folder on to's file system, what the copy replaces
-// or deletes goes there first, at main's paths.
-func AttachReceive(runtimeDir, from, to, aside, instance string, stdin io.Reader, stdout io.Writer) error {
-	return pass(filepath.Join(runtimeDir, receiveSocket), Message{Instance: instance, Path: from, To: to, Aside: aside}, stdin, stdout)
+// main's folder from, as `gripi worker receive` does.
+func AttachReceive(runtimeDir, from, to, instance string, stdin io.Reader, stdout io.Writer) error {
+	return pass(filepath.Join(runtimeDir, receiveSocket), Message{Instance: instance, Path: from, To: to}, stdin, stdout)
 }
 
 // AttachReceiveMove is AttachReceive into the copy of a move, which main's folder from, its shadow of its home

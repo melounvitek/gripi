@@ -5,7 +5,6 @@ package mirror
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -510,56 +509,6 @@ func TestFinishingAnInterruptedBarrierReportsWhatItRewroteBefore(t *testing.T) {
 	r.start(t, sessions)
 	if want := []string{filepath.Join(folder, "a/session.jsonl"), filepath.Join(folder, "b/session.jsonl")}; !slices.Equal(replaced, want) {
 		t.Fatalf("reported %v as replaced, want %v", replaced, want)
-	}
-}
-
-// Main writes only into the folders it allows, also when the worker adds a worktree.
-func TestTheDestinationRefusesFoldersItDoesntAllow(t *testing.T) {
-	unit := newRepo(t)
-	refuse := func(refused string) *rig {
-		dst := t.TempDir()
-		r := &rig{unit: unit, dst: dst, state: filepath.Join(dst, "state")}
-		var err error
-		if r.d, err = NewMovedDestination(r.state, "/", dst); err != nil {
-			t.Fatal(err)
-		}
-		r.d.AllowRoot = func(root string) error {
-			if root == refused {
-				return errors.New("not on this worker")
-			}
-			return nil
-		}
-		return r
-	}
-	failed := func(r *rig) {
-		t.Helper()
-		select {
-		case err := <-r.ran:
-			if err == nil || !strings.Contains(err.Error(), "not on this worker") {
-				t.Fatalf("Run = %v", err)
-			}
-		case <-time.After(30 * time.Second):
-			t.Fatal("the mirror went on")
-		}
-		if err := <-r.served; err == nil {
-			t.Fatal("Serve succeeded")
-		}
-	}
-
-	r := refuse(unit.Worktrees[1])
-	r.launch(t, nil)
-	failed(r)
-	if _, err := os.Lstat(r.dst + unit.Main); err == nil {
-		t.Fatal("main got files of a unit with a refused folder")
-	}
-
-	added := filepath.Join(filepath.Dir(unit.Worktrees[0]), "added")
-	r = refuse(added)
-	r.start(t, nil)
-	git(t, unit.Main, "worktree", "add", "-q", "-b", "added", added)
-	failed(r)
-	if _, err := os.Lstat(r.dst + added); err == nil {
-		t.Fatal("main got the refused worktree")
 	}
 }
 

@@ -135,14 +135,7 @@ func (installation *Installation) Command(command []string) []string {
 // copyFolder makes the worker's folder to match main's folder from, sending only what differs. What exclude names,
 // as in mirror.Options, stays as it is on both sides.
 func (conn *Conn) copyFolder(ctx context.Context, from, to string, exclude []string) error {
-	return conn.send(ctx, mirror.Unit{Main: from}, to, "", mirror.Options{Exclude: exclude, Dereference: true})
-}
-
-// CopyUnit makes the worker's copy of a unit, at the same paths, match main's unit, sending only what differs.
-// Ignored folders stay as they are on both sides. With aside, a folder on the worker on the unit's file system, what
-// the copy replaces or deletes there goes to aside first.
-func (conn *Conn) CopyUnit(ctx context.Context, unit mirror.Unit, aside string) error {
-	return conn.send(ctx, unit, unit.Main, aside, mirror.Options{})
+	return conn.upload(ctx, []string{from, to}, mirror.Unit{Main: from}, mirror.Options{Exclude: exclude, Dereference: true})
 }
 
 // UploadMove fills a move's copy, which PrepareMove made, with folder, main's shadow of its home folder, as it is.
@@ -154,15 +147,6 @@ func (conn *Conn) UploadMove(ctx context.Context, id, folder string) error {
 // leaves the other files in its folder as they are.
 func (conn *Conn) UploadSessionFile(ctx context.Context, file string) error {
 	return conn.upload(ctx, []string{"--file", file}, mirror.Unit{Main: filepath.Dir(file), File: file}, mirror.Options{})
-}
-
-// send copies main's unit to the folder to on the worker.
-func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to, aside string, options mirror.Options) error {
-	var arguments []string
-	if aside != "" {
-		arguments = []string{"--aside", aside}
-	}
-	return conn.upload(ctx, append(arguments, unit.Main, to), unit, options)
 }
 
 // upload copies main's unit to the worker with `gripi worker receive <arguments>`, where the helper makes the copy, so

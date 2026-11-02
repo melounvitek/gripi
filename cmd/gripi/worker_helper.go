@@ -69,13 +69,6 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	defer stop()
 	options.ApplyAuth = func(path, contents string) error { return auth.WriteLocked(ctx, path, []byte(contents)) }
 	options.DockerUpstream = dockerproxy.Upstream(os.Environ())
-	if *ownHome != "" {
-		// The Docker daemon runs outside the view, so the sessions get a socket that moves the host paths in their
-		// requests from main's home folder to the worker user's own, and passes them on to the helper's Docker.
-		options.Docker = func(ctx context.Context, socket string) error {
-			return dockerproxy.Serve(ctx, dockerproxy.Options{Listen: socket, Upstream: options.DockerUpstream, Mappings: []dockerproxy.Mapping{{From: *home, To: *ownHome}}})
-		}
-	}
 	if err := helper.Serve(ctx, stdin, stdout, options); err != nil {
 		return failure(stderr, "worker", err)
 	}
@@ -103,8 +96,8 @@ func attachWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer)
 	return 0
 }
 
-// mirrorWorker connects main's copy of a unit to the unit's mirror in the helper, or with --move, to a mirror of a
-// move: of the move's copy, or with --file, of the session's file.
+// mirrorWorker connects main's copy to a mirror of a move in the helper: of the move's copy, or with --file, of the
+// session's file.
 func mirrorWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("worker mirror", flag.ContinueOnError)
 	runtimeDir := flags.String("runtime-dir", "", "")
@@ -114,22 +107,14 @@ func mirrorWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer)
 	if err != nil {
 		return usageError(stderr, "worker", err.Error())
 	}
-	if *move != "" && len(positional) != 1 {
-		return usageError(stderr, "worker", "mirror --move takes a helper instance")
-	}
-	if *move == "" && len(positional) != 2 {
-		return usageError(stderr, "worker", "mirror takes a unit's main folder and a helper instance")
+	if *move == "" || len(positional) != 1 {
+		return usageError(stderr, "worker", "mirror takes --move and a helper instance")
 	}
 	folder, err := runtimeDirectory(*runtimeDir)
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
-	if *move != "" {
-		err = helper.AttachMoveMirror(folder, *move, *file, positional[0], stdin, stdout)
-	} else {
-		err = helper.AttachMirror(folder, positional[0], positional[1], stdin, stdout)
-	}
-	if err != nil {
+	if err := helper.AttachMoveMirror(folder, *move, *file, positional[0], stdin, stdout); err != nil {
 		return failure(stderr, "worker", err)
 	}
 	return 0
@@ -152,7 +137,6 @@ func hostMove(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int
 func receiveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("worker receive", flag.ContinueOnError)
 	runtimeDir := flags.String("runtime-dir", "", "")
-	aside := flags.String("aside", "", "")
 	move := flags.String("move", "", "")
 	file := flags.String("file", "", "")
 	positional, err := parseArguments(flags, arguments)
@@ -177,7 +161,7 @@ func receiveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 	case *file != "":
 		err = helper.AttachReceiveFile(folder, *file, positional[0], stdin, stdout)
 	default:
-		err = helper.AttachReceive(folder, positional[0], positional[1], *aside, positional[2], stdin, stdout)
+		err = helper.AttachReceive(folder, positional[0], positional[1], positional[2], stdin, stdout)
 	}
 	if err != nil {
 		return failure(stderr, "worker", err)

@@ -19,7 +19,7 @@ import (
 // another one later. Only session.release kills them.
 type session struct {
 	cgroup    string
-	cwd       string         // Pi's folder, which tells the unit whose mirror answers its barriers
+	cwd       string         // Pi's folder
 	move      string         // the move that the session runs in, if any
 	listeners []net.Listener // the attach and extension sockets
 
@@ -47,9 +47,8 @@ const closeTimeout = 5 * time.Second
 // releaseTimeout is how long session.release waits for a session's processes to die once it has killed them.
 const releaseTimeout = 5 * time.Second
 
-// create starts Pi for a session, in the session's cgroup, with the helper's environment, request.Env, the helper's
-// DOCKER_HOST if it serves one, and GRIPI_WORKER_SOCKET. With inMove, it starts Pi in the move's view, with the
-// move's DOCKER_HOST.
+// create starts Pi for a session, in the session's cgroup, with the helper's environment, request.Env and
+// GRIPI_WORKER_SOCKET. With inMove, it starts Pi in the move's view, with the move's DOCKER_HOST.
 func (s *server) create(request Message, inMove *move) error {
 	id := request.Session
 	if err := checkID("session", id); err != nil {
@@ -103,11 +102,8 @@ func (s *server) create(request Message, inMove *move) error {
 	current.cwd = request.Cwd
 
 	environment := append(append(os.Environ(), request.Env...), "GRIPI_WORKER_SOCKET="+current.listeners[1].Addr().String())
-	switch {
-	case inMove != nil:
+	if inMove != nil {
 		environment = append(environment, "DOCKER_HOST=unix://"+s.dockerSocket(inMove))
-	case s.docker != "":
-		environment = append(environment, "DOCKER_HOST="+s.docker)
 	}
 	path, err := lookPath(request.Args[0], environment)
 	if err != nil {

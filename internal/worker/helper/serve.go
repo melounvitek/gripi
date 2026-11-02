@@ -19,7 +19,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/worker/mirror"
 	"golang.org/x/sys/unix"
 )
 
@@ -28,9 +27,7 @@ import (
 //
 //   - helper to main: {"type":"hello","instance":…,"version":…} once, then {"id":N,"type":"ping"} every second;
 //   - main to helper: {"id":N,"type":"session.create","session":…,"cwd":…,"args":[…],"env":["NAME=value",…]},
-//     session.close and session.release with "session", auth.apply with "path" and "contents", mirror.start with
-//     "unit" ({"main":…,"worktrees":[…],"git_dir":…}), and for a unit of Pi's session folders "sessions" and the
-//     main folder of their sessions' repository as "path", and mirror.stop with the unit's main folder as "path";
+//     session.close and session.release with "session", and auth.apply with "path" and "contents";
 //   - main to helper, for a session that moves to the worker on a private copy of its repository (see move.go):
 //     move.prepare with "move", "repository", "roots" and "private", answered with the copy's folder as "path";
 //     move.seed, move.release, answered with "barriers", and move.delete with "move"; session.create with "move"
@@ -39,22 +36,19 @@ import (
 //
 // The streams that main opens to the helper start with a Message too, which names the helper's instance.
 type Message struct {
-	ID       uint64       `json:"id,omitempty"`
-	Type     string       `json:"type,omitempty"`
-	Instance string       `json:"instance,omitempty"`
-	Version  string       `json:"version,omitempty"`
-	Session  string       `json:"session,omitempty"`
-	Cwd      string       `json:"cwd,omitempty"`
-	Args     []string     `json:"args,omitempty"`
-	Env      []string     `json:"env,omitempty"`
-	Path     string       `json:"path,omitempty"`
-	To       string       `json:"to,omitempty"`
-	Aside    string       `json:"aside,omitempty"`
-	Contents string       `json:"contents,omitempty"`
-	Unit     *mirror.Unit `json:"unit,omitempty"`
-	Sessions bool         `json:"sessions,omitempty"`
-	OK       bool         `json:"ok,omitempty"`
-	Error    string       `json:"error,omitempty"`
+	ID       uint64   `json:"id,omitempty"`
+	Type     string   `json:"type,omitempty"`
+	Instance string   `json:"instance,omitempty"`
+	Version  string   `json:"version,omitempty"`
+	Session  string   `json:"session,omitempty"`
+	Cwd      string   `json:"cwd,omitempty"`
+	Args     []string `json:"args,omitempty"`
+	Env      []string `json:"env,omitempty"`
+	Path     string   `json:"path,omitempty"`
+	To       string   `json:"to,omitempty"`
+	Contents string   `json:"contents,omitempty"`
+	OK       bool     `json:"ok,omitempty"`
+	Error    string   `json:"error,omitempty"`
 
 	Move       string    `json:"move,omitempty"`
 	Repository string    `json:"repository,omitempty"`
@@ -98,14 +92,10 @@ type Options struct {
 	// Lease is DefaultLease when zero.
 	Lease time.Duration
 	// Mirror answers the worker extension's barriers and health checks. Without it, the helper answers them from the
-	// mirrors (mirror.start) of the unit that holds the session's folder and of that unit's sessions' folders, and
-	// fails barriers of other sessions.
+	// mirrors of the session's move, and fails those of other sessions.
 	Mirror Mirror
 	// ApplyAuth writes a login file for auth.apply. Without it, auth.apply fails.
 	ApplyAuth func(path, contents string) error
-	// Docker, when set, serves Docker's API for the sessions on socket, in RuntimeDir, until ctx ends, and every
-	// session's DOCKER_HOST names socket, also when Docker fails.
-	Docker func(ctx context.Context, socket string) error
 	// Clock is CLOCK_BOOTTIME when nil. It must keep counting while the machine is suspended, so a lease can't
 	// outlast what main allows.
 	Clock func() time.Duration
@@ -130,8 +120,6 @@ type server struct {
 	answered bool
 	stopping bool // no session starts once Serve has started to kill them
 	sessions map[string]*session
-	mirrors  map[string]*mirroredUnit // by the unit's main folder
-	docker   string                   // the sessions' DOCKER_HOST, if Options.Docker serves it
 	moves    map[string]*move
 
 	cache sync.Mutex // held while moves take ignored folders from earlier copies or leave them
@@ -155,48 +143,23 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	rand.Read(instance)
 	s := &server{
 		options: options, instance: hex.EncodeToString(instance), output: make(chan any, 64), done: make(chan struct{}),
-		pings: map[uint64]time.Duration{}, renewed: options.Clock(), sessions: map[string]*session{}, mirrors: map[string]*mirroredUnit{},
-		moves: map[string]*move{},
+		pings: map[uint64]time.Duration{}, renewed: options.Clock(), sessions: map[string]*session{}, moves: map[string]*move{},
 	}
 	if s.options.Mirror == nil {
 		s.options.Mirror = s
 	}
-	mirrors, err := net.Listen("unix", filepath.Join(options.RuntimeDir, mirrorSocket))
-	if err != nil {
-		return err
-	}
-	defer mirrors.Close()
-	go s.serveMirrors(mirrors)
 	receives, err := net.Listen("unix", filepath.Join(options.RuntimeDir, receiveSocket))
 	if err != nil {
 		return err
 	}
 	defer receives.Close()
 	go s.serveReceives(ctx, receives)
-	if options.Docker != nil {
-		// The dot keeps it apart from the sessions' sockets.
-		socket := filepath.Join(options.RuntimeDir, "docker.api.sock")
-		s.docker = "unix://" + socket
-		docker, stopDocker := context.WithCancel(ctx)
-		dockerStopped := make(chan struct{})
-		go func() {
-			defer close(dockerStopped)
-			if err := options.Docker(docker, socket); docker.Err() == nil {
-				log.Printf("serve Docker for the sessions: %v", err)
-			}
-		}()
-		defer func() {
-			stopDocker()
-			<-dockerStopped
-		}()
-	}
 	defer close(s.done)
 	go s.write(output)
 	closed := make(chan struct{})
 	go s.read(input, closed)
 	s.send(Message{Type: "hello", Instance: s.instance, Version: options.Version})
 	err = s.keepLease(ctx, closed)
-	s.stopMirrors()
 	s.mu.Lock()
 	s.stopping = true
 	ids := make([]string, 0, len(s.sessions))
@@ -326,11 +289,7 @@ func (s *server) handle(request Message) {
 			err = s.create(request, nil)
 		}
 	case "mirror.start":
-		if request.Move != "" {
-			err = s.startMoveMirror(request.Move, request.File)
-		} else {
-			err = s.startMirror(request.Unit, request.Sessions, request.Path)
-		}
+		err = s.startMoveMirror(request.Move, request.File)
 	case "move.prepare":
 		var copy string
 		copy, err = s.prepare(request)
@@ -353,8 +312,6 @@ func (s *server) handle(request Message) {
 		err = s.close(request.Session)
 	case "session.release":
 		err = s.release(releaseTimeout, request.Session)
-	case "mirror.stop":
-		err = s.stopMirror(request.Path)
 	case "auth.apply":
 		if s.options.ApplyAuth == nil {
 			err = errors.New("this helper cannot write logins")

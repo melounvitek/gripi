@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/worker/helper"
 )
 
 // fakePi stands in for Pi. It starts processes the way Pi's tools do, in the background, in a session of their own
@@ -127,7 +129,7 @@ func TestConnectRunsSessionsOnTheWorker(t *testing.T) {
 		t.Fatal("closing Pi killed what it started")
 	}
 
-	if err := conn.ReleaseSession(ctx, "s1"); err != nil {
+	if err := conn.call(ctx, helper.Message{Type: "session.release", Session: "s1"}); err != nil {
 		t.Fatal(err)
 	}
 	assertGone(t, time.Second, pids...)

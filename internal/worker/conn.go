@@ -141,12 +141,6 @@ func (conn *Conn) Attach(ctx context.Context, session string) (command *exec.Cmd
 	return conn.stream(ctx, "attach", session)
 }
 
-// AttachMirror returns ssh that connects main's copy of a unit to the helper's mirror of it, which StartMirror
-// prepared, for a mirror.Destination. Call release once it has ended.
-func (conn *Conn) AttachMirror(ctx context.Context, main string) (command *exec.Cmd, release func(), err error) {
-	return conn.stream(ctx, "mirror", main)
-}
-
 // AttachMoveMirror returns ssh that connects main's copy to one of a move's mirrors, which StartMoveMirror prepared:
 // with file, the session's file's, for a mirror.Destination whose File it is, and otherwise the move's copy's, for one
 // that keeps the worker's paths in main's shadow of them. Call release once it has ended.

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/worker/helper"
-	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
 // GoneMargin is how much longer than the lease main waits before it treats a worker as gone, for clocks that run at
@@ -313,27 +312,9 @@ func (control *Control) CloseSession(ctx context.Context, id string) error {
 	return control.call(ctx, helper.Message{Type: "session.close", Session: id})
 }
 
-// ReleaseSession kills every process of a session on the worker.
-func (control *Control) ReleaseSession(ctx context.Context, id string) error {
-	return control.call(ctx, helper.Message{Type: "session.release", Session: id})
-}
-
 // ApplyAuth writes a login file on the worker under Pi's lock.
 func (control *Control) ApplyAuth(ctx context.Context, path, contents string) error {
 	return control.call(ctx, helper.Message{Type: "auth.apply", Path: path, Contents: contents})
-}
-
-// StartMirror prepares the helper's mirror of a unit, which sends the unit's changes once AttachMirror connects main's
-// copy to it, and answers the barriers of the sessions in the unit. A unit of Pi's session folders, those of the
-// sessions in the repository whose main folder is sessionsOf, sends its changes without waiting for barriers, and the
-// helper makes the folders that don't exist yet. The barriers of a session need both mirrors.
-func (control *Control) StartMirror(ctx context.Context, unit mirror.Unit, sessionsOf string) error {
-	return control.call(ctx, helper.Message{Type: "mirror.start", Unit: &unit, Sessions: sessionsOf != "", Path: sessionsOf})
-}
-
-// StopMirror sends main the last changes of the unit whose main folder is main, then stops its mirror.
-func (control *Control) StopMirror(ctx context.Context, main string) error {
-	return control.call(ctx, helper.Message{Type: "mirror.stop", Path: main})
 }
 
 // LastAnswer is when main last answered a ping.

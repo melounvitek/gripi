@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/worker/helper"
 )
 
 // These tests connect with the real ssh to GRIPI_TEST_SSH, such as localhost, and install the helper in
@@ -204,7 +206,7 @@ func TestRealSSHSessionsSeeMainsHomeFolderAsTheWorkersOwn(t *testing.T) {
 	if expected := []string{worker.options.Home, seen, seen, strings.TrimSpace(worker.direct("id -u"))}; !slices.Equal(lines[:4], expected) {
 		t.Fatalf("the session saw HOME, PWD, pwd -P and id -u %q, want %q", lines[:4], expected)
 	}
-	if err := worker.conn.ReleaseSession(ctx, "s1"); err != nil {
+	if err := worker.conn.call(ctx, helper.Message{Type: "session.release", Session: "s1"}); err != nil {
 		t.Fatal(err)
 	}
 	if left := worker.running(lines[4:]); len(left) > 0 {

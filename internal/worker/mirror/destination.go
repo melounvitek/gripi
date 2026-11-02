@@ -38,11 +38,6 @@ type Destination struct {
 	// there, new ones included. A barrier that was finished after a crash,
 	// as the destination opened, is reported when Serve starts.
 	Applied func(checkpoint Checkpoint, aside string, saved, replaced []string)
-	// AllowRoot, if set before Serve, is asked about each folder of the unit,
-	// with the source's path, before Serve accepts it: those the source names
-	// at the start and as it adds worktrees, and those of the checkpoint. If
-	// it refuses one, Serve fails.
-	AllowRoot func(root string) error
 	// File, if set before Serve, makes the destination keep only that file, with the source's path, of a unit of its
 	// folder: it lists nothing else there, takes nothing but the file's contents and never deletes it, so that the
 	// folder's other files, such as other sessions, stay as they are.
@@ -59,7 +54,6 @@ type Destination struct {
 	written map[string]stamp // how the destination left the files it wrote
 	lines   int              // in the written file, which has a line for each change of a stamp
 	since   int64            // files it never wrote changed here if their ctime is this or later
-	all     bool             // every file changed here
 }
 
 // stamp is how a file looked once the destination had written it, kept in
@@ -216,10 +210,6 @@ func (d *Destination) writeStamps(paths map[string]bool) error {
 	_, err = file.Write(data)
 	return errors.Join(err, file.Close())
 }
-
-// SaveAsideReplaced makes every file here count as changed here, so that Serve saves aside whatever it replaces or
-// deletes, as for a copy that may have changes that the source never got.
-func (d *Destination) SaveAsideReplaced() { d.all = true }
 
 // Checkpoint returns the last applied barrier.
 func (d *Destination) Checkpoint() Checkpoint {
@@ -710,9 +700,6 @@ func (a *applier) changed(p string, info fs.FileInfo) bool {
 	if a.aside == "" || gitIndex(p) {
 		return false
 	}
-	if a.d.all {
-		return true
-	}
 	if written, ok := a.d.written[p]; ok {
 		return written != stampOf(p, info)
 	}
@@ -1054,15 +1041,9 @@ func (r *receiver) addRoots(roots []string) error {
 		if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" || !within(root, r.d.from) || r.d.File != "" && root != filepath.Dir(r.d.File) {
 			return fmt.Errorf("mirror: refusing the folder %q", root)
 		}
-		if slices.Contains(r.roots, root) {
-			continue
+		if !slices.Contains(r.roots, root) {
+			r.roots = append(r.roots, root)
 		}
-		if r.d.AllowRoot != nil {
-			if err := r.d.AllowRoot(root); err != nil {
-				return fmt.Errorf("mirror: refusing the folder %s: %w", root, err)
-			}
-		}
-		r.roots = append(r.roots, root)
 	}
 	return nil
 }

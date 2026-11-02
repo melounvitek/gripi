@@ -106,9 +106,6 @@ func TestControlCallsTheHelper(t *testing.T) {
 	if err := control.CloseSession(ctx, "s1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := control.ReleaseSession(ctx, "s1"); err != nil {
-		t.Fatal(err)
-	}
 
 	control.Close()
 	select {
