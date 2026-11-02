@@ -18,7 +18,10 @@ type sessionStore struct {
 	sessionfile.Store
 }
 
-var _ agent.Store = sessionStore{}
+var (
+	_ agent.Store           = sessionStore{}
+	_ agent.ToolPathsReader = sessionStore{}
+)
 
 func (store sessionStore) Exists(key string) bool {
 	_, err := os.Stat(key)
