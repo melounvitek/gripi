@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,6 +76,51 @@ func TestNoSessionMovesOnACopyThatHidesTheGatewaysOwnFiles(t *testing.T) {
 		if err := workers.Move(context.Background(), key, repository, "beelink", prepare); !refused(err) || !strings.Contains(err.Error(), "would hide") {
 			t.Errorf("moving a session in the folder of %s = %v", name, err)
 		}
+	}
+}
+
+// Repositories that the previous version of Gripi left on workers only make the workers unavailable.
+func TestTheGatewayRunsWithoutWorkersWhileThePreviousVersionHasRepositoriesOnThem(t *testing.T) {
+	cfg, _, _ := fakePiConfig(t)
+	cfg.WorkerPlacementsPath = filepath.Join(t.TempDir(), "worker-placements.json")
+	previous := `[{"worker": "beelink", "unit": {"main": "/home/me/Work/app"}}]`
+	if err := os.WriteFile(cfg.WorkerPlacementsPath, []byte(previous), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	handler, workers, err := newGateway(cfg, remote.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.(interface{ Close(context.Context) error }).Close(context.Background())
+	if workers != nil {
+		t.Fatal("the gateway runs sessions on workers")
+	}
+	if !strings.Contains(logged.String(), "Workers are unavailable") || !strings.Contains(logged.String(), "/home/me/Work/app on beelink") {
+		t.Fatalf("log %q", logged.String())
+	}
+	socket := socketPath(t)
+	server, err := startLocalServer(handler.(interface{ Local() http.Handler }).Local(), socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	t.Setenv("GRIPI_SOCKET_PATH", socket)
+
+	if code, stdout, stderr := runCLI("send", "0a1-alpha", "Hello", "--json"); code != 0 {
+		t.Fatalf("gripi send = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, stdout, stderr := runCLI("wait", "0a1-alpha", "--timeout", "10"); code != 0 || !strings.Contains(stdout, "idle") {
+		t.Fatalf("gripi wait = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, _, stderr := runCLI("worker", "move", "0a1-alpha", "beelink"); code != 1 || !strings.Contains(stderr, "runs no sessions on workers") {
+		t.Fatalf("gripi worker move = %d, stderr %q", code, stderr)
+	}
+	if contents, _ := os.ReadFile(cfg.WorkerPlacementsPath); string(contents) != previous {
+		t.Fatalf("the placements changed to %s", contents)
 	}
 }
 

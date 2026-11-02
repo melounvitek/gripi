@@ -2,8 +2,10 @@ package worker
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,16 +77,38 @@ type record struct {
 	Stale   []staleMove `json:"stale,omitempty"`
 }
 
-// LoadPlacements reads the placements from the state file at path, which may not exist yet.
+// ErrPreviousPlacements is why the placements of the previous version of Gripi don't load: only that version can bring
+// their repositories back.
+var ErrPreviousPlacements = errors.New("the previous version of Gripi moved repositories to workers")
+
+// LoadPlacements reads the placements from the state file at path, which may not exist yet. The previous version of
+// Gripi kept whole repositories on workers there, as a list: an empty one is no placement, which the next change
+// replaces, but any other fails with ErrPreviousPlacements and stays as it is.
 func LoadPlacements(path string) (*Placements, error) {
 	placements := &Placements{file: state.NewFile(path)}
 	contents, found, err := placements.file.Read()
-	if err == nil && found {
-		if err = json.Unmarshal(contents, &placements.data); err != nil {
-			err = fmt.Errorf("parse %s: %w", path, err)
-		}
+	if err != nil || !found {
+		return placements, err
 	}
-	return placements, err
+	var previous []struct {
+		Worker string
+		Unit   struct{ Main string }
+	}
+	if json.Unmarshal(contents, &previous) == nil {
+		if len(previous) == 0 {
+			return placements, nil
+		}
+		var repositories []string
+		for _, placement := range previous {
+			repositories = append(repositories, placement.Unit.Main+" on "+placement.Worker)
+		}
+		return placements, fmt.Errorf("%w, as %s says: %s; bring them back with that version ('gripi worker return <folder>') before upgrading",
+			ErrPreviousPlacements, path, strings.Join(repositories, ", "))
+	}
+	if err := json.Unmarshal(contents, &placements.data); err != nil {
+		return placements, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return placements, nil
 }
 
 // Find returns the placement of the session whose key is key.
