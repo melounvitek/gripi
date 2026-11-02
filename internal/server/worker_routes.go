@@ -57,6 +57,12 @@ func (handler *Handler) Worker(placement WorkerPlacement) http.Handler {
 
 // reachesSession reports whether a request may touch a session: a worker's reaches only the sessions on that worker.
 func reachesSession(request *http.Request, key string) bool {
-	placement, fromWorker := request.Context().Value(workerKey{}).(WorkerPlacement)
+	placement, fromWorker := workerOf(request)
 	return !fromWorker || placement.Session(key)
+}
+
+// workerOf returns the placement of the worker whose gripi sent a request, if a worker's did.
+func workerOf(request *http.Request) (WorkerPlacement, bool) {
+	placement, fromWorker := request.Context().Value(workerKey{}).(WorkerPlacement)
+	return placement, fromWorker
 }

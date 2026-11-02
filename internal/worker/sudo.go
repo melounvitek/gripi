@@ -16,8 +16,11 @@ import (
 // ctx ends, and returns sudo's exit status.
 func (manager *Manager) Sudo(ctx context.Context, key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
 	placement, placed := manager.options.Placements.Find(key)
-	if !placed || placement.Stage != "" {
-		return 0, refuse("the session is coming back from its worker; run the command again once it runs on main")
+	if !placed {
+		return 0, refuse("the session runs on main now; run the command again")
+	}
+	if placement.Stage != "" {
+		return 0, refuse("the session is coming back from worker %s; run the command again once it runs on main", placement.Worker)
 	}
 	manager.mu.Lock()
 	var conn link
@@ -26,7 +29,7 @@ func (manager *Manager) Sudo(ctx context.Context, key, cwd string, argv []string
 	}
 	manager.mu.Unlock()
 	if conn == nil {
-		return 0, fmt.Errorf("worker %s disconnected", placement.Worker)
+		return 0, fmt.Errorf("worker %s disconnected; run the command again once Gripi reaches it", placement.Worker)
 	}
 	return conn.Sudo(ctx, sessionID(key), cwd, argv, password, stdout, stderr)
 }

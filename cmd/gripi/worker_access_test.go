@@ -184,7 +184,7 @@ func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 		t.Fatalf("gripi send = %d, stderr %q, session %+v", code, stderr, session)
 	}
 	for _, command := range [][]string{{"show", "0a1-beta"}, {"send", beta, "Hello"}, {"tag", beta, "from-worker"}} {
-		if code, stdout, stderr := runCLI(command...); code != 1 || stdout != "" || !strings.Contains(stderr, "no session matches") {
+		if code, stdout, stderr := runCLI(command...); code != 1 || stdout != "" || !strings.Contains(stderr, "matches no session on worker beelink, where gripi reaches only the sessions on beelink; ask the user to run the command on main") {
 			t.Fatalf("gripi %q on a session on main = %d, stdout %q, stderr %q", command, code, stdout, stderr)
 		}
 	}

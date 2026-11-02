@@ -479,12 +479,16 @@ func connect(reference string) (*gatewayClient, gateway.LocalSession, error) {
 
 // session finds the one session a path, an ID or an ID prefix refers to.
 func (client *gatewayClient) session(reference string) (gateway.LocalSession, error) {
-	sessions, err := client.sessions("")
-	if err != nil {
+	var payload struct {
+		Sessions []gateway.LocalSession `json:"sessions"`
+		// Worker names the worker where this gripi runs, which reaches only the sessions there.
+		Worker string `json:"worker"`
+	}
+	if err := client.get("/sessions", &payload); err != nil {
 		return gateway.LocalSession{}, err
 	}
 	var matches []gateway.LocalSession
-	for _, session := range sessions {
+	for _, session := range payload.Sessions {
 		if session.Path == reference || session.ID == reference {
 			return session, nil
 		}
@@ -494,6 +498,9 @@ func (client *gatewayClient) session(reference string) (gateway.LocalSession, er
 	}
 	switch len(matches) {
 	case 0:
+		if payload.Worker != "" {
+			return gateway.LocalSession{}, fmt.Errorf("%q matches no session on worker %s, where gripi reaches only the sessions on %[2]s; ask the user to run the command on main", reference, payload.Worker)
+		}
 		return gateway.LocalSession{}, fmt.Errorf("no session matches %q; 'gripi list --all' shows every session", reference)
 	case 1:
 		return matches[0], nil

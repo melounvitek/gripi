@@ -727,7 +727,7 @@ func TestSudoRunsTheCommandOnTheWorkerOfTheSession(t *testing.T) {
 	if err := rig.manager.options.Placements.SetStage(rig.key, releasing); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) {
+	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) || !strings.Contains(err.Error(), "worker beelink") {
 		t.Fatalf("Sudo in a session that is coming back = %v", err)
 	}
 }

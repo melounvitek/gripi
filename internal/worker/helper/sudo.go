@@ -106,19 +106,19 @@ func Sudo(runtimeDir string, input io.Reader, stdout, stderr io.Writer) (int, er
 	command := exec.CommandContext(ctx, cmp.Or(run.Sudo, "/usr/bin/sudo"), append([]string{"-A", "-k", "-p", sudoPrompt, "--"}, run.Args...)...)
 	// Stdin stays nil, which reads /dev/null.
 	command.Env = append(os.Environ(), "SUDO_ASKPASS="+executable, "GRIPI_SUDO_TOKEN="+run.Token, "GRIPI_SOCKET_PATH="+filepath.Join(runtimeDir, askpassSocket))
-	command.Stdout, command.Stderr = stdout, stderr
+	// Through pipes, which WaitDelay stops reading, so that what the command leaves running can't keep main waiting.
+	command.Stdout, command.Stderr = struct{ io.Writer }{stdout}, struct{ io.Writer }{stderr}
 	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
 	command.WaitDelay = 10 * time.Second
 	if err := startInCgroup(command, run.Cgroup); err != nil {
 		return 0, fmt.Errorf("start sudo: %w", err)
 	}
-	err = command.Wait()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		if status := exit.Sys().(syscall.WaitStatus); status.Signaled() {
-			return 128 + int(status.Signal()), nil
-		}
-		return exit.ExitCode(), nil
+	if err := command.Wait(); command.ProcessState == nil {
+		return 0, err
 	}
-	return 0, err
+	status := command.ProcessState.Sys().(syscall.WaitStatus)
+	if status.Signaled() {
+		return 128 + int(status.Signal()), nil
+	}
+	return status.ExitStatus(), nil
 }

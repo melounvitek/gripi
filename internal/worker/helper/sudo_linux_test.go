@@ -99,6 +99,24 @@ func TestSudoRunsTheCommandInTheSessionsViewAndCgroupWithTheOfferedPassword(t *t
 		t.Fatalf("askpass answered %q", answers)
 	}
 
+	// What the command leaves running keeps main waiting at most a few seconds, as on main.
+	command, _, output, _ = rig.sudoRun(sudo, rig.offerSudo("s1", "t4", "secret", repository, "sh", "-c", "sleep 1000 & echo started"), "t4")
+	ended := make(chan string, 1)
+	go func() {
+		var printed strings.Builder
+		output.WriteTo(&printed)
+		command.Wait()
+		ended <- printed.String()
+	}()
+	select {
+	case printed := <-ended:
+		if printed != "started\n" || command.ProcessState.ExitCode() != 0 {
+			t.Fatalf("the command printed %q and exited with %d", printed, command.ProcessState.ExitCode())
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("gripi worker sudo waits for what the command left running")
+	}
+
 	// The command stops when main stops waiting for it, and with the session.
 	stopped := func(token string, stop func(input *os.File)) {
 		t.Helper()

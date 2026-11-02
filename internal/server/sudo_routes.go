@@ -186,7 +186,7 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		return
 	}
 	var worker, user string
-	if placement, fromWorker := request.Context().Value(workerKey{}).(WorkerPlacement); fromWorker {
+	if placement, fromWorker := workerOf(request); fromWorker {
 		location, _ := app.workers.Location(session)
 		worker, user = placement.Name(), location.User
 	}
