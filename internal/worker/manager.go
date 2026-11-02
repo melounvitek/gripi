@@ -753,6 +753,9 @@ type WorkerPlacement struct {
 	worker  string
 }
 
+// Name names the worker.
+func (placement WorkerPlacement) Name() string { return placement.worker }
+
 // Session reports whether a session runs on the worker.
 func (placement WorkerPlacement) Session(key string) bool {
 	found, placed := placement.manager.options.Placements.Find(key)

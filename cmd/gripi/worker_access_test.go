@@ -25,6 +25,8 @@ func (placement fakePlacement) Session(key string) bool {
 	return slices.Contains(placement.sessions, key)
 }
 
+func (fakePlacement) Name() string { return "beelink" }
+
 // Settings can put each of the gateway's files and folders anywhere in the home folder, and no session may move to a
 // worker on a copy that would hide one there.
 func TestNoSessionMovesOnACopyThatHidesTheGatewaysOwnFiles(t *testing.T) {

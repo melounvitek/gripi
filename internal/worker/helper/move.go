@@ -431,7 +431,7 @@ func (s *server) host(m *move) (*hostProcess, error) {
 	config := hostConfig{
 		Move: m.id, Instance: s.instance, RuntimeDir: s.options.RuntimeDir, Home: s.options.Home, Copy: s.copyFolder(m.id), Seeds: s.seeds(m.id),
 		Unit:   mirror.Unit{Main: m.Roots[0], Worktrees: m.Roots[1:], GitDir: m.Repository, Within: m.Private},
-		Docker: dockerproxy.Options{Listen: s.dockerSocket(m), Upstream: s.options.DockerUpstream},
+		Docker: dockerproxy.Options{Listen: s.dockerSocket(m), Upstream: s.options.DockerUpstream, Worker: s.options.Name, User: currentUser()},
 	}
 	// Docker sees the copy and the worker user's home folder where the view shows them at main's paths.
 	for _, root := range m.Private {

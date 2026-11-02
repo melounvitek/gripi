@@ -54,7 +54,9 @@ func (workers *fakeWorkers) onWorker(key string) bool {
 	return workers.placed[key]
 }
 
-// Session tells the gripi commands of beelink which sessions run there.
+// Name and Session tell the gripi commands of beelink which sessions run there.
+func (workers *fakeWorkers) Name() string { return "beelink" }
+
 func (workers *fakeWorkers) Session(key string) bool {
 	return workers.onWorker(key)
 }

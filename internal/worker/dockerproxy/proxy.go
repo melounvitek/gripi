@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -27,6 +28,8 @@ type Options struct {
 	// the paths in Docker's answers back, by the longest To. The symbolic links in the paths of requests are followed
 	// first, as the process sees them, because Docker would follow them where it runs.
 	Mappings []Mapping
+	// Worker and User are the worker that the proxy serves and its user, whom it names when it can't reach Docker.
+	Worker, User string
 }
 
 // Mapping names two absolute folders: From as the process sees it, and To as Docker does.
@@ -87,6 +90,10 @@ func Serve(ctx context.Context, options Options) error {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			var dial *net.OpError
+			if errors.As(err, &dial) && dial.Op == "dial" {
+				err = errors.New(Unusable(options.Worker, options.User, dial))
+			}
 			fail(w, http.StatusBadGateway, err)
 		},
 	}

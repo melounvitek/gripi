@@ -464,6 +464,18 @@ func TestAMovesSessionsReachDockerAtTheCopysPaths(t *testing.T) {
 	if got, want := strings.TrimSpace(<-created), `{"HostConfig":{"Binds":["`+rig.copy("m1", repository)+`:/x","`+rig.own+`/.cache:/y"]}}`; got != want {
 		t.Errorf("Docker got %s, want %s", got, want)
 	}
+
+	// Once Docker can't be reached, the session learns where it runs, as whom, and what an admin of the worker can do.
+	os.Remove(upstream)
+	if response, err = client.Get("http://docker/v1.52/containers/json"); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	host, _ := os.Hostname()
+	if want := fmt.Sprintf("sessions on worker %s run as %s, who can't use Docker there", host, rig.hello.User); response.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), want) {
+		t.Fatalf("without Docker, /containers/json = %s %s; want %q", response.Status, body, want)
+	}
 }
 
 // A new copy of a repository takes the folders that Git ignores, such as node_modules, from the latest earlier copy

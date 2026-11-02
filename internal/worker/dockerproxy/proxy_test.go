@@ -512,6 +512,26 @@ func TestServesPrivateSocketForTCPEndpoints(t *testing.T) {
 	}
 }
 
+// An agent whose Docker can't be reached learns from the docker CLI why, and what an admin of the worker can do.
+func TestSaysWhereTheSessionRunsWhenDockerCantBeReached(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "docker.sock")
+	client, _ := serve(t, dockerproxy.Options{
+		Listen: filepath.Join(t.TempDir(), "proxy.sock"), Upstream: "unix://" + missing, Mappings: []dockerproxy.Mapping{{From: from, To: to}},
+		Worker: "beelink", User: "gripi",
+	})
+	response, err := client.Get("http://docker/v1.52/containers/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var answer struct{ Message string }
+	json.NewDecoder(response.Body).Decode(&answer)
+	if want := "Gripi's Docker proxy: sessions on worker beelink run as gripi, who can't use Docker there (dial unix " + missing + ": connect: no such file or directory). " +
+		"An admin of beelink can install or start Docker there, or set up rootless Docker for gripi"; response.StatusCode != http.StatusBadGateway || answer.Message != want {
+		t.Fatalf("status %d, %q; want %q", response.StatusCode, answer.Message, want)
+	}
+}
+
 func TestRefusesUnsupportedEndpoints(t *testing.T) {
 	for _, upstream := range []string{"ssh://user@host", "npipe:////./pipe/docker_engine", ""} {
 		err := dockerproxy.Serve(context.Background(), dockerproxy.Options{

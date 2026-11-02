@@ -318,7 +318,7 @@ gripi worker add gripi@beelink.example.ts.net
 
 `add` checks the system, Git and systemd, installs Gripi’s helper there and checks that it can make private views, also when the worker user’s home folder has main’s path, saying what to do when the system blocks them. It fails when the worker’s user cannot create Pi’s agent folder at its path on main, as the sessions there see it, or when the worker shares main’s files, as main itself as the same user or a home folder mounted on both would: the worker’s files would replace main’s, such as Pi’s logins. Main checks both again whenever it connects. A worker that is main as another user is fine, because the sessions there see that user’s home folder at main’s. The worker is named after the first part of the host name, `beelink` here, unless `--name` names it. `gripi worker list` lists the workers.
 
-`add` also checks, under the worker user’s systemd as the helper runs, whether the worker’s user can use the worker’s Docker. When the worker has Docker but its user can’t use it, `add` still adds the worker, and says why and what an admin of the worker can do. Main checks Docker again whenever it connects, says what it found in the gateway’s log when the sessions can’t use Docker, and **Run on worker…** shows it for the chosen worker, once main has connected to it.
+`add` also checks, under the worker user’s systemd as the helper runs, whether the worker’s user can use the worker’s Docker. When the worker has Docker but its user can’t use it, `add` still adds the worker, and says why and what an admin of the worker can do. Main checks Docker again whenever it connects, says what it found in the gateway’s log when the sessions can’t use Docker, and **Run on worker…** shows it for the chosen worker, once main has connected to it. When a session there runs Docker that can’t be reached, its Docker socket answers with the same explanation, which the `docker` CLI shows.
 
 ### What a worker gets
 
@@ -338,7 +338,7 @@ Pi on a worker gets the environment variables that it gets on main, including th
 
 Every `localhost` port in the URLs of Pi’s `models.json` and `mcp.json`, such as a local model proxy or an MCP server, reaches the same port on main from the worker while main is connected to it. A port that cannot be forwarded, such as one that something on the worker uses, keeps main from connecting.
 
-A `gripi` socket of the worker’s own is forwarded to the path of main’s socket on the worker, so the [`gripi` command](../README.md#command-line) works in sessions there. It reaches only the sessions on that worker, and refuses `gripi sudo`, `gripi claim` and new sessions, which would start on main.
+A `gripi` socket of the worker’s own is forwarded to the path of main’s socket on the worker, so the [`gripi` command](../README.md#command-line) works in sessions there. It reaches only the sessions on that worker, and refuses `gripi sudo`, `gripi claim` and new sessions, which would start on main, with what to do instead.
 
 ### Moving a session
 
