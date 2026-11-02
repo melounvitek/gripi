@@ -85,6 +85,7 @@ func buildGripi(t *testing.T) string {
 type unitHelper struct {
 	*fakeMain
 	runtimeDir string
+	hello      helper.Message
 	instance   string
 	pi         string
 }
@@ -132,7 +133,7 @@ func startUnitHelperWith(t *testing.T, lease time.Duration, env []string, flags 
 	go func() { main.stopped(command.Wait()) }()
 	hello := main.next()
 	main.answer(main.nextPing())
-	return &unitHelper{fakeMain: main, runtimeDir: runtimeDir, instance: hello.Instance, pi: pi}
+	return &unitHelper{fakeMain: main, runtimeDir: runtimeDir, hello: hello, instance: hello.Instance, pi: pi}
 }
 
 // createSession starts the fake Pi with env on top of its own variables, and returns the PIDs of it and of the

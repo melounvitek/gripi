@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,6 +41,40 @@ func fakeDocker(t *testing.T) (socket string, created <-chan string) {
 	daemon.Start()
 	t.Cleanup(daemon.Close)
 	return socket, bodies
+}
+
+// Main learns on connecting whom the sessions run as and whether they can use Docker, and if not, what to do about it.
+func TestTheHelloSaysWhomSessionsRunAsAndWhetherTheyCanUseDocker(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root may use any socket")
+	}
+	socket, _ := fakeDocker(t)
+	locked := filepath.Join(t.TempDir(), "locked.sock")
+	listener, err := net.Listen("unix", locked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ upstream, docker string }{
+		{"unix://" + socket, "available"},
+		{"unix://" + locked, "sessions on worker beelink run as " + me.Username + ", who can't use Docker there (dial unix " + locked + ": connect: permission denied). " +
+			"An admin of beelink can add " + me.Username + " to the docker group or set up rootless Docker for it, then restart " + me.Username +
+			"'s processes so they get the group: sudo systemctl restart user@$(id -u " + me.Username + ").service"},
+		{"unix:///nonexistent/docker.sock", "sessions on worker beelink run as " + me.Username + ", who can't use Docker there (dial unix /nonexistent/docker.sock: connect: no such file or directory). " +
+			"An admin of beelink can install or start Docker there, or set up rootless Docker for " + me.Username},
+	} {
+		unit := startUnitHelperWith(t, helper.DefaultLease, []string{"DOCKER_HOST=" + test.upstream}, "--name", "beelink")
+		if unit.hello.User != me.Username || unit.hello.Docker != test.docker {
+			t.Errorf("with Docker at %s, the hello says user %q, Docker %q; want %q", test.upstream, unit.hello.User, unit.hello.Docker, test.docker)
+		}
+	}
 }
 
 func TestSessionsOutsideTheViewKeepTheirDockerHost(t *testing.T) {

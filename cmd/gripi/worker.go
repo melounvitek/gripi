@@ -23,6 +23,7 @@ import (
 	gateway "github.com/melounvitek/gripi/internal/server"
 	"github.com/melounvitek/gripi/internal/state"
 	remote "github.com/melounvitek/gripi/internal/worker"
+	"github.com/melounvitek/gripi/internal/worker/dockerproxy"
 )
 
 const workerHelp = `Usage:
@@ -61,8 +62,9 @@ unprivileged user namespaces, which add checks with Gripi's helper there.
 add fails when the worker's user cannot create Pi's folder
 (~/.pi/agent) at its path here, or when the worker shares this machine's
 files, as this machine itself as the same user or a home folder mounted on
-both would. The worker will hold a full copy of Pi's configuration,
-including logins; keeping it secure is up to you.
+both would. When the worker's user can't use the worker's Docker, add says
+why and what an admin of the worker can do. The worker will hold a full copy
+of Pi's configuration, including logins; keeping it secure is up to you.
 
 list prints each worker's name and SSH destination.
 
@@ -141,11 +143,14 @@ type worker struct {
 	Destination string `json:"destination"`
 }
 
-// workerProbe prints the worker's system, architecture, user and home, then "git" if it has Git and "systemd" if
-// systemd-run can start a command under the user's systemd with cgroup v2.
+// workerProbe prints the worker's system, architecture, user and home, then "git" if it has Git, "systemd" if
+// systemd-run can start a command under the user's systemd with cgroup v2, and if it has the docker CLI, "docker: "
+// and the last line of `docker version` under the user's systemd, where the helper runs and the groups of a new login
+// may be missing: "available" or why Docker can't be reached.
 // ssh runs it in the worker user's shell, so it uses only what both sh and fish accept.
 const workerProbe = `uname -s; uname -m; id -un; echo "$HOME"; command -v git >/dev/null && echo git; ` +
-	`systemd-run --user --pipe --quiet test -f /sys/fs/cgroup/cgroup.controllers && echo systemd`
+	`systemd-run --user --pipe --quiet test -f /sys/fs/cgroup/cgroup.controllers && echo systemd; ` +
+	`systemd-run --user --pipe --quiet sh -c 'command -v docker > /dev/null && echo "docker: $(timeout 10 docker version --format available 2>&1 | tail -n 1)"'`
 
 // workerHelper is where `gripi worker add` installs the helper on a worker to check the private views there: this
 // executable, in remote.DefaultInstallDir, unless a test changes it.
@@ -256,6 +261,11 @@ func addWorker(arguments []string, stdout, stderr io.Writer) int {
 The worker will hold a full copy of Pi's configuration, including logins.
 Keeping it secure is up to you.
 `, *name, destination)
+	for _, line := range lines[4:] {
+		if reason, found := strings.CutPrefix(line, "docker: "); found && reason != "available" {
+			fmt.Fprintf(stdout, "Docker: %s\n", dockerproxy.Unusable(*name, user, errors.New(reason)))
+		}
+	}
 	return 0
 }
 

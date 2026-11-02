@@ -64,14 +64,14 @@ export class WorkerPickerController {
     const name = main.split("/").filter(Boolean).pop();
     const copied = roots.map((root) => (root === main ? name : this.callbacks.homePath(root)));
     const listed = copied.length > 1 ? `${copied.slice(0, -1).join(", ")} and ${copied.at(-1)}` : copied[0];
-    this.renderFacts([
+    this.moveFacts = [
       ["moves", `this session only, to a private copy of ${name}`],
       // The main checkout holds the Git folder, which comes along without it too.
       ["copy", roots.includes(main) ? listed : `${listed}, with ${name}'s Git folder`],
       ["ignored", "files up to 10 MB; folders such as node_modules/ come from the worker's earlier copies"],
       ["on main", `${name}'s other sessions keep running`],
       ["return", "brings its changes back; main keeps what it changed too, and the worker's version is kept aside"]
-    ]);
+    ];
     this.go.hidden = false;
     this.choose(Math.max(0, this.workers.findIndex((worker) => worker.state === "connected")));
   }
@@ -123,7 +123,11 @@ export class WorkerPickerController {
     if (index < 0 || !this.workers.length) return;
     this.cursor = (index + this.workers.length) % this.workers.length;
     movePickerCursor(this.list, this.cursor);
-    this.go.textContent = `move to ${this.workers[this.cursor].name}`;
+    const { name, docker } = this.workers[this.cursor];
+    this.go.textContent = `move to ${name}`;
+    // The worker says whether its sessions can use Docker when Gripi connects to it.
+    const dockerFact = !docker ? `checked once Gripi connects to ${name}` : docker === "available" ? `available on ${name}` : `not available on ${name}: ${docker}`;
+    this.renderFacts([...this.moveFacts, ["docker", dockerFact]]);
   }
 
   renderForward() {

@@ -26,6 +26,8 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	home := flags.String("home", "", "")
 	// Gripi's folder on the worker, as Docker sees it, for the moves' copies.
 	dataDir := flags.String("data-dir", "", "")
+	// Main's name for the worker, which the helper's messages give; the host name when unset.
+	name := flags.String("name", "", "")
 	// The cgroup that systemd delegated to the unit, and the worker user's own home folder, which serve passes on to
 	// itself in the view.
 	cgroup := flags.String("cgroup", "", "")
@@ -35,7 +37,10 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	} else if len(positional) > 0 {
 		return usageError(stderr, "worker", "serve takes no arguments besides its flags")
 	}
-	options := helper.Options{Lease: *lease, Cgroup: *cgroup, Home: *home, OwnHome: cmp.Or(*ownHome, *home), DataDir: *dataDir}
+	options := helper.Options{Lease: *lease, Cgroup: *cgroup, Home: *home, OwnHome: cmp.Or(*ownHome, *home), DataDir: *dataDir, Name: *name}
+	if options.Name == "" {
+		options.Name, _ = os.Hostname()
+	}
 	var err error
 	if options.RuntimeDir, err = runtimeDirectory(*runtimeDir); err != nil {
 		return failure(stderr, "worker", err)

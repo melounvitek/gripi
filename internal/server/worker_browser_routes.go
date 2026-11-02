@@ -14,6 +14,9 @@ type Worker struct {
 	State string `json:"state"`
 	// GoneAt is when an unreachable worker is gone.
 	GoneAt time.Time `json:"gone_at,omitzero"`
+	// Docker is "available" when the worker's sessions can use Docker, and otherwise says why they can't and what an
+	// admin of the worker can do, as the worker said when this machine last connected to it; empty until then.
+	Docker string `json:"docker,omitempty"`
 }
 
 // WorkerLocation is where a session runs while it is on a worker, or is moving to one.

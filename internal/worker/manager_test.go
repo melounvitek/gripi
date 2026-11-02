@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -129,6 +131,8 @@ func (link *fakeLink) call(format string, arguments ...any) error {
 	return nil
 }
 
+func (link *fakeLink) User() string                                    { return "gripi" }
+func (link *fakeLink) Docker() string                                  { return link.rig.docker }
 func (link *fakeLink) ApplyAuth(context.Context, string, string) error { return nil }
 func (link *fakeLink) Lost() <-chan struct{}                           { return link.lost }
 func (link *fakeLink) GoneAt() time.Time                               { return link.goneAt }
@@ -258,6 +262,7 @@ type moveRig struct {
 	events   []string
 	failing  map[string]error // what fakeLink's calls that start with a key fail with
 	seeding  chan struct{}    // if set, closed when a move seeds its copy, which then waits for the move's end
+	docker   string           // what the worker says of Docker when main connects
 	links    []*fakeLink
 	prepared []Move
 	created  []Session
@@ -693,6 +698,35 @@ func TestASessionOnALostWorkerContinuesOnMainOnceTheWorkerIsGone(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the stale copy was not deleted")
 		}
+	}
+}
+
+// Main remembers whom the sessions on a worker run as and whether they can use Docker, as the worker said when main
+// last connected to it, and logs why they can't.
+func TestTheStatusOfAWorkerSaysWhetherItsSessionsCanUseDocker(t *testing.T) {
+	rig := newMoveRig(t)
+	if status := rig.manager.Status("beelink"); status.User != "" || status.Docker != "" {
+		t.Fatalf("before main connected, the status is %+v", status)
+	}
+	rig.docker = "sessions on worker beelink run as gripi, who can't use Docker there (permission denied)"
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	if err := rig.manager.Reconnect(context.Background(), "beelink"); err != nil {
+		t.Fatal(err)
+	}
+	link := rig.link()
+	link.goneAt = rig.now
+	close(link.lost)
+	for rig.manager.Status("beelink").State == Connected {
+		time.Sleep(time.Millisecond)
+	}
+	if status := rig.manager.Status("beelink"); status.User != "gripi" || status.Docker != rig.docker {
+		t.Fatalf("the status = %+v", status)
+	}
+	if !strings.Contains(logged.String(), "Docker: "+rig.docker) {
+		t.Fatalf("the log says %q", logged.String())
 	}
 }
 

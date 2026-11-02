@@ -46,6 +46,9 @@ type Status struct {
 	State State `json:"state"`
 	// GoneAt is when a worker that main lost is gone, unless main has reached it again since.
 	GoneAt time.Time `json:"gone_at,omitzero"`
+	// User and Docker are what the worker said when main last connected to it (Control's), and empty until then.
+	User   string `json:"user,omitempty"`
+	Docker string `json:"docker,omitempty"`
 }
 
 // refusal is an error that refuses what was asked, such as moving a session that is moving already, rather than
@@ -118,6 +121,8 @@ type ManagerOptions struct {
 // link is main's connection to a worker as the manager uses it: a *Conn, or a fake in tests.
 type link interface {
 	authApplier
+	User() string
+	Docker() string
 	Lost() <-chan struct{}
 	GoneAt() time.Time
 	Forward(ctx context.Context, port Forward) (cancel func() error, err error)
@@ -179,6 +184,7 @@ type remote struct {
 	connecting   sync.Mutex // held while connecting, so that others wait for the connection
 	state        State
 	goneAt       time.Time // when the worker is gone, after main lost its connection
+	user, docker string    // as the worker said when main last connected to it
 	conn         link
 	installation *Installation
 	stopSocket   func() error
@@ -244,7 +250,7 @@ func (manager *Manager) Status(name string) Status {
 	if worker == nil {
 		return Status{State: Disconnected}
 	}
-	status := Status{State: worker.state, GoneAt: worker.goneAt}
+	status := Status{State: worker.state, GoneAt: worker.goneAt, User: worker.user, Docker: worker.docker}
 	if worker.state == Disconnected && !worker.goneAt.IsZero() {
 		status.State = Gone
 		if manager.options.Clock().Before(worker.goneAt) {
@@ -403,7 +409,11 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 	manager.mu.Lock()
 	// The new helper runs, so the helper of a lost connection has stopped.
 	worker.conn, worker.installation, worker.stopSocket, worker.state, worker.goneAt = conn, installation, stopSocket, Connected, time.Time{}
+	worker.user, worker.docker = conn.User(), conn.Docker()
 	manager.mu.Unlock()
+	if docker := conn.Docker(); docker != "" && docker != "available" {
+		log.Printf("Docker: %s", docker)
+	}
 	manager.logins.add(worker.name, conn)
 	go func() {
 		<-conn.Lost()
@@ -417,6 +427,7 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 // its gripi socket to the gateway.
 func (manager *Manager) open(ctx context.Context, name string) (link, *Installation, func() error, error) {
 	options := manager.options.Connection
+	options.Name = name
 	var err error
 	if options.Destination, err = manager.options.Destination(name); err != nil {
 		return nil, nil, nil, err

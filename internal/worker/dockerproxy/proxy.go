@@ -148,6 +148,31 @@ func dialer(upstream string) (func(ctx context.Context, network, address string)
 	}, nil
 }
 
+// Check returns nil when Docker's endpoint upstream takes connections, and otherwise why not.
+func Check(ctx context.Context, upstream string) error {
+	dial, err := dialer(upstream)
+	if err != nil {
+		return err
+	}
+	connection, err := dial(ctx, "", "")
+	if err == nil {
+		connection.Close()
+	}
+	return err
+}
+
+// Unusable says that the sessions on the worker of a name, which run as user, can't use Docker, why, and what an
+// admin of the worker can do.
+func Unusable(worker, user string, why error) string {
+	advice := "install or start Docker there, or set up rootless Docker for " + user
+	// The docker CLI says so too.
+	if strings.Contains(why.Error(), "permission denied") {
+		advice = fmt.Sprintf("add %[1]s to the docker group or set up rootless Docker for it, then restart %[1]s's processes so they get the group: "+
+			"sudo systemctl restart user@$(id -u %[1]s).service", user)
+	}
+	return fmt.Sprintf("sessions on worker %s run as %s, who can't use Docker there (%v). An admin of %s can %s", worker, user, why, worker, advice)
+}
+
 // Upstream returns the Docker endpoint that the docker CLI uses with env: DOCKER_HOST, else the current context's
 // endpoint, else the default socket.
 func Upstream(env []string) string {

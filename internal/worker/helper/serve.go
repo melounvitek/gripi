@@ -14,18 +14,22 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/worker/dockerproxy"
 	"golang.org/x/sys/unix"
 )
 
 // Message is one line of the control protocol, newline-delimited JSON in both directions. Each side numbers its own
 // requests and answers the other's with a Message that has the request's ID and no type:
 //
-//   - helper to main: {"type":"hello","instance":…,"version":…} once, then {"id":N,"type":"ping"} every second;
+//   - helper to main: {"type":"hello","instance":…,"version":…,"user":…,"docker":…} once, then {"id":N,"type":"ping"}
+//     every second;
 //   - main to helper: {"id":N,"type":"session.create","session":…,"cwd":…,"args":[…],"env":["NAME=value",…]},
 //     session.close and session.release with "session", and auth.apply with "path" and "contents";
 //   - main to helper, for a session that moves to the worker on a private copy of its repository (see move.go):
@@ -49,6 +53,10 @@ type Message struct {
 	Contents string   `json:"contents,omitempty"`
 	OK       bool     `json:"ok,omitempty"`
 	Error    string   `json:"error,omitempty"`
+	// User is whom the sessions run as. Docker is "available" when they can use Docker, and otherwise says why they
+	// can't and what an admin of the worker can do; it is empty when the helper has no Docker endpoint.
+	User   string `json:"user,omitempty"`
+	Docker string `json:"docker,omitempty"`
 
 	Move       string    `json:"move,omitempty"`
 	Repository string    `json:"repository,omitempty"`
@@ -106,6 +114,8 @@ type Options struct {
 	Home, OwnHome, DataDir string
 	// DockerUpstream is the Docker endpoint that each move's Docker socket reaches, if any.
 	DockerUpstream string
+	// Name is main's name for the worker, which the helper's messages give.
+	Name string
 }
 
 type server struct {
@@ -158,7 +168,7 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	go s.write(output)
 	closed := make(chan struct{})
 	go s.read(input, closed)
-	s.send(Message{Type: "hello", Instance: s.instance, Version: options.Version})
+	s.send(Message{Type: "hello", Instance: s.instance, Version: options.Version, User: currentUser(), Docker: s.docker(ctx)})
 	err = s.keepLease(ctx, closed)
 	s.mu.Lock()
 	s.stopping = true
@@ -199,6 +209,26 @@ func lockRuntimeDir(dir string) (unlock func(), err error) {
 		os.Remove(path)
 	}
 	return func() { lock.Close() }, nil
+}
+
+// docker says whether the sessions can use Docker, as the hello does.
+func (s *server) docker(ctx context.Context) string {
+	if s.options.DockerUpstream == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := dockerproxy.Check(ctx, s.options.DockerUpstream); err != nil {
+		return dockerproxy.Unusable(s.options.Name, currentUser(), err)
+	}
+	return "available"
+}
+
+func currentUser() string {
+	if current, err := user.Current(); err == nil {
+		return current.Username
+	}
+	return strconv.Itoa(os.Getuid())
 }
 
 // keepLease pings main every second and returns when the lease expires, main closes the connection or ctx ends.

@@ -65,6 +65,9 @@ type Control struct {
 	close    sync.Once
 	lose     sync.Once
 
+	// What the helper's hello said: whom the sessions run as, and whether they can use Docker (helper.Message).
+	user, docker string
+
 	mu         sync.Mutex
 	lastID     uint64
 	pending    map[uint64]chan helper.Message
@@ -88,7 +91,7 @@ func NewControl(ctx context.Context, output io.Reader, input io.WriteCloser, ver
 			if message.Version != version {
 				return fmt.Errorf("the helper on the worker has version %s, not %s", message.Version, version)
 			}
-			control.instance = message.Instance
+			control.instance, control.user, control.docker = message.Instance, message.User, message.Docker
 		case <-control.closed:
 			return errors.New("the helper ended before it said hello")
 		case <-ctx.Done():
@@ -264,6 +267,13 @@ func (control *Control) request(ctx context.Context, request helper.Message) (he
 
 // Instance names the helper, so that streams reach only this one.
 func (control *Control) Instance() string { return control.instance }
+
+// User is whom the worker's sessions run as.
+func (control *Control) User() string { return control.user }
+
+// Docker is "available" when the worker's sessions can use Docker, and otherwise says why they can't and what an admin
+// of the worker can do.
+func (control *Control) Docker() string { return control.docker }
 
 // CreateSession starts Pi for a session, in the session's cgroup on the worker, and in its move's view if it has one.
 func (control *Control) CreateSession(ctx context.Context, session Session) error {
