@@ -39,7 +39,7 @@ Gateway commands:
   serve     Start the gateway
   password  Create the admin password if it is missing
   check     Check that this build works with this machine's Pi
-  worker    Manage computers that run sessions over SSH, and move repositories there
+  worker    Manage computers that run sessions over SSH, and move sessions there and back
 
 Run 'gripi help <command>' or 'gripi <command> --help' for details.
 `
@@ -101,7 +101,7 @@ settings but needs no running gateway.
 
 The gateway runs this on a new version before it updates to it.
 `},
-	{name: "worker", summary: "Manage computers that run sessions over SSH, and move repositories there", run: manageWorkers, help: workerHelp},
+	{name: "worker", summary: "Manage computers that run sessions over SSH, and move sessions there and back", run: manageWorkers, help: workerHelp},
 }
 
 func run(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {

@@ -1713,7 +1713,7 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 	if app.writeRPCError(response, err) {
 		return true
 	}
-	// The workers refuse to start a session on this machine in a session folder of a repository on a worker, for one.
+	// The workers refuse to start a session that is moving, or whose return has not finished, for one.
 	if refused(err) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": err.Error()})
 		return true

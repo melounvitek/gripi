@@ -290,7 +290,7 @@ export class WorkerController {
     return this.send("return", "/workers/return", {}, { worker: this.location?.worker, repository: this.location?.repository });
   }
 
-  // Asks the gateway to move the repository, which the block shows until the gateway answers.
+  // Asks the gateway to move the session or bring it back, which the block shows until the gateway answers.
   async send(action, url, fields, details) {
     if (this.pending) return false;
     const session = this.callbacks.sessionPath();

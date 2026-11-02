@@ -141,7 +141,7 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 	}
 }
 
-// Only Pi's sessions move to workers, so a Hermes session that started in a folder of a repository on a worker stays on
+// Only Pi's sessions move to workers, so a Hermes session that started in the folder of a session on a worker stays on
 // main, where only main's gripi commands reach it.
 func TestWorkerCommandsReachNoHermesSession(t *testing.T) {
 	project := t.TempDir()
