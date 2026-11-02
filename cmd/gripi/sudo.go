@@ -24,6 +24,10 @@ exit code. The password goes only to sudo, never to the agent.
 Each command needs the user's password again. The command reads no input, and
 Gripi keeps only the first 16 MiB of each of its outputs.
 
+In a session on a worker, the command runs as root on the worker, in the
+session's folders as the session sees them, and sudo there asks for the
+password of the worker's user.
+
 gripi sudo finds its session by PI_SESSION_FILE, which Pi's bash tool sets, or
 by HERMES_SESSION_ID, which Hermes's terminal sets.
 

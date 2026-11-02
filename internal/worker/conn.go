@@ -46,6 +46,8 @@ type Options struct {
 	// main's paths, such as the helper and the copies, runs in a private view in which Home shows the worker user's
 	// home folder (package view). Without it, they see the worker's files as they are.
 	Home string
+	// Sudo is the worker's sudo, which runs the commands of gripi sudo; /usr/bin/sudo when empty. Tests use a fake one.
+	Sudo string
 }
 
 // Conn is main's connection to a worker: ssh channels and forwards from its Pool, and the helper's Control.

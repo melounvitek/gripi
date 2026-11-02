@@ -36,6 +36,8 @@ type WorkerLocation struct {
 	// Waiting names the session on this machine whose step a move or return of the session waits for.
 	Waiting string       `json:"waiting,omitempty"`
 	Ports   []WorkerPort `json:"ports"`
+	// User is whom the worker's sessions run as, once this machine has connected to the worker.
+	User string `json:"user,omitempty"`
 }
 
 // Indicator is what a session's indicator shows: the worker's state, or copying while the session moves there.

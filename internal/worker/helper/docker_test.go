@@ -15,8 +15,8 @@ import (
 	"github.com/melounvitek/gripi/internal/worker/helper"
 )
 
-// fakeDocker serves Docker's /_ping on a Unix socket, and records the bodies of container creations.
-func fakeDocker(t *testing.T) (socket string, created <-chan string) {
+// fakeDocker serves Docker's /_ping on a Unix socket, and records the bodies of container creations, until stop.
+func fakeDocker(t *testing.T) (socket string, created <-chan string, stop func()) {
 	t.Helper()
 	socket = filepath.Join(t.TempDir(), "docker.sock")
 	listener, err := net.Listen("unix", socket)
@@ -40,7 +40,7 @@ func fakeDocker(t *testing.T) (socket string, created <-chan string) {
 	daemon.Listener = listener
 	daemon.Start()
 	t.Cleanup(daemon.Close)
-	return socket, bodies
+	return socket, bodies, daemon.Close
 }
 
 // Main learns on connecting whom the sessions run as and whether they can use Docker, and if not, what to do about it.
@@ -48,7 +48,7 @@ func TestTheHelloSaysWhomSessionsRunAsAndWhetherTheyCanUseDocker(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root may use any socket")
 	}
-	socket, _ := fakeDocker(t)
+	socket, _, _ := fakeDocker(t)
 	locked := filepath.Join(t.TempDir(), "locked.sock")
 	listener, err := net.Listen("unix", locked)
 	if err != nil {

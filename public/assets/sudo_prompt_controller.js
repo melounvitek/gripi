@@ -31,6 +31,8 @@ export class SudoPromptController {
       expiry: prompt.querySelector("[data-sudo-expiry]"),
       command: prompt.querySelector("[data-sudo-command]"),
       cwd: prompt.querySelector("[data-sudo-cwd]"),
+      workerTerm: prompt.querySelector("[data-sudo-worker-term]"),
+      worker: prompt.querySelector("[data-sudo-worker]"),
       password: prompt.querySelector("[data-sudo-password]"),
       error: prompt.querySelector("[data-sudo-error]")
     } : null;
@@ -70,7 +72,7 @@ export class SudoPromptController {
     const now = Date.now();
     const request = this.requests.find((each) => !this.finished.has(each.id) && Date.parse(each.expires_at) > now) || null;
     if (request?.id === this.request?.id) return;
-    const { prompt, form, command, cwd, password, error } = this.elements;
+    const { prompt, form, command, cwd, workerTerm, worker, password, error } = this.elements;
     // Decided before the editor goes, so that a message being typed doesn't go on in the password field.
     const focus = request && !this.request && this.canFocus();
     this.clearPassword();
@@ -88,6 +90,9 @@ export class SudoPromptController {
     }
     command.textContent = request.display;
     cwd.textContent = request.cwd;
+    // sudo on a worker asks for the password of the worker's user.
+    workerTerm.hidden = worker.hidden = !request.worker;
+    worker.textContent = request.worker ? `worker ${request.worker}, as root with ${request.user || "its user"}'s password` : "";
     this.ticker = setInterval(() => this.tick(), 1000);
     this.tick();
     // The first tick may already find it expired and show the next one.

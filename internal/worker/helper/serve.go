@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -36,6 +37,8 @@ import (
 //     move.prepare with "move", "repository", "roots" and "private", answered with the copy's folder as "path";
 //     move.seed, move.release, answered with "barriers", and move.delete with "move"; session.create with "move"
 //     too; and mirror.start with "move", and the session's file as "file" for the session file's mirror;
+//   - main to helper, for a command that gripi sudo runs as root (see sudo.go): sudo.offer with "session", "token",
+//     "password", "cwd" and "args", answered with the session's cgroup as "path" and what sudo runs as "args";
 //   - answers: {"id":N,"ok":true} or {"id":N,"ok":false,"error":"…"}.
 //
 // The streams that main opens to the helper start with a Message too, which names the helper's instance.
@@ -57,6 +60,9 @@ type Message struct {
 	// can't and what an admin of the worker can do; it is empty when the helper has no Docker endpoint.
 	User   string `json:"user,omitempty"`
 	Docker string `json:"docker,omitempty"`
+	// Token names the Password of a command that gripi sudo runs as root.
+	Token    string `json:"token,omitempty"`
+	Password string `json:"password,omitempty"`
 
 	Move       string    `json:"move,omitempty"`
 	Repository string    `json:"repository,omitempty"`
@@ -72,6 +78,7 @@ type Response struct {
 	OK       bool      `json:"ok"`
 	Error    string    `json:"error,omitempty"`
 	Path     string    `json:"path,omitempty"`
+	Args     []string  `json:"args,omitempty"`
 	Barriers *Barriers `json:"barriers,omitempty"`
 }
 
@@ -131,6 +138,8 @@ type server struct {
 	stopping bool // no session starts once Serve has started to kill them
 	sessions map[string]*session
 	moves    map[string]*move
+	// passwords wait for the askpass program of the sudo of a command that gripi sudo runs, by its token.
+	passwords map[string][]byte
 
 	cache sync.Mutex // held while moves take ignored folders from earlier copies or leave them
 }
@@ -154,6 +163,7 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	s := &server{
 		options: options, instance: hex.EncodeToString(instance), output: make(chan any, 64), done: make(chan struct{}),
 		pings: map[uint64]time.Duration{}, renewed: options.Clock(), sessions: map[string]*session{}, moves: map[string]*move{},
+		passwords: map[string][]byte{},
 	}
 	if s.options.Mirror == nil {
 		s.options.Mirror = s
@@ -164,6 +174,12 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	}
 	defer receives.Close()
 	go s.serveReceives(ctx, receives)
+	askpass, err := net.Listen("unix", filepath.Join(options.RuntimeDir, askpassSocket))
+	if err != nil {
+		return err
+	}
+	defer askpass.Close()
+	go http.Serve(askpass, http.HandlerFunc(s.answerAskpass))
 	defer close(s.done)
 	go s.write(output)
 	closed := make(chan struct{})
@@ -338,6 +354,13 @@ func (s *server) handle(request Message) {
 		}
 	case "move.delete":
 		err = s.deleteMove(request.Move)
+	case "sudo.offer":
+		var cgroup string
+		var args []string
+		if cgroup, args, err = s.offerSudo(request); err == nil {
+			s.send(Response{ID: request.ID, OK: true, Path: cgroup, Args: args})
+			return
+		}
 	case "session.close":
 		err = s.close(request.Session)
 	case "session.release":

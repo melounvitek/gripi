@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -178,6 +179,10 @@ func (workers *fakeWorkers) Notices(string) []gateway.WorkerNotice {
 	workers.mu.Lock()
 	defer workers.mu.Unlock()
 	return workers.notices
+}
+
+func (workers *fakeWorkers) Sudo(context.Context, string, string, []string, []byte, io.Writer, io.Writer) (int, error) {
+	return 0, errors.New("the fake worker runs no sudo")
 }
 
 func (workers *fakeWorkers) DismissNotices(context.Context, string) error {

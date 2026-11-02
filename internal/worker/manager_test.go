@@ -247,6 +247,11 @@ func (link *fakeLink) DeleteMove(_ context.Context, id string) error {
 	return link.call("delete %s", id)
 }
 
+func (link *fakeLink) Sudo(_ context.Context, session, cwd string, argv []string, password []byte, stdout, _ io.Writer) (int, error) {
+	io.WriteString(stdout, "ran\n")
+	return 3, link.call("sudo %s in %s: %s with %s", session, cwd, strings.Join(argv, " "), password)
+}
+
 // moveRig is main with a repository in its home folder, which has a linked worktree that a session used and another
 // one, and a manager whose worker beelink is a fakeLink. The worker's changes to a move's copy are simulated by
 // changing main's shadow of it, as the copy's mirror would.
@@ -698,6 +703,32 @@ func TestASessionOnALostWorkerContinuesOnMainOnceTheWorkerIsGone(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the stale copy was not deleted")
 		}
+	}
+}
+
+// gripi sudo in a session on a worker runs the command there, but not once the session is on its way back.
+func TestSudoRunsTheCommandOnTheWorkerOfTheSession(t *testing.T) {
+	rig := newMoveRig(t)
+	ctx := context.Background()
+	var output strings.Builder
+	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) {
+		t.Fatalf("Sudo in a session on main = %v", err)
+	}
+	rig.move()
+	rig.took()
+
+	code, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id", "-u"}, []byte("secret"), &output, io.Discard)
+	if err != nil || code != 3 || output.String() != "ran\n" {
+		t.Fatalf("Sudo = %d, %v, printed %q", code, err, output.String())
+	}
+	if events, want := rig.took(), []string{"sudo " + sessionID(rig.key) + " in " + rig.feature + ": id -u with secret"}; !slices.Equal(events, want) {
+		t.Fatalf("the worker did %q, want %q", events, want)
+	}
+	if err := rig.manager.options.Placements.SetStage(rig.key, releasing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) {
+		t.Fatalf("Sudo in a session that is coming back = %v", err)
 	}
 }
 

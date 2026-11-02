@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -439,8 +440,13 @@ func TestThePiAdapterExtractsTheExtensionsToTheSameFolderAfterARestart(t *testin
 	}
 }
 
-// recordedWorkers notes the sessions that the gateway was asked to move.
-type recordedWorkers struct{ moves []string }
+// recordedWorkers notes the sessions that the gateway was asked to move. Sessions are at location, if it names a
+// worker, and run the commands of gripi sudo there with sudo.
+type recordedWorkers struct {
+	moves    []string
+	location gateway.WorkerLocation
+	sudo     func(key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error)
+}
 
 func (workers *recordedWorkers) Move(_ context.Context, key, _, worker string, _ func(context.Context, func(string) bool) (func(), error)) error {
 	workers.moves = append(workers.moves, key+" to "+worker)
@@ -465,7 +471,11 @@ func (workers *recordedWorkers) Unforward(key string, port int) error {
 func (workers *recordedWorkers) List() ([]gateway.Worker, error) { return nil, nil }
 
 func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) {
-	return gateway.WorkerLocation{}, false
+	return workers.location, workers.location.Worker != ""
+}
+
+func (workers *recordedWorkers) Sudo(_ context.Context, key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
+	return workers.sudo(key, cwd, argv, password, stdout, stderr)
 }
 
 func (workers *recordedWorkers) Placed() map[string]string { return nil }

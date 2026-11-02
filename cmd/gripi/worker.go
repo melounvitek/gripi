@@ -43,6 +43,7 @@ Internal, run by Gripi on a worker over SSH:
   gripi worker receive [--runtime-dir <folder>] --file <file> <helper instance>
   gripi worker mirror [--runtime-dir <folder>] --move <move> [--file <file>] <helper instance>
   gripi worker enter --home <folder> -- <command>
+  gripi worker sudo [--runtime-dir <folder>]
 
 A worker is another computer that runs sessions for this gateway. Gripi
 reaches it with this machine's ssh, as the gateway's user and with that
@@ -103,7 +104,9 @@ copy of a move's repository, or of its session's file, to the helper, which
 sends their changes. enter runs a command in a private view in which the
 folder of --home, this machine's home folder, shows the worker user's own
 home folder; when that is the same folder, the view changes nothing, but
-enter still makes one, as moved sessions need.
+enter still makes one, as moved sessions need. sudo runs, outside the views,
+the sudo of a command that gripi sudo asked for in a session there, as its
+input says.
 
 Gripi keeps the workers in ~/.pi/gripi/workers.json, or in the file named by
 GRIPI_WORKERS_PATH, and which sessions are on which worker in
@@ -189,6 +192,8 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return hostMove(arguments[1:], stdin, stdout, stderr)
 	case "enter":
 		return enterWorker(arguments[1:], stdin, stdout, stderr)
+	case "sudo":
+		return sudoWorker(arguments[1:], stdin, stdout, stderr)
 	}
 	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list, remove, move, return, forward or unforward", arguments[0]))
 }

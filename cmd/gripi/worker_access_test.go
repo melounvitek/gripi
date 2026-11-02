@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/config"
+	gateway "github.com/melounvitek/gripi/internal/server"
 	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
@@ -186,9 +188,9 @@ func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 			t.Fatalf("gripi %q on a session on main = %d, stdout %q, stderr %q", command, code, stdout, stderr)
 		}
 	}
-	t.Setenv("PI_SESSION_FILE", alpha)
-	if code, _, stderr := runCLI("sudo", "--", "true"); code != 1 || !strings.Contains(stderr, "403") {
-		t.Fatalf("gripi sudo = %d, stderr %q", code, stderr)
+	t.Setenv("PI_SESSION_FILE", beta)
+	if code, _, stderr := runCLI("sudo", "--", "true"); code != 1 || !strings.Contains(stderr, "no session of yours") {
+		t.Fatalf("gripi sudo in a session on main = %d, stderr %q", code, stderr)
 	}
 
 	stop()
@@ -196,3 +198,69 @@ func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 		t.Fatalf("gripi list after stop = %d, stderr %q", code, stderr)
 	}
 }
+
+// gripi sudo in a session on a worker asks as on main, for the password of the worker's user, and runs the command as
+// root there.
+func TestSudoInASessionOnAWorkerRunsTheCommandThere(t *testing.T) {
+	state := filepath.Dir(socketPath(t))
+	if err := os.MkdirAll(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	alpha, _ := fakePiGateway(t, func(configured *config.Config) {
+		configured.ReadStatePath = filepath.Join(state, "read.json")
+		cfg = *configured
+	})
+	var ran []string
+	workers := &recordedWorkers{
+		location: gateway.WorkerLocation{Worker: "beelink", State: "connected", User: "gripi"},
+		sudo: func(key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
+			ran = append(ran, key, cwd, strings.Join(argv, " "), string(password))
+			io.WriteString(stdout, "out\n")
+			io.WriteString(stderr, "err\n")
+			return 7, nil
+		},
+	}
+	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	socket, stop, err := startWorkerSocket(cfg, browser, "beelink", fakePlacement{sessions: []string{alpha}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	t.Setenv("GRIPI_SOCKET_PATH", socket)
+	outsideSessions(t)
+	t.Setenv("PI_SESSION_FILE", alpha)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := startCLI("sudo", "--", "apt-get", "install", "-y", "ripgrep")
+	request := sudoRequestsUntil(t, alpha, "", 1)[0]
+	if request["worker"] != "beelink" || request["user"] != "gripi" || request["display"] != "apt-get install -y ripgrep" || request["cwd"] != cwd {
+		t.Fatalf("the request = %v", request)
+	}
+	if code := answerSudo(request["id"].(string), "the worker's password", ""); code != http.StatusOK {
+		t.Fatalf("answer = %d", code)
+	}
+	if answered := <-result; answered.code != 7 || answered.stdout != "out\n" || !strings.HasSuffix(answered.stderr, "err\n") {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	if want := []string{alpha, cwd, "apt-get install -y ripgrep", "the worker's password"}; !slices.Equal(ran, want) {
+		t.Fatalf("the worker ran %q, want %q", ran, want)
+	}
+
+	workers.sudo = func(string, string, []string, []byte, io.Writer, io.Writer) (int, error) {
+		return 0, refusal{errors.New("the session is coming back from its worker")}
+	}
+	result = startCLI("sudo", "--", "true")
+	request = sudoRequestsUntil(t, alpha, "", 1)[0]
+	answerSudo(request["id"].(string), "the worker's password", "")
+	if answered := <-result; answered.code != 1 || !strings.Contains(answered.stderr, "409: the session is coming back from its worker") {
+		t.Fatalf("gripi sudo that the worker refused = %+v", answered)
+	}
+}
+
+type refusal struct{ error }
+
+func (refusal) Refused() bool { return true }

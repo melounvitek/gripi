@@ -437,7 +437,7 @@ func TestLeaseExpiryKillsEveryProcessOfAMove(t *testing.T) {
 }
 
 func TestAMovesSessionsReachDockerAtTheCopysPaths(t *testing.T) {
-	upstream, created := fakeDocker(t)
+	upstream, created, stop := fakeDocker(t)
 	rig := startMoveHelper(t, helper.DefaultLease, "DOCKER_HOST=unix://"+upstream)
 	private := rig.privateRoot()
 	shadow, repository := rig.shadow(private, "first\n")
@@ -466,7 +466,7 @@ func TestAMovesSessionsReachDockerAtTheCopysPaths(t *testing.T) {
 	}
 
 	// Once Docker can't be reached, the session learns where it runs, as whom, and what an admin of the worker can do.
-	os.Remove(upstream)
+	stop()
 	if response, err = client.Get("http://docker/v1.52/containers/json"); err != nil {
 		t.Fatal(err)
 	}

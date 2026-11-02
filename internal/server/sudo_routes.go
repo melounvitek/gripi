@@ -59,6 +59,10 @@ type sudoRequestView struct {
 	Display   string    `json:"display"`
 	CWD       string    `json:"cwd"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// Worker names the worker where the command runs, for a session there, and User the worker's user, whose password
+	// sudo asks for there.
+	Worker string `json:"worker,omitempty"`
+	User   string `json:"user,omitempty"`
 }
 
 // sudoRequests holds the pending requests only in memory. A request leaves as it is answered, so it is never shown again.
@@ -69,13 +73,16 @@ type sudoRequests struct {
 	passwords map[string][]byte
 }
 
-func (requests *sudoRequests) add(session, cwd string, argv []string) (*sudoRequest, error) {
+func (requests *sudoRequests) add(session, cwd string, argv []string, worker, user string) (*sudoRequest, error) {
 	id, err := randomBrowserToken()
 	if err != nil {
 		return nil, err
 	}
 	request := &sudoRequest{
-		view:     sudoRequestView{ID: id, Session: session, Display: shellWords(argv), CWD: shellWords([]string{cwd}), ExpiresAt: time.Now().Add(SudoTimeout)},
+		view: sudoRequestView{
+			ID: id, Session: session, Display: shellWords(argv), CWD: shellWords([]string{cwd}), ExpiresAt: time.Now().Add(SudoTimeout),
+			Worker: worker, User: user,
+		},
 		answered: make(chan struct{}),
 	}
 	requests.mu.Lock()
@@ -157,7 +164,8 @@ func shellWords(words []string) string {
 }
 
 // sudo asks the user, in the conversation of the session that runs 'gripi sudo', to answer a request to run a
-// command as root, and waits for the answer.
+// command as root, and waits for the answer. A worker's gripi sudo runs the command on the worker, with the password of
+// the worker's user.
 func (app *application) sudo(response http.ResponseWriter, request *http.Request) {
 	if !parseForm(response, request) {
 		return
@@ -177,7 +185,12 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
 	}
-	pending, err := app.sudoRequests.add(session, cwd, argv)
+	var worker, user string
+	if placement, fromWorker := request.Context().Value(workerKey{}).(WorkerPlacement); fromWorker {
+		location, _ := app.workers.Location(session)
+		worker, user = placement.Name(), location.User
+	}
+	pending, err := app.sudoRequests.add(session, cwd, argv, worker, user)
 	if err != nil {
 		writeInternalError(response, "add a sudo request", err)
 		return
@@ -200,7 +213,26 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the user cancelled the request in Gripi"})
 		return
 	}
+	if worker != "" {
+		app.runSudoOnWorker(response, request, session, cwd, argv, pending.password)
+		return
+	}
 	app.runSudo(response, request, cwd, argv, pending.password)
+}
+
+// runSudoOnWorker runs the command with sudo on the worker that runs the session.
+func (app *application) runSudoOnWorker(response http.ResponseWriter, request *http.Request, session, cwd string, argv []string, password []byte) {
+	defer clear(password)
+	var stdout, stderr cappedBuffer
+	code, err := app.workers.Sudo(request.Context(), session, cwd, argv, password, &stdout, &stderr)
+	if request.Context().Err() != nil {
+		return
+	}
+	if err != nil {
+		writeWorkersError(response, "run sudo on a worker", err)
+		return
+	}
+	writeJSON(response, SudoResult{ExitCode: code, Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Truncated: stdout.dropped || stderr.dropped})
 }
 
 // runSudo runs the command with sudo, which runs gripi as its askpass program. gripi takes the password from the

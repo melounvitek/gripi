@@ -86,6 +86,7 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 		{http.MethodPost, "/sessions/pin", url.Values{"session": {beta}, "pinned": {"true"}}},
 		{http.MethodPost, "/sessions/tags", url.Values{"session": {beta}, "tag": {"main-only"}, "assigned": {"false"}}},
 		{http.MethodPost, "/sessions/delete", url.Values{"session": {beta}}},
+		{http.MethodPost, "/sudo", url.Values{"session": {beta}, "cwd": {project}, "argv": {"true"}}},
 	} {
 		if response := command(worker, request.method, request.route, request.fields); response.Code != http.StatusNotFound {
 			t.Fatalf("%s %s %v on a session on main = %d %s", request.method, request.route, request.fields, response.Code, response.Body.String())
@@ -100,7 +101,6 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 		// New sessions would start on main.
 		{"/sessions/new_at_cwd", url.Values{"cwd": {project}}, "gripi on worker beelink can't start sessions, which would start on main; ask the user to start one in Gripi"},
 		{"/sessions/new_at_cwd", url.Values{"cwd": {project}, "fork_from": {alpha}}, "gripi on worker beelink can't start sessions"},
-		{"/sudo", url.Values{"session": {alpha}, "cwd": {project}, "argv": {"true"}}, "gripi on worker beelink reaches only the sessions on beelink"},
 		{"/sudo/askpass", url.Values{"token": {"any"}}, "gripi on worker beelink reaches only the sessions on beelink and can't run this command; ask the user to run it on main"},
 		{"/sessions/claim", url.Values{"session": {alpha}}, "gripi on worker beelink can't claim sessions, which it would look for among main's; ask the user to run gripi claim on main"},
 		{"/workers/return", url.Values{"session": {alpha}}, "gripi on worker beelink can't move sessions between main and workers; ask the user to do it in Gripi, or with gripi worker on main"},

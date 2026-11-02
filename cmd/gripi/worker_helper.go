@@ -137,6 +137,28 @@ func hostMove(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int
 	return 0
 }
 
+// sudoWorker runs sudo for a command that gripi sudo asked for in a session, outside the views, as the first line of
+// its input says, and exits with sudo's status. Main runs it under the user's systemd, which lets it start sudo in the
+// session's cgroup.
+func sudoWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("worker sudo", flag.ContinueOnError)
+	runtimeDir := flags.String("runtime-dir", "", "")
+	if positional, err := parseArguments(flags, arguments); err != nil {
+		return usageError(stderr, "worker", err.Error())
+	} else if len(positional) > 0 {
+		return usageError(stderr, "worker", "sudo takes no arguments besides its flags")
+	}
+	folder, err := runtimeDirectory(*runtimeDir)
+	if err != nil {
+		return failure(stderr, "worker", err)
+	}
+	code, err := helper.Sudo(folder, stdin, stdout, stderr)
+	if err != nil {
+		return failure(stderr, "worker", err)
+	}
+	return code
+}
+
 // receiveWorker connects the channel that main opened for a copy of its folder to the helper, which makes the copy:
 // with --move, the move's copy, and with --file, a copy of main's file at the same path.
 func receiveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {

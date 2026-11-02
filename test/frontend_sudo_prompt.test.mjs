@@ -18,7 +18,7 @@ function promptFixture({ replies = [] } = {}) {
   const form = new FakeElement("form");
   const prompt = new FakeElement("section");
   prompt.hidden = true;
-  const parts = Object.fromEntries(["expiry", "command", "cwd", "password", "error", "run", "cancel"].map((name) => [name, new FakeElement("span", [`[data-sudo-${name}]`])]));
+  const parts = Object.fromEntries(["expiry", "command", "cwd", "worker-term", "worker", "password", "error", "run", "cancel"].map((name) => [name, new FakeElement("span", [`[data-sudo-${name}]`])]));
   prompt.append(...Object.values(parts));
   const window = new FakeEventTarget();
   const sent = [];
@@ -71,6 +71,20 @@ test("the oldest pending request takes the editor's place and keeps what is type
   assert.equal(controller.dismissed, true);
   fire(window, "pointerdown");
   assert.equal(controller.dismissed, false);
+});
+
+test("a request of a session on a worker says that the command runs there, with the password of the worker's user", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
+  const { controller, worker, "worker-term": workerTerm } = promptFixture();
+
+  controller.update([{ ...request("first"), worker: "beelink", user: "gripi" }]);
+  assert.equal(workerTerm.hidden, false);
+  assert.equal(worker.hidden, false);
+  assert.equal(worker.textContent, "worker beelink, as root with gripi's password");
+
+  controller.update([request("second")]);
+  assert.equal(workerTerm.hidden, true);
+  assert.equal(worker.hidden, true);
 });
 
 test("Enter sends the password as a form and clears the field at once, and a refused password keeps the request", async (t) => {
