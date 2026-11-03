@@ -333,7 +333,11 @@ function pickerFixture({ replies = [], forwarded = [] } = {}) {
 }
 
 test("Run on worker lists the workers with their state and what moves, and moves only with its own button", async () => {
-  const workers = [{ name: "nuc", destination: "gripi@nuc", state: "unreachable" }, { name: "beelink", destination: "gripi@beelink", state: "connected" }];
+  const nucDocker = "sessions on worker nuc run as gripi, who can't use Docker there (permission denied).";
+  const workers = [
+    { name: "nuc", destination: "gripi@nuc", state: "unreachable", docker: nucDocker },
+    { name: "beelink", destination: "gripi@beelink", state: "connected", docker: "available" }
+  ];
   const roots = ["/home/me/Work/storefront", "/home/me/Work/.worktrees/storefront/coupons"];
   const { picker, modal, sent, calls, fire, terms, list, go } = pickerFixture({
     replies: [reply(200, { workers, repository: { main: "/home/me/Work/storefront", roots } })]
@@ -349,7 +353,8 @@ test("Run on worker lists the workers with their state and what moves, and moves
     "copy", "storefront and ~/Work/.worktrees/storefront/coupons",
     "ignored", "files up to 10 MB; folders such as node_modules/ come from the worker's earlier copies",
     "on main", "storefront's other sessions keep running",
-    "return", "brings its changes back; main keeps what it changed too, and the worker's version is kept aside"
+    "return", "brings its changes back; main keeps what it changed too, and the worker's version is kept aside",
+    "docker", "available on beelink"
   ]);
   // The connected worker comes first under the cursor.
   assert.equal(rows[1].getAttribute("aria-selected"), "true");
@@ -359,6 +364,7 @@ test("Run on worker lists the workers with their state and what moves, and moves
   fire(list, "click", { target: rows[0].children[1] });
   assert.equal(rows[0].getAttribute("aria-selected"), "true");
   assert.equal(go.textContent, "move to nuc");
+  assert.deepEqual(terms().slice(-2), ["docker", `not available on nuc: ${nucDocker}`]);
   assert.deepEqual(calls.moves, []);
   fire(modal, "keydown", { key: "ArrowDown" });
   assert.equal(go.textContent, "move to beelink");
@@ -375,6 +381,8 @@ test("Run on worker names the session's own worktree when it started in one", as
   });
   await picker.openMove();
   assert.equal(terms()[3], "~/Work/.worktrees/storefront/coupons, with storefront's Git folder");
+  // Main learns about Docker when it connects to the worker.
+  assert.deepEqual(terms().slice(-2), ["docker", "checked once Gripi connects to beelink"]);
 });
 
 test("Run on worker says how to add a worker when there is none, and why the session can't move", async () => {

@@ -13,25 +13,32 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/worker/dockerproxy"
 	"golang.org/x/sys/unix"
 )
 
 // Message is one line of the control protocol, newline-delimited JSON in both directions. Each side numbers its own
 // requests and answers the other's with a Message that has the request's ID and no type:
 //
-//   - helper to main: {"type":"hello","instance":…,"version":…} once, then {"id":N,"type":"ping"} every second;
+//   - helper to main: {"type":"hello","instance":…,"version":…,"user":…,"docker":…} once, then {"id":N,"type":"ping"}
+//     every second;
 //   - main to helper: {"id":N,"type":"session.create","session":…,"cwd":…,"args":[…],"env":["NAME=value",…]},
 //     session.close and session.release with "session", and auth.apply with "path" and "contents";
 //   - main to helper, for a session that moves to the worker on a private copy of its repository (see move.go):
 //     move.prepare with "move", "repository", "roots" and "private", answered with the copy's folder as "path";
 //     move.seed, move.release, answered with "barriers", and move.delete with "move"; session.create with "move"
 //     too; and mirror.start with "move", and the session's file as "file" for the session file's mirror;
+//   - main to helper, for a command that gripi sudo runs as root (see sudo.go): sudo.offer with "session", "token",
+//     "password", "cwd" and "args", answered with the session's cgroup as "path" and what sudo runs as "args";
 //   - answers: {"id":N,"ok":true} or {"id":N,"ok":false,"error":"…"}.
 //
 // The streams that main opens to the helper start with a Message too, which names the helper's instance.
@@ -49,6 +56,13 @@ type Message struct {
 	Contents string   `json:"contents,omitempty"`
 	OK       bool     `json:"ok,omitempty"`
 	Error    string   `json:"error,omitempty"`
+	// User is whom the sessions run as. Docker is "available" when they can use Docker, and otherwise says why they
+	// can't and what an admin of the worker can do; it is empty when the helper has no Docker endpoint.
+	User   string `json:"user,omitempty"`
+	Docker string `json:"docker,omitempty"`
+	// Token names the Password of a command that gripi sudo runs as root.
+	Token    string `json:"token,omitempty"`
+	Password string `json:"password,omitempty"`
 
 	Move       string    `json:"move,omitempty"`
 	Repository string    `json:"repository,omitempty"`
@@ -64,6 +78,7 @@ type Response struct {
 	OK       bool      `json:"ok"`
 	Error    string    `json:"error,omitempty"`
 	Path     string    `json:"path,omitempty"`
+	Args     []string  `json:"args,omitempty"`
 	Barriers *Barriers `json:"barriers,omitempty"`
 }
 
@@ -106,6 +121,8 @@ type Options struct {
 	Home, OwnHome, DataDir string
 	// DockerUpstream is the Docker endpoint that each move's Docker socket reaches, if any.
 	DockerUpstream string
+	// Name is main's name for the worker, which the helper's messages give.
+	Name string
 }
 
 type server struct {
@@ -121,6 +138,8 @@ type server struct {
 	stopping bool // no session starts once Serve has started to kill them
 	sessions map[string]*session
 	moves    map[string]*move
+	// passwords wait for the askpass program of the sudo of a command that gripi sudo runs, by its token.
+	passwords map[string][]byte
 
 	cache sync.Mutex // held while moves take ignored folders from earlier copies or leave them
 }
@@ -144,6 +163,7 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	s := &server{
 		options: options, instance: hex.EncodeToString(instance), output: make(chan any, 64), done: make(chan struct{}),
 		pings: map[uint64]time.Duration{}, renewed: options.Clock(), sessions: map[string]*session{}, moves: map[string]*move{},
+		passwords: map[string][]byte{},
 	}
 	if s.options.Mirror == nil {
 		s.options.Mirror = s
@@ -154,11 +174,17 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	}
 	defer receives.Close()
 	go s.serveReceives(ctx, receives)
+	askpass, err := net.Listen("unix", filepath.Join(options.RuntimeDir, askpassSocket))
+	if err != nil {
+		return err
+	}
+	defer askpass.Close()
+	go http.Serve(askpass, http.HandlerFunc(s.answerAskpass))
 	defer close(s.done)
 	go s.write(output)
 	closed := make(chan struct{})
 	go s.read(input, closed)
-	s.send(Message{Type: "hello", Instance: s.instance, Version: options.Version})
+	s.send(Message{Type: "hello", Instance: s.instance, Version: options.Version, User: currentUser(), Docker: s.docker(ctx)})
 	err = s.keepLease(ctx, closed)
 	s.mu.Lock()
 	s.stopping = true
@@ -199,6 +225,26 @@ func lockRuntimeDir(dir string) (unlock func(), err error) {
 		os.Remove(path)
 	}
 	return func() { lock.Close() }, nil
+}
+
+// docker says whether the sessions can use Docker, as the hello does.
+func (s *server) docker(ctx context.Context) string {
+	if s.options.DockerUpstream == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := dockerproxy.Check(ctx, s.options.DockerUpstream); err != nil {
+		return dockerproxy.Unusable(s.options.Name, currentUser(), err)
+	}
+	return "available"
+}
+
+func currentUser() string {
+	if current, err := user.Current(); err == nil {
+		return current.Username
+	}
+	return strconv.Itoa(os.Getuid())
 }
 
 // keepLease pings main every second and returns when the lease expires, main closes the connection or ctx ends.
@@ -308,6 +354,13 @@ func (s *server) handle(request Message) {
 		}
 	case "move.delete":
 		err = s.deleteMove(request.Move)
+	case "sudo.offer":
+		var cgroup string
+		var args []string
+		if cgroup, args, err = s.offerSudo(request); err == nil {
+			s.send(Response{ID: request.ID, OK: true, Path: cgroup, Args: args})
+			return
+		}
 	case "session.close":
 		err = s.close(request.Session)
 	case "session.release":

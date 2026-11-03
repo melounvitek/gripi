@@ -26,6 +26,8 @@ func (placement workerPlacement) Session(key string) bool {
 	return slices.Contains(placement.sessions, key)
 }
 
+func (workerPlacement) Name() string { return "beelink" }
+
 func workerHandler(handler http.Handler, placement gateway.WorkerPlacement) http.Handler {
 	return handler.(interface {
 		Worker(gateway.WorkerPlacement) http.Handler
@@ -84,24 +86,30 @@ func TestWorkerCommandsReachOnlyTheSessionsOnTheWorker(t *testing.T) {
 		{http.MethodPost, "/sessions/pin", url.Values{"session": {beta}, "pinned": {"true"}}},
 		{http.MethodPost, "/sessions/tags", url.Values{"session": {beta}, "tag": {"main-only"}, "assigned": {"false"}}},
 		{http.MethodPost, "/sessions/delete", url.Values{"session": {beta}}},
+		{http.MethodPost, "/sudo", url.Values{"session": {beta}, "cwd": {project}, "argv": {"true"}}},
 	} {
 		if response := command(worker, request.method, request.route, request.fields); response.Code != http.StatusNotFound {
 			t.Fatalf("%s %s %v on a session on main = %d %s", request.method, request.route, request.fields, response.Code, response.Body.String())
 		}
 	}
+	// Each refusal says where the session runs and what to do instead.
 	for _, request := range []struct {
 		route  string
 		fields url.Values
+		error  string
 	}{
 		// New sessions would start on main.
-		{"/sessions/new_at_cwd", url.Values{"cwd": {project}}},
-		{"/sessions/new_at_cwd", url.Values{"cwd": {project}, "fork_from": {alpha}}},
-		{"/sudo", url.Values{"session": {alpha}, "cwd": {project}, "argv": {"true"}}},
-		{"/sudo/askpass", url.Values{"token": {"any"}}},
-		{"/sessions/claim", url.Values{"session": {alpha}}},
+		{"/sessions/new_at_cwd", url.Values{"cwd": {project}}, "gripi on worker beelink can't start sessions, which would start on main; ask the user to start one in Gripi"},
+		{"/sessions/new_at_cwd", url.Values{"cwd": {project}, "fork_from": {alpha}}, "gripi on worker beelink can't start sessions"},
+		{"/sudo/askpass", url.Values{"token": {"any"}}, "gripi on worker beelink reaches only the sessions on beelink and can't run this command; ask the user to run it on main"},
+		{"/sessions/claim", url.Values{"session": {alpha}}, "gripi on worker beelink can't claim sessions, which it would look for among main's; ask the user to run gripi claim on main"},
+		{"/workers/return", url.Values{"session": {alpha}}, "gripi on worker beelink can't move sessions between main and workers; ask the user to do it in Gripi, or with gripi worker on main"},
+		{"/workers/forward", url.Values{"session": {alpha}, "port": {"5173"}}, "gripi on worker beelink can't forward ports to main; ask the user to do it with Forward a port… in Gripi, or with gripi worker forward on main"},
 	} {
-		if response := command(worker, http.MethodPost, request.route, request.fields); response.Code != http.StatusForbidden {
-			t.Fatalf("%s from a worker = %d %s", request.route, response.Code, response.Body.String())
+		response := command(worker, http.MethodPost, request.route, request.fields)
+		var refusal struct{ Error string }
+		if json.Unmarshal(response.Body.Bytes(), &refusal); response.Code != http.StatusForbidden || !strings.HasPrefix(refusal.Error, request.error) {
+			t.Fatalf("%s from a worker = %d %s, want %q", request.route, response.Code, response.Body.String(), request.error)
 		}
 	}
 	if log, _ := os.ReadFile(os.Getenv("GRIPI_E2E_FAKE_PI_LOG")); strings.Contains(string(log), beta) {

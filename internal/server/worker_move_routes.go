@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -37,6 +38,10 @@ type Workers interface {
 	// Notices returns the notices of a session's returns that kept changes aside, until DismissNotices.
 	Notices(key string) []WorkerNotice
 	DismissNotices(ctx context.Context, key string) error
+	// Sudo runs a command as root on the worker that runs a session, in the session's folders there, at cwd, with
+	// the worker's sudo, which gets password, the worker user's. It passes the command's outputs to stdout and stderr,
+	// stops it when ctx ends, and returns sudo's exit status.
+	Sudo(ctx context.Context, key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error)
 }
 
 // refused reports whether an error of Workers refuses what was asked, such as moving a session that is on a worker

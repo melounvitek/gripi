@@ -25,8 +25,9 @@ const DefaultUnit = "gripi-worker"
 
 // Options configure Connect.
 type Options struct {
-	// Destination is where ssh connects, as `gripi worker add` saved it.
-	Destination string
+	// Destination is where ssh connects, as `gripi worker add` saved it, and Name main's name for the worker, which
+	// the helper's messages give.
+	Destination, Name string
 	// SocketDir holds ssh's control sockets. It must be a private folder under Gripi's state folder.
 	SocketDir string
 	// Executable is the Gripi executable that the worker runs as its helper; os.Executable() when empty.
@@ -45,6 +46,8 @@ type Options struct {
 	// main's paths, such as the helper and the copies, runs in a private view in which Home shows the worker user's
 	// home folder (package view). Without it, they see the worker's files as they are.
 	Home string
+	// Sudo is the worker's sudo, which runs the commands of gripi sudo; /usr/bin/sudo when empty. Tests use a fake one.
+	Sudo string
 }
 
 // Conn is main's connection to a worker: ssh channels and forwards from its Pool, and the helper's Control.
@@ -104,6 +107,9 @@ func (conn *Conn) start(ctx context.Context, version string) error {
 	}
 	if conn.options.Home != "" {
 		serve = append(serve, "--home", conn.options.Home)
+	}
+	if conn.options.Name != "" {
+		serve = append(serve, "--name", conn.options.Name)
 	}
 	command, release, err := conn.Command(ctx, ShellQuote(serve...))
 	if err != nil {

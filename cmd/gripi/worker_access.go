@@ -84,7 +84,7 @@ func (workers gatewayWorkers) List() ([]gateway.Worker, error) {
 	list := make([]gateway.Worker, 0, len(saved))
 	for _, worker := range saved {
 		status := workers.Status(worker.Name)
-		list = append(list, gateway.Worker{Name: worker.Name, Destination: worker.Destination, State: string(status.State), GoneAt: status.GoneAt})
+		list = append(list, gateway.Worker{Name: worker.Name, Destination: worker.Destination, State: string(status.State), GoneAt: status.GoneAt, Docker: status.Docker})
 	}
 	return list, err
 }
@@ -97,7 +97,7 @@ func (workers gatewayWorkers) Location(key string) (gateway.WorkerLocation, bool
 	}
 	return gateway.WorkerLocation{
 		Worker: location.Worker, State: string(location.State), GoneAt: location.GoneAt, Repository: location.Repository,
-		Copying: location.Copying, Returning: location.Returning, Ports: ports,
+		Copying: location.Copying, Returning: location.Returning, Ports: ports, User: location.User,
 	}, found
 }
 

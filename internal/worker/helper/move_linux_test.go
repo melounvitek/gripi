@@ -437,7 +437,7 @@ func TestLeaseExpiryKillsEveryProcessOfAMove(t *testing.T) {
 }
 
 func TestAMovesSessionsReachDockerAtTheCopysPaths(t *testing.T) {
-	upstream, created := fakeDocker(t)
+	upstream, created, stop := fakeDocker(t)
 	rig := startMoveHelper(t, helper.DefaultLease, "DOCKER_HOST=unix://"+upstream)
 	private := rig.privateRoot()
 	shadow, repository := rig.shadow(private, "first\n")
@@ -463,6 +463,18 @@ func TestAMovesSessionsReachDockerAtTheCopysPaths(t *testing.T) {
 	}
 	if got, want := strings.TrimSpace(<-created), `{"HostConfig":{"Binds":["`+rig.copy("m1", repository)+`:/x","`+rig.own+`/.cache:/y"]}}`; got != want {
 		t.Errorf("Docker got %s, want %s", got, want)
+	}
+
+	// Once Docker can't be reached, the session learns where it runs, as whom, and what an admin of the worker can do.
+	stop()
+	if response, err = client.Get("http://docker/v1.52/containers/json"); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	host, _ := os.Hostname()
+	if want := fmt.Sprintf("sessions on worker %s run as %s, who can't use Docker there", host, rig.hello.User); response.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), want) {
+		t.Fatalf("without Docker, /containers/json = %s %s; want %q", response.Status, body, want)
 	}
 }
 

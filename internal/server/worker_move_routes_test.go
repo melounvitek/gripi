@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -54,7 +55,9 @@ func (workers *fakeWorkers) onWorker(key string) bool {
 	return workers.placed[key]
 }
 
-// Session tells the gripi commands of beelink which sessions run there.
+// Name and Session tell the gripi commands of beelink which sessions run there.
+func (workers *fakeWorkers) Name() string { return "beelink" }
+
 func (workers *fakeWorkers) Session(key string) bool {
 	return workers.onWorker(key)
 }
@@ -176,6 +179,10 @@ func (workers *fakeWorkers) Notices(string) []gateway.WorkerNotice {
 	workers.mu.Lock()
 	defer workers.mu.Unlock()
 	return workers.notices
+}
+
+func (workers *fakeWorkers) Sudo(context.Context, string, string, []string, []byte, io.Writer, io.Writer) (int, error) {
+	return 0, errors.New("the fake worker runs no sudo")
 }
 
 func (workers *fakeWorkers) DismissNotices(context.Context, string) error {

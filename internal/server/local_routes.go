@@ -195,7 +195,12 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 			Agent: session.Agent,
 		})
 	}
-	writeJSON(response, map[string]any{"sessions": result})
+	payload := map[string]any{"sessions": result}
+	// A worker's gripi reaches only the sessions there, which it says when it finds none.
+	if placement, fromWorker := workerOf(request); fromWorker {
+		payload["worker"] = placement.Name()
+	}
+	writeJSON(response, payload)
 }
 
 // localConversation answers with the most recent messages of a session, as many as the browser first shows.

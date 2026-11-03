@@ -27,10 +27,12 @@ var SudoPath = "/usr/bin/sudo"
 // sudoPrompt is the prompt that Gripi gives sudo, without a %, which sudo would expand.
 const sudoPrompt = "gripi"
 
-// SudoAskpassPrompt is the only prompt that gripi, as sudo's askpass program, answers with the password. sudo-rs asks
-// askpass "[sudo: <the -p prompt>] <PAM's prompt>" for each hidden prompt of PAM, one-time codes too, and
-// "[sudo: input needed <PAM's prompt> " for each visible one, so this is the password prompt of pam_unix alone.
-const SudoAskpassPrompt = "[sudo: " + sudoPrompt + "] Password: "
+// SudoAskpassPrompts are the only prompts that gripi, as sudo's askpass program, answers with the password: the
+// password prompt of pam_unix alone, as sudo-rs and classic sudo pass it on. sudo-rs asks askpass
+// "[sudo: <the -p prompt>] <PAM's prompt>" for each hidden prompt of PAM, one-time codes too, and
+// "[sudo: input needed <PAM's prompt> " for each visible one. Classic sudo asks with the -p prompt in place of PAM's
+// "Password: " or its translation, and with PAM's own prompt for any other, unless sudoers sets passprompt_override.
+var SudoAskpassPrompts = []string{"[sudo: " + sudoPrompt + "] Password: ", sudoPrompt}
 
 const sudoOutputLimit = 16 << 20
 
@@ -59,6 +61,10 @@ type sudoRequestView struct {
 	Display   string    `json:"display"`
 	CWD       string    `json:"cwd"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// Worker names the worker where the command runs, for a session there, and User the worker's user, whose password
+	// sudo asks for there.
+	Worker string `json:"worker,omitempty"`
+	User   string `json:"user,omitempty"`
 }
 
 // sudoRequests holds the pending requests only in memory. A request leaves as it is answered, so it is never shown again.
@@ -69,13 +75,16 @@ type sudoRequests struct {
 	passwords map[string][]byte
 }
 
-func (requests *sudoRequests) add(session, cwd string, argv []string) (*sudoRequest, error) {
+func (requests *sudoRequests) add(session, cwd string, argv []string, worker, user string) (*sudoRequest, error) {
 	id, err := randomBrowserToken()
 	if err != nil {
 		return nil, err
 	}
 	request := &sudoRequest{
-		view:     sudoRequestView{ID: id, Session: session, Display: shellWords(argv), CWD: shellWords([]string{cwd}), ExpiresAt: time.Now().Add(SudoTimeout)},
+		view: sudoRequestView{
+			ID: id, Session: session, Display: shellWords(argv), CWD: shellWords([]string{cwd}), ExpiresAt: time.Now().Add(SudoTimeout),
+			Worker: worker, User: user,
+		},
 		answered: make(chan struct{}),
 	}
 	requests.mu.Lock()
@@ -157,7 +166,8 @@ func shellWords(words []string) string {
 }
 
 // sudo asks the user, in the conversation of the session that runs 'gripi sudo', to answer a request to run a
-// command as root, and waits for the answer.
+// command as root, and waits for the answer. A worker's gripi sudo runs the command on the worker, with the password of
+// the worker's user.
 func (app *application) sudo(response http.ResponseWriter, request *http.Request) {
 	if !parseForm(response, request) {
 		return
@@ -167,8 +177,13 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "a sudo request needs a command and an absolute working directory"})
 		return
 	}
+	placement, fromWorker := workerOf(request)
 	if !app.validOwnedSessionPath(request, session) || !app.knownOrPendingSession(request, session) {
-		writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": "the command runs in no session of yours in Gripi, so nobody could answer"})
+		refusal := "the command runs in no session of yours in Gripi, so nobody could answer"
+		if fromWorker {
+			refusal = "the command runs in no session of yours on worker " + placement.Name() + ", so nobody could answer; ask the user to run it on main"
+		}
+		writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": refusal})
 		return
 	}
 	// The browser's page and live events show the requests of the canonical session, which an alias would miss.
@@ -177,7 +192,12 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
 	}
-	pending, err := app.sudoRequests.add(session, cwd, argv)
+	var worker, user string
+	if fromWorker {
+		location, _ := app.workers.Location(session)
+		worker, user = placement.Name(), location.User
+	}
+	pending, err := app.sudoRequests.add(session, cwd, argv, worker, user)
 	if err != nil {
 		writeInternalError(response, "add a sudo request", err)
 		return
@@ -200,7 +220,26 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the user cancelled the request in Gripi"})
 		return
 	}
+	if worker != "" {
+		app.runSudoOnWorker(response, request, session, cwd, argv, pending.password)
+		return
+	}
 	app.runSudo(response, request, cwd, argv, pending.password)
+}
+
+// runSudoOnWorker runs the command with sudo on the worker that runs the session.
+func (app *application) runSudoOnWorker(response http.ResponseWriter, request *http.Request, session, cwd string, argv []string, password []byte) {
+	defer clear(password)
+	var stdout, stderr cappedBuffer
+	code, err := app.workers.Sudo(request.Context(), session, cwd, argv, password, &stdout, &stderr)
+	if request.Context().Err() != nil {
+		return
+	}
+	if err != nil {
+		writeWorkersError(response, "run sudo on a worker", err)
+		return
+	}
+	writeJSON(response, SudoResult{ExitCode: code, Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Truncated: stdout.dropped || stderr.dropped})
 }
 
 // runSudo runs the command with sudo, which runs gripi as its askpass program. gripi takes the password from the

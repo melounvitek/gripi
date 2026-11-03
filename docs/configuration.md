@@ -182,7 +182,7 @@ platform_hints:
 
 Requirements and limits:
 
-- Linux only, tested with [sudo-rs](https://github.com/trifectatechfoundation/sudo-rs). Gripi answers only pam_unix’s untranslated `Password: ` prompt. If PAM asks for anything else, such as a one-time code, or in another language, sudo fails without running the command.
+- Linux only, with [sudo-rs](https://github.com/trifectatechfoundation/sudo-rs) or classic [sudo](https://www.sudo.ws/). Gripi answers only pam_unix’s password prompt: with sudo-rs, its untranslated `Password: `, and with classic sudo, `Password: ` or its translation. If PAM asks for anything else, such as a one-time code, sudo fails without running the command. With classic sudo, sudoers must not set `passprompt_override`, which would show Gripi every prompt of PAM as the password prompt.
 - sudoers must not keep `SUDO_ASKPASS` or `GRIPI_SUDO_TOKEN` with `env_keep`, which would pass them on to the command.
 - Every command needs your approval and your password. Gripi runs sudo with `-k`, so an earlier sudo login doesn’t count.
 - `!` commands and nested subagents can’t use it. Gripi can’t tell which conversation they belong to, so `gripi sudo` fails at once.
@@ -190,6 +190,20 @@ Requirements and limits:
 - In [multi-user mode](#multi-user-mode), only the session’s owner sees the request and can answer it.
 
 This keeps the password from leaking by accident. It doesn’t protect against a hostile agent: one that runs as the gateway’s OS user could replace Gripi, or ask you to approve a harmful command. Read the command before you run it, because it runs as root.
+
+### On a worker
+
+In a session on a [worker](#workers), `gripi sudo` asks the same way, and runs the command as root on the worker, where the session runs. The command sees the session’s folders as the session does, such as its copy of the repository at main’s paths, starts in the same folder, and runs in the session’s cgroup, so stopping the session, its return or losing the worker stop it too. sudo there asks for the password of the worker’s user, so the request says so, such as `on  worker beelink, as root with gripi's password`. The password goes from the browser to the gateway, then over the gateway’s SSH connection to Gripi’s helper on the worker, which gives it to sudo’s askpass program once; it never reaches a command line, a log or a file.
+
+The worker needs, once, its user allowed to use sudo with a password, a sudo that meets the requirements above, and `nsenter` from util-linux 2.38 or later. For example, on the worker, as an admin:
+
+```sh
+sudo passwd gripi
+echo 'gripi ALL=(ALL:ALL) ALL' | sudo tee /etc/sudoers.d/gripi
+sudo chmod 440 /etc/sudoers.d/gripi
+```
+
+Root on a worker is root over everything on that machine, not just over the session’s copy: other users’ files, Docker, and every other session that runs there. Approve commands on a worker as carefully as on main.
 
 ## Pinned session directories
 
@@ -302,11 +316,13 @@ Pi’s sessions name the paths of the projects and of Pi’s agent folder, so se
 In the view:
 
 - Tools see the worker’s user as itself, with `HOME` set to main’s home folder, and the files that they write belong to it.
-- Programs that need setuid don’t work, such as `sudo`, and rootless Podman, which needs `newuidmap`.
+- Programs that need setuid don’t work, such as `sudo`, and rootless Podman, which needs `newuidmap`. [`gripi sudo`](#on-a-worker) works.
 - Services that the worker user’s systemd starts, such as with `systemd-run --user` without `--scope`, run outside the view and don’t see main’s paths. They run as the worker’s user, so they can’t change other users’ files either.
 - Docker works: each moved session gets a Docker socket of Gripi’s own in `DOCKER_HOST`, in place of main’s, which passes its requests on to the worker’s Docker, as `DOCKER_HOST` in the worker user’s systemd environment (not its login shell’s), the current Docker context or `/var/run/docker.sock` names it. The Docker daemon runs outside the views, so the socket changes the paths where requests name host folders, in bind mounts of new containers and in local volumes bound to a folder: paths in the folders that show the session’s copy, such as `~/Work`, to the copy, and other paths in main’s home folder to the worker user’s home folder. It first follows the symbolic links in those paths as the sessions see them, because the daemon would follow them outside the view, where main’s home folder may be another user’s, and refuses a path whose links it cannot follow, such as a link to a missing path. It doesn’t change them in Swarm services, and it cannot reach Docker over `ssh://` or over `tcp://` with TLS, so with such an endpoint, Docker fails in the sessions.
 
 Membership of the `docker` group makes the worker’s user root on the worker in effect, and containers can leave files owned by root in the projects; rootless Docker avoids both. So the Docker socket only prevents accidents: sessions can still reach other users’ files through Docker on purpose.
+
+Gripi’s helper runs under the worker user’s systemd, which keeps the groups that it started with. So after `sudo usermod -aG docker gripi`, restart it with `sudo systemctl restart user@$(id -u gripi).service`, which stops everything that the user runs there, sessions included.
 
 Then add the worker on main:
 
@@ -315,6 +331,8 @@ gripi worker add gripi@beelink.example.ts.net
 ```
 
 `add` checks the system, Git and systemd, installs Gripi’s helper there and checks that it can make private views, also when the worker user’s home folder has main’s path, saying what to do when the system blocks them. It fails when the worker’s user cannot create Pi’s agent folder at its path on main, as the sessions there see it, or when the worker shares main’s files, as main itself as the same user or a home folder mounted on both would: the worker’s files would replace main’s, such as Pi’s logins. Main checks both again whenever it connects. A worker that is main as another user is fine, because the sessions there see that user’s home folder at main’s. The worker is named after the first part of the host name, `beelink` here, unless `--name` names it. `gripi worker list` lists the workers.
+
+`add` also checks, under the worker user’s systemd as the helper runs, whether the worker’s user can use the worker’s Docker. When the worker has Docker but its user can’t use it, `add` still adds the worker, and says why and what an admin of the worker can do. Main checks Docker again whenever it connects, says what it found in the gateway’s log when the sessions can’t use Docker, and **Run on worker…** shows it for the chosen worker, once main has connected to it. When a session there runs Docker that can’t be reached, its Docker socket answers with the same explanation, which the `docker` CLI shows.
 
 ### What a worker gets
 
@@ -334,7 +352,7 @@ Pi on a worker gets the environment variables that it gets on main, including th
 
 Every `localhost` port in the URLs of Pi’s `models.json` and `mcp.json`, such as a local model proxy or an MCP server, reaches the same port on main from the worker while main is connected to it. A port that cannot be forwarded, such as one that something on the worker uses, keeps main from connecting.
 
-A `gripi` socket of the worker’s own is forwarded to the path of main’s socket on the worker, so the [`gripi` command](../README.md#command-line) works in sessions there. It reaches only the sessions on that worker, and refuses `gripi sudo`, `gripi claim` and new sessions, which would start on main.
+A `gripi` socket of the worker’s own is forwarded to the path of main’s socket on the worker, so the [`gripi` command](../README.md#command-line) works in sessions there. It reaches only the sessions on that worker, and refuses `gripi claim` and new sessions, which would start on main, with what to do instead. [`gripi sudo`](#on-a-worker) runs the command on the worker.
 
 ### Moving a session
 

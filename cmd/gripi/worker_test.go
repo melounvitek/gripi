@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -37,18 +39,31 @@ case $command in *.gripi-worker-check-*) [ -n "$FAKE_SSH_SHARED" ] || command=$(
 HOME=$FAKE_SSH_HOME exec sh -c "$command"
 `
 
-// fakeSSH puts fakeSSHScript on PATH as ssh, and a systemd-run that succeeds, gives the test a home that the
-// worker shares and a workers file, and returns the file with ssh's arguments. The worker's private views, which
-// this machine may block, work and show its files as they are.
+// fakeSystemdRun stands in for systemd-run: it succeeds, and runs only the commands that check Docker.
+const fakeSystemdRun = `#!/bin/sh
+case "$*" in *docker*) ;; *) exit 0 ;; esac
+while [ "${1#--}" != "$1" ]; do shift; done
+exec "$@"
+`
+
+// fakeDocker stands in for the docker CLI, which can't reach Docker with FAKE_DOCKER_ERROR.
+const fakeDocker = `#!/bin/sh
+[ "$1 $2 $3" = "version --format available" ] || exit 99
+echo available
+[ -z "$FAKE_DOCKER_ERROR" ] || { echo "$FAKE_DOCKER_ERROR" >&2; exit 1; }
+`
+
+// fakeSSH puts fakeSSHScript on PATH as ssh, and a systemd-run that succeeds and a docker that works, gives the test
+// a home that the worker shares and a workers file, and returns the file with ssh's arguments. The worker's private
+// views, which this machine may block, work and show its files as they are.
 func fakeSSH(t *testing.T) (arguments string) {
 	t.Helper()
 	isolateSettings(t)
 	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "ssh"), []byte(fakeSSHScript), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "systemd-run"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-		t.Fatal(err)
+	for name, script := range map[string]string{"ssh": fakeSSHScript, "systemd-run": fakeSystemdRun, "docker": fakeDocker} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
 	home := t.TempDir()
@@ -60,6 +75,7 @@ func fakeSSH(t *testing.T) (arguments string) {
 	t.Setenv("FAKE_SSH_ERROR", "")
 	t.Setenv("FAKE_SSH_ANSWER", "")
 	t.Setenv("FAKE_SSH_SHARED", "")
+	t.Setenv("FAKE_DOCKER_ERROR", "")
 	arguments = filepath.Join(directory, "arguments")
 	t.Setenv("FAKE_SSH_ARGUMENTS", arguments)
 	viewScripts = func(_ context.Context, options remote.Options) (func(string, ...string) (string, error), error) {
@@ -118,6 +134,9 @@ func TestWorkerAddChecksTheWorkerOverSSHAndRemembersIt(t *testing.T) {
 			t.Fatalf("stdout %q does not contain %q", stdout, expected)
 		}
 	}
+	if strings.Contains(stdout, "Docker") {
+		t.Fatalf("stdout %q mentions Docker, which works", stdout)
+	}
 	recorded, err := os.ReadFile(arguments)
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +177,27 @@ func TestWorkerAddChecksTheWorkerOverSSHAndRemembersIt(t *testing.T) {
 	}
 	if code, stdout, stderr := runCLI("worker", "remove", "beelink-omarchy"); code != 1 || stdout != "" || !strings.Contains(stderr, "beelink-omarchy") {
 		t.Fatalf("gripi worker remove of a missing worker = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+// Docker is optional, so a worker whose user can't use it is added, with what an admin of the worker can do. The
+// check runs under the user's systemd, as the helper does, which may not have the groups of a new login yet.
+func TestWorkerAddSaysWhatToDoWhenTheWorkersUserCannotUseDocker(t *testing.T) {
+	fakeSSH(t)
+	t.Setenv("FAKE_DOCKER_ERROR", "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock")
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
+	if want := "Docker: sessions on worker beelink run as " + me.Username + ", who can't use Docker there (permission denied while trying to connect to the docker API at " +
+		"unix:///var/run/docker.sock). An admin of beelink can add " + me.Username + " to the docker group or set up rootless Docker for it, then restart " +
+		me.Username + "'s processes so they get the group: sudo systemctl restart user@$(id -u " + me.Username + ").service\n"; code != 0 || stderr != "" || !strings.HasSuffix(stdout, want) {
+		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q; want stdout to end with %q", code, stdout, stderr, want)
+	}
+	if workers := listedWorkers(t); len(workers) != 1 {
+		t.Fatalf("workers = %v", workers)
 	}
 }
 
@@ -400,8 +440,13 @@ func TestThePiAdapterExtractsTheExtensionsToTheSameFolderAfterARestart(t *testin
 	}
 }
 
-// recordedWorkers notes the sessions that the gateway was asked to move.
-type recordedWorkers struct{ moves []string }
+// recordedWorkers notes the sessions that the gateway was asked to move. Sessions are at location, if it names a
+// worker, and run the commands of gripi sudo there with sudo.
+type recordedWorkers struct {
+	moves    []string
+	location gateway.WorkerLocation
+	sudo     func(key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error)
+}
 
 func (workers *recordedWorkers) Move(_ context.Context, key, _, worker string, _ func(context.Context, func(string) bool) (func(), error)) error {
 	workers.moves = append(workers.moves, key+" to "+worker)
@@ -426,7 +471,11 @@ func (workers *recordedWorkers) Unforward(key string, port int) error {
 func (workers *recordedWorkers) List() ([]gateway.Worker, error) { return nil, nil }
 
 func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) {
-	return gateway.WorkerLocation{}, false
+	return workers.location, workers.location.Worker != ""
+}
+
+func (workers *recordedWorkers) Sudo(_ context.Context, key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
+	return workers.sudo(key, cwd, argv, password, stdout, stderr)
 }
 
 func (workers *recordedWorkers) Placed() map[string]string { return nil }

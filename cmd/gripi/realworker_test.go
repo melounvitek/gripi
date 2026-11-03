@@ -63,7 +63,16 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 	agentDir := filepath.Join(shared, "agent")
 	repository, feature := filepath.Join(home, "gripi-e2e-work", "repo"), filepath.Join(home, "gripi-e2e-work", "repo-feature")
 	readme := filepath.Join(repository, "README")
-	connection := remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run")}
+	// A fake sudo stands in for the worker's, which needs a password and root, unless the worker user may use sudo with
+	// GRIPI_TEST_WORKER_SUDO_PASSWORD.
+	sudoPassword, fakeSudo := os.Getenv("GRIPI_TEST_WORKER_SUDO_PASSWORD"), ""
+	if sudoPassword == "" {
+		sudoPassword, fakeSudo = "the worker's password", filepath.Join(realWorkerRoot, "sudo")
+		if output, err := onWorker("mkdir -p " + realWorkerRoot + " && printf %s " + remote.ShellQuote(fakeSudoOnWorker) + " > " + fakeSudo + " && chmod 700 " + fakeSudo); err != nil {
+			t.Fatalf("install the fake sudo: %v %s", err, output)
+		}
+	}
+	connection := remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run"), Sudo: fakeSudo}
 	workerHelper = connection
 	t.Cleanup(func() { workerHelper = remote.Options{} })
 	// inView runs a sh script on the worker, which sees main's home folder there as the sessions do.
@@ -179,6 +188,16 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 			}
 		}
 	}
+	// browse sends a request as the browser does.
+	browse := func(method, target string, form url.Values) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, "http://127.0.0.1:4567"+target, strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Accept", "application/json")
+		request.RemoteAddr = "127.0.0.1:40000"
+		response := httptest.NewRecorder()
+		browser.ServeHTTP(response, request)
+		return response
+	}
 	// noTakeOver fails when the guard of the sessions' files took the mirror for another program.
 	noTakeOver := func() {
 		t.Helper()
@@ -241,6 +260,37 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 	}
 	if _, err := os.Stat(feature); !os.IsNotExist(err) {
 		t.Fatalf("main's worktree of the moved session before it returned: %v", err)
+	}
+	// gripi sudo in the moved session asks in Gripi for the password of the worker's user, and runs the command as root
+	// on the worker, in the session's folder, which only the session's view has.
+	workerUser, _ := onWorker("id -un")
+	if status := workers.Status("beelink"); status.User != workerUser || status.Docker == "" {
+		t.Fatalf("the worker's status = %+v", status)
+	}
+	before := len(replies(moved.ID))
+	cli("send", moved.ID, `RUN [[{"name":"bash","arguments":{"command":`+quote("gripi sudo -- sh -c 'pwd; head -n 1 README; id -u'")+`}}]]`)
+	var asked struct {
+		Requests []map[string]string `json:"sudo_requests"`
+	}
+	for deadline := time.Now().Add(30 * time.Second); len(asked.Requests) == 0; time.Sleep(100 * time.Millisecond) {
+		if err := json.Unmarshal(browse(http.MethodGet, "/events?session="+url.QueryEscape(moved.Path), nil).Body.Bytes(), &asked); err != nil || time.Now().After(deadline) {
+			t.Fatalf("gripi sudo asked nothing: %v", err)
+		}
+	}
+	if request := asked.Requests[0]; request["worker"] != "beelink" || request["user"] != workerUser || request["cwd"] != repository {
+		t.Fatalf("the sudo request = %v", request)
+	}
+	if answer := browse(http.MethodPost, "/sudo/answer", url.Values{"id": {asked.Requests[0]["id"]}, "password": {sudoPassword}}); answer.Code != http.StatusOK {
+		t.Fatalf("answer = %d %s", answer.Code, answer.Body)
+	}
+	cli("wait", moved.ID, "--timeout", "60")
+	if got := replies(moved.ID); len(got) == before || !strings.Contains(got[len(got)-1], `"text":"`+repository+`\nfirst line\n0\n`) {
+		t.Fatalf("gripi sudo replied %q", got[before:])
+	}
+	if fakeSudo != "" {
+		if answers, _ := onWorker("cat " + realWorkerRoot + "/askpass"); !strings.HasPrefix(answers, sha256Hex(sudoPassword+"\n")+"\n") {
+			t.Fatalf("askpass answered %q", answers)
+		}
 	}
 	// The worker's logins follow main's while it is connected, without main's refresh tokens.
 	authJSON := filepath.Join(agentDir, "auth.json")
@@ -328,11 +378,7 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 	// events returns the live events of a session after a cursor, as the browser gets them, and the last event's number.
 	events := func(session string, after int64) ([]map[string]any, int64) {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:4567/events?after=%d&session=%s", after, url.QueryEscape(session)), nil)
-		request.Header.Set("Accept", "application/json")
-		request.RemoteAddr = "127.0.0.1:40000"
-		response := httptest.NewRecorder()
-		browser.ServeHTTP(response, request)
+		response := browse(http.MethodGet, fmt.Sprintf("/events?after=%d&session=%s", after, url.QueryEscape(session)), nil)
 		var batch struct {
 			Events  []map[string]any `json:"events"`
 			LastSeq int64            `json:"last_seq"`
@@ -437,6 +483,21 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 		t.Fatalf("still running on the worker: %s", output)
 	}
 }
+
+// fakeSudoOnWorker stands in for the worker's sudo, which needs a password and root. Named sudo, it is a parent that
+// gripi's askpass program accepts. It asks askpass for the password twice, as classic sudo does after a wrong one,
+// with the -p prompt, and records a hash of each answer in askpass next to itself. Then it runs the command as the
+// worker's user, who can enter the namespaces of the session's view only through their user namespace, which root
+// doesn't need.
+const fakeSudoOnWorker = `#!/bin/sh
+[ "$1 $2 $3 $4 $5" = "-A -k -p gripi --" ] || { echo "fake sudo: unexpected arguments $*" >&2; exit 99; }
+shift 5
+for call in 1 2; do
+	"$SUDO_ASKPASS" gripi | sha256sum | cut -d ' ' -f 1 >> "${0%/*}/askpass"
+done
+[ "$1" = nsenter ] && shift && set -- nsenter --user --preserve-credentials "$@"
+exec "$@"
+`
 
 func quote(text string) string {
 	quoted, _ := json.Marshal(text)

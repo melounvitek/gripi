@@ -327,9 +327,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakeSudoScript stands in for sudo-rs. Named sudo, it is a parent that gripi's askpass program accepts. It asks
-// askpass once for each word of FAKE_SUDO_ASKPASS, with the prompts that sudo-rs would use, and records only a hash
-// of each answer. Then it records the command's arguments, environment and input, and runs the command as the user.
+// fakeSudoScript stands in for sudo-rs, or with the words that start with classic, for classic sudo. Named sudo, it is
+// a parent that gripi's askpass program accepts. It asks askpass once for each word of FAKE_SUDO_ASKPASS, with the
+// prompts that sudo-rs or classic sudo would use, and records only a hash of each answer. Then it records the
+// command's arguments, environment and input, and runs the command as the user.
 const fakeSudoScript = `#!/bin/sh
 [ "$1 $2 $3 $5" = "-A -k -p --" ] || { echo "fake sudo: unexpected arguments $*" >&2; exit 99; }
 marker=$4
@@ -341,6 +342,9 @@ for call in $FAKE_SUDO_ASKPASS; do
 	otp) "$SUDO_ASKPASS" "[sudo: $marker] Verification code: " ;;
 	visible) "$SUDO_ASKPASS" "[sudo: input needed Password: " ;;
 	unparented) sh -c '"$SUDO_ASKPASS" "$1"; :' sh "[sudo: $marker] Password: " ;;
+	classic) "$SUDO_ASKPASS" "$marker" ;;
+	classic-otp) "$SUDO_ASKPASS" "Verification code: " ;;
+	classic-unparented) sh -c '"$SUDO_ASKPASS" "$1"; :' sh "$marker" ;;
 	esac | sha256sum | cut -d ' ' -f 1 >> "$FAKE_SUDO_RECORD/askpass"
 done
 printf '%s\n' "$@" > "$FAKE_SUDO_RECORD/argv"
@@ -484,6 +488,21 @@ func TestSudoGivesThePasswordOnlyToThePasswordPromptOfSudo(t *testing.T) {
 	}
 	// The password that the last prompt got shows that the others did not take it.
 	if answers := askpassAnswers(t, record, "secret"); !slices.Equal(answers, []string{"nothing", "nothing", "nothing", "password"}) {
+		t.Fatalf("askpass answered %v", answers)
+	}
+}
+
+// Classic sudo passes askpass its -p prompt in place of pam_unix's password prompt, and PAM's own prompt for any other.
+func TestSudoGivesThePasswordOnlyToThePasswordPromptOfClassicSudo(t *testing.T) {
+	record := fakeSudo(t, "classic-otp classic-unparented classic classic")
+	alpha, _ := fakePiGateway(t)
+	outsideSessions(t)
+	t.Setenv("PI_SESSION_FILE", alpha)
+
+	if answered := sudoWithPassword(t, alpha, "secret", "sh", "-c", "echo ran"); answered.code != 0 || answered.stdout != "ran\n" {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	if answers := askpassAnswers(t, record, "secret"); !slices.Equal(answers, []string{"nothing", "nothing", "password", "nothing"}) {
 		t.Fatalf("askpass answered %v", answers)
 	}
 }

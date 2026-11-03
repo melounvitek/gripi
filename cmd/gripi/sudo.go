@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
@@ -23,6 +24,10 @@ exit code. The password goes only to sudo, never to the agent.
 
 Each command needs the user's password again. The command reads no input, and
 Gripi keeps only the first 16 MiB of each of its outputs.
+
+In a session on a worker, the command runs as root on the worker, in the
+session's folders as the session sees them, and sudo there asks for the
+password of the worker's user.
 
 gripi sudo finds its session by PI_SESSION_FILE, which Pi's bash tool sets, or
 by HERMES_SESSION_ID, which Hermes's terminal sets.
@@ -83,7 +88,7 @@ func runAsRoot(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 func answerSudoPrompt(arguments []string, stdout, stderr io.Writer) int {
 	// Where sudoers keeps the environment, a command that sudo runs has the token too, and may run gripi.
 	parent, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", os.Getppid()))
-	if len(arguments) != 1 || arguments[0] != gateway.SudoAskpassPrompt || err != nil || string(parent) != "sudo\n" {
+	if len(arguments) != 1 || !slices.Contains(gateway.SudoAskpassPrompts, arguments[0]) || err != nil || string(parent) != "sudo\n" {
 		fmt.Fprintln(stderr, "gripi sudo: Gripi answers only the password prompt of the sudo that it runs")
 		return exitFailure
 	}

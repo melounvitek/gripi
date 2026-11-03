@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -129,6 +131,8 @@ func (link *fakeLink) call(format string, arguments ...any) error {
 	return nil
 }
 
+func (link *fakeLink) User() string                                    { return "gripi" }
+func (link *fakeLink) Docker() string                                  { return link.rig.docker }
 func (link *fakeLink) ApplyAuth(context.Context, string, string) error { return nil }
 func (link *fakeLink) Lost() <-chan struct{}                           { return link.lost }
 func (link *fakeLink) GoneAt() time.Time                               { return link.goneAt }
@@ -243,6 +247,11 @@ func (link *fakeLink) DeleteMove(_ context.Context, id string) error {
 	return link.call("delete %s", id)
 }
 
+func (link *fakeLink) Sudo(_ context.Context, session, cwd string, argv []string, password []byte, stdout, _ io.Writer) (int, error) {
+	io.WriteString(stdout, "ran\n")
+	return 3, link.call("sudo %s in %s: %s with %s", session, cwd, strings.Join(argv, " "), password)
+}
+
 // moveRig is main with a repository in its home folder, which has a linked worktree that a session used and another
 // one, and a manager whose worker beelink is a fakeLink. The worker's changes to a move's copy are simulated by
 // changing main's shadow of it, as the copy's mirror would.
@@ -258,6 +267,7 @@ type moveRig struct {
 	events   []string
 	failing  map[string]error // what fakeLink's calls that start with a key fail with
 	seeding  chan struct{}    // if set, closed when a move seeds its copy, which then waits for the move's end
+	docker   string           // what the worker says of Docker when main connects
 	links    []*fakeLink
 	prepared []Move
 	created  []Session
@@ -693,6 +703,61 @@ func TestASessionOnALostWorkerContinuesOnMainOnceTheWorkerIsGone(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the stale copy was not deleted")
 		}
+	}
+}
+
+// gripi sudo in a session on a worker runs the command there, but not once the session is on its way back.
+func TestSudoRunsTheCommandOnTheWorkerOfTheSession(t *testing.T) {
+	rig := newMoveRig(t)
+	ctx := context.Background()
+	var output strings.Builder
+	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) {
+		t.Fatalf("Sudo in a session on main = %v", err)
+	}
+	rig.move()
+	rig.took()
+
+	code, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id", "-u"}, []byte("secret"), &output, io.Discard)
+	if err != nil || code != 3 || output.String() != "ran\n" {
+		t.Fatalf("Sudo = %d, %v, printed %q", code, err, output.String())
+	}
+	if events, want := rig.took(), []string{"sudo " + sessionID(rig.key) + " in " + rig.feature + ": id -u with secret"}; !slices.Equal(events, want) {
+		t.Fatalf("the worker did %q, want %q", events, want)
+	}
+	if err := rig.manager.options.Placements.SetStage(rig.key, releasing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) || !strings.Contains(err.Error(), "worker beelink") {
+		t.Fatalf("Sudo in a session that is coming back = %v", err)
+	}
+}
+
+// Main remembers whom the sessions on a worker run as and whether they can use Docker, as the worker said when main
+// last connected to it, and logs why they can't.
+func TestTheStatusOfAWorkerSaysWhetherItsSessionsCanUseDocker(t *testing.T) {
+	rig := newMoveRig(t)
+	if status := rig.manager.Status("beelink"); status.User != "" || status.Docker != "" {
+		t.Fatalf("before main connected, the status is %+v", status)
+	}
+	rig.docker = "sessions on worker beelink run as gripi, who can't use Docker there (permission denied)"
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	if err := rig.manager.Reconnect(context.Background(), "beelink"); err != nil {
+		t.Fatal(err)
+	}
+	link := rig.link()
+	link.goneAt = rig.now
+	close(link.lost)
+	for rig.manager.Status("beelink").State == Connected {
+		time.Sleep(time.Millisecond)
+	}
+	if status := rig.manager.Status("beelink"); status.User != "gripi" || status.Docker != rig.docker {
+		t.Fatalf("the status = %+v", status)
+	}
+	if !strings.Contains(logged.String(), "Docker: "+rig.docker) {
+		t.Fatalf("the log says %q", logged.String())
 	}
 }
 
