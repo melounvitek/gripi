@@ -67,10 +67,11 @@ type Adapter struct {
 
 var _ agent.Adapter = (*Adapter)(nil)
 
+// listFresh is how long a listing serves the gateway, which lists sessions for every page and sidebar.
+var listFresh = 10 * time.Second
+
 const (
-	retryAfter = 30 * time.Second
-	// listFresh is how long a listing serves the gateway, which lists sessions for every page and sidebar.
-	listFresh   = 2 * time.Second
+	retryAfter  = 30 * time.Second
 	listTimeout = 15 * time.Second
 	// loadTimeout bounds loading a session, for which Hermes builds the session's agent.
 	loadTimeout = time.Minute

@@ -46,7 +46,8 @@ func (adapter *Adapter) listing() []listedSession {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
-	adapter.listedAt = time.Now()
+	// Hermes takes seconds to list many sessions, so the listing stays fresh from when it ends, failed or not.
+	defer func() { adapter.listedAt = time.Now() }()
 	// connected logs why Hermes cannot start.
 	conn, err := adapter.connected(ctx)
 	if err != nil {

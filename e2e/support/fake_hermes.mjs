@@ -242,5 +242,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: request.id, error: { code: -32601, message: `Method not found: ${request.method}` } });
     return;
   }
+  // FAKE_HERMES_LIST_MS delays each session/list answer, as Hermes takes a while to list many sessions.
+  if (request.method === "session/list" && process.env.FAKE_HERMES_LIST_MS) {
+    setTimeout(() => send({ id: request.id, result: method(request.params) }), Number(process.env.FAKE_HERMES_LIST_MS));
+    return;
+  }
   send({ id: request.id, result: method(request.params) });
 });
