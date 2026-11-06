@@ -36,6 +36,8 @@ async function replyFromPi(page) {
 }
 
 async function askInPanel(page, prompt) {
+  // Playwright sees the composer before the panel's page has loaded, while Enter would still only add a new line.
+  await expect(page.locator("#hermes-panel")).not.toHaveClass(/is-loading/);
   const composer = panel(page).getByLabel("Message to Hermes");
   await composer.fill(prompt);
   await composer.press("Enter");
