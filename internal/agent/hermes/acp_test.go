@@ -172,6 +172,31 @@ func TestCloseStopsAHermesThatKeepsRunningAndWhatItStarted(t *testing.T) {
 	}
 }
 
+func TestASlowListingStillServesTheNextCaller(t *testing.T) {
+	fresh := listFresh
+	listFresh = 100 * time.Millisecond
+	defer func() { listFresh = fresh }()
+	t.Setenv("FAKE_HERMES_LIST_MS", "200")
+	log := filepath.Join(t.TempDir(), "log")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	adapter := New(Options{Path: fakeHermesPath()})
+	defer adapter.Close()
+
+	for range 2 {
+		if _, err := adapter.Store().Sessions(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	contents, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lists := strings.Count(string(contents), `"method":"session/list"`); lists != 1 {
+		t.Fatalf("Hermes listed its sessions %d times", lists)
+	}
+}
+
 func TestHermesStopsOnceIdleWithoutClients(t *testing.T) {
 	adapter := New(Options{Path: fakeHermesPath(), IdleTimeout: 100 * time.Millisecond})
 	defer adapter.Close()
