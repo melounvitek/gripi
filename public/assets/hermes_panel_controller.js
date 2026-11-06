@@ -44,7 +44,11 @@ export class HermesPanelController {
     this.showWidth(this.stored(HERMES_PANEL_WIDTH_KEY));
     this.document.querySelector("[data-hermes-toggle]").addEventListener("pointerdown", (event) => this.startResize(event));
     this.document.addEventListener("click", (event) => {
-      if (event.target.closest("[data-hermes-toggle]") && !this.resized) this.toggle();
+      // The click that ends a drag only ends it.
+      if (event.target.closest("[data-hermes-toggle]")) {
+        if (this.resized) this.resized = false;
+        else this.toggle();
+      }
       // On a phone, the panel covers the tab, so its loading screen needs a way out.
       if (event.target.closest("[data-hermes-panel-close]")) this.close();
     });
@@ -172,7 +176,10 @@ export class HermesPanelController {
       tab.removeEventListener("pointerup", end);
       tab.removeEventListener("pointercancel", end);
       // The width the panel shows, so a drag past a bound leaves none of the way back to drag over again.
-      if (this.resized) this.store(HERMES_PANEL_WIDTH_KEY, `${this.panel.getBoundingClientRect().width}px`);
+      if (!this.resized) return;
+      const width = `${this.panel.getBoundingClientRect().width}px`;
+      this.showWidth(width);
+      this.store(HERMES_PANEL_WIDTH_KEY, width);
     };
     tab.addEventListener("pointermove", move);
     tab.addEventListener("pointerup", end);

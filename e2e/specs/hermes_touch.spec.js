@@ -20,6 +20,8 @@ test("a voice conversation starts and ends, and what was said opens, on the firs
 
 test("the Hermes tab opens the panel over the whole screen, which goes back to Gripi, on the first taps", async ({ page }) => {
   expect((await page.request.post("/hermes/new")).ok()).toBe(true);
+  // Even with a narrow panel, as dragged to on a wider screen.
+  await page.addInitScript(() => localStorage.setItem("gripi:hermes-panel-width", "320px"));
   await page.goto("/");
   const tab = page.getByRole("button", { name: "Hermes", exact: true });
   await tab.tap();

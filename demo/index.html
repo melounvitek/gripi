@@ -129,9 +129,9 @@
     @media (pointer: coarse) { body.hermes-panel-framed .hermes-panel-back { display: inline-flex; } .hermes-panel-action[data-hermes-close] { display: none; } }
     body:not(.hermes-panel-framed) :is([data-hermes-close], [data-hermes-pop-out]) { display: none; }
     /* The panel has a column of its own on wide screens, lies over the conversation on narrower ones, and fills a phone's screen. */
-    /* Dragging the tab sets the panel's width, which leaves the sessions and a readable conversation room beside it, and
-       which a phone's screen limits. */
-    body { --hermes-panel-shown-width: min(clamp(20rem, var(--hermes-panel-width, 30rem), max(30rem, 100vw - 52rem)), 100vw); }
+    /* Dragging the tab sets the panel's width, which leaves the sessions and a readable conversation room beside it. */
+    body { --hermes-panel-shown-width: clamp(20rem, var(--hermes-panel-width, 30rem), max(30rem, 100vw - 52rem)); }
+    @media (max-width: 30rem) { body { --hermes-panel-shown-width: 100vw; } }
     .hermes-panel { position: fixed; inset: 0 0 0 auto; z-index: 50; width: var(--hermes-panel-shown-width); border-left: 1px solid var(--border); background: var(--bg); }
     .hermes-panel[hidden] { display: none; }
     .hermes-panel iframe { display: block; width: 100%; height: 100%; border: 0; }

@@ -102,6 +102,11 @@ test("dragging the Hermes tab resizes the open panel, which keeps its width afte
   expect(right(await hermesButton(page).boundingBox())).toBe(await scrollbarStart(page));
   const conversation = await page.locator("#conversation-scroll").boundingBox();
   expect(conversation.x + conversation.width).toBeLessThanOrEqual((await shown.boundingBox()).x);
+  // The keyboard still closes and opens it after a drag.
+  await hermesButton(page).press("Enter");
+  await expect(shown).toBeHidden();
+  await hermesButton(page).press("Enter");
+  await expect(shown).toBeVisible();
 
   await page.reload();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
