@@ -76,6 +76,42 @@ test("Hermes talks in a panel next to the session, which switching sessions and 
   await expect(page.getByLabel("Message to Pi")).toBeFocused();
 });
 
+// Drags the Hermes tab sideways by the given pixels, with the mouse.
+async function dragHermesTab(page, by) {
+  const { x, y, width, height } = await hermesButton(page).boundingBox();
+  await page.mouse.move(x + width / 2, y + height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x + width / 2 + by / 2, y + height / 2);
+  await page.mouse.move(x + width / 2 + by, y + height / 2);
+  await page.mouse.up();
+}
+
+test("dragging the Hermes tab resizes the open panel, which keeps its width after a reload", async ({ page }) => {
+  const shown = page.locator("#hermes-panel");
+  // Closed, the tab only opens the panel.
+  await dragHermesTab(page, -150);
+  await expect(shown).toBeHidden();
+
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+  const before = (await shown.boundingBox()).width;
+  await dragHermesTab(page, -100);
+  await expect.poll(async () => Math.round((await shown.boundingBox()).width)).toBe(Math.round(before + 100));
+  // The drag leaves the panel open, with the tab on its edge and the session in full view next to it.
+  await expect(shown).toBeVisible();
+  expect(right(await hermesButton(page).boundingBox())).toBe(await scrollbarStart(page));
+  const conversation = await page.locator("#conversation-scroll").boundingBox();
+  expect(conversation.x + conversation.width).toBeLessThanOrEqual((await shown.boundingBox()).x);
+
+  await page.reload();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+  expect(Math.round((await shown.boundingBox()).width)).toBe(Math.round(before + 100));
+
+  // A click still closes the panel.
+  await hermesButton(page).click();
+  await expect(shown).toBeHidden();
+});
+
 test("the panel says Hermes is starting until its conversation shows", async ({ page }) => {
   let release;
   const held = new Promise((resolve) => { release = resolve; });

@@ -1,4 +1,7 @@
 const HERMES_PANEL_OPEN_KEY = "gripi:hermes-panel-open";
+const HERMES_PANEL_WIDTH_KEY = "gripi:hermes-panel-width";
+// How far the Hermes tab moves before a press on it resizes the panel rather than closes it.
+const HERMES_RESIZE_THRESHOLD_PX = 4;
 const HERMES_FOLLOW_INTERVAL_MS = 5_000;
 const HERMES_WINDOW_FEATURES = "popup,width=480,height=820";
 
@@ -38,8 +41,10 @@ export class HermesPanelController {
       if (this.callOnLoad) this.frame.contentWindow.postMessage("gripi:hermes-voice-call", this.window.location.origin);
       this.callOnLoad = false;
     });
+    this.showWidth(this.stored(HERMES_PANEL_WIDTH_KEY));
+    this.document.querySelector("[data-hermes-toggle]").addEventListener("pointerdown", (event) => this.startResize(event));
     this.document.addEventListener("click", (event) => {
-      if (event.target.closest("[data-hermes-toggle]")) this.toggle();
+      if (event.target.closest("[data-hermes-toggle]") && !this.resized) this.toggle();
       // On a phone, the panel covers the tab, so its loading screen needs a way out.
       if (event.target.closest("[data-hermes-panel-close]")) this.close();
     });
@@ -147,12 +152,54 @@ export class HermesPanelController {
     this.close();
   }
 
-  storedOpen() {
+  // Dragging the tab of the open panel sideways resizes the panel, within the bounds that the stylesheet sets.
+  startResize(event) {
+    this.resized = false;
+    if (this.panel.hidden || event.button !== 0) return;
+    const tab = event.currentTarget;
+    const startX = event.clientX;
+    const startWidth = this.panel.getBoundingClientRect().width;
+    // The tab keeps the pointer while it crosses the panel's frame, which would otherwise take it.
+    tab.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      const by = startX - moveEvent.clientX;
+      if (!this.resized && Math.abs(by) < HERMES_RESIZE_THRESHOLD_PX) return;
+      this.resized = true;
+      this.showWidth(`${startWidth + by}px`);
+    };
+    const end = () => {
+      tab.removeEventListener("pointermove", move);
+      tab.removeEventListener("pointerup", end);
+      tab.removeEventListener("pointercancel", end);
+      // The width the panel shows, so a drag past a bound leaves none of the way back to drag over again.
+      if (this.resized) this.store(HERMES_PANEL_WIDTH_KEY, `${this.panel.getBoundingClientRect().width}px`);
+    };
+    tab.addEventListener("pointermove", move);
+    tab.addEventListener("pointerup", end);
+    tab.addEventListener("pointercancel", end);
+  }
+
+  showWidth(width) {
+    if (width) this.document.documentElement.style.setProperty("--hermes-panel-width", width);
+  }
+
+  stored(key) {
     try {
-      return this.window.localStorage.getItem(HERMES_PANEL_OPEN_KEY) === "true";
+      return this.window.localStorage.getItem(key);
     } catch (_error) {
-      return false;
+      return null;
     }
+  }
+
+  store(key, value) {
+    try {
+      this.window.localStorage.setItem(key, value);
+    } catch (_error) {
+    }
+  }
+
+  storedOpen() {
+    return this.stored(HERMES_PANEL_OPEN_KEY) === "true";
   }
 
   storeOpen(open) {
