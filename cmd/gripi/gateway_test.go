@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -626,6 +629,69 @@ func TestDeleteExplainsWhatItCannotDelete(t *testing.T) {
 	for _, path := range []string{alpha, beta} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("a refused gripi delete removed %s (%v)", path, err)
+		}
+	}
+}
+
+// piCLI starts a process whose arguments are those given, such as Pi CLI's, which outlives its parent, so that it
+// descends from no gateway. It ends with the test.
+func piCLI(t *testing.T, arguments ...string) int {
+	t.Helper()
+	output, err := exec.Command("sh", append([]string{"-c", `sh -c 'while :; do sleep 1; done' pi "$@" </dev/null >/dev/null 2>&1 & echo $!`, "sh"}, arguments...)...).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
+}
+
+func TestTakeoverHandsASessionThatPiCLIUsedBackToTheGateway(t *testing.T) {
+	alpha, beta := fakePiGateway(t)
+	// Pi CLI writes to sessions that the gateway has seen.
+	runCLI("list")
+	for _, path := range []string{alpha, beta} {
+		appendSessionRecords(t, path, map[string]any{"type": "message", "id": "external", "parentId": "assistant-1", "timestamp": "2026-01-02T00:00:09Z", "message": map[string]any{"role": "assistant", "stopReason": "stop", "content": []any{map[string]any{"type": "text", "text": "From Pi CLI"}}}})
+	}
+	// The gateway notices Pi CLI's writes once it is to write the session itself.
+	for _, id := range []string{"0a1-alpha", "0a1-beta"} {
+		if code, _, stderr := runCLI("send", id, "message"); code != 1 || !strings.Contains(stderr, "'gripi takeover "+id+"'") {
+			t.Fatalf("send to a session used in Pi CLI = %d, stderr %q", code, stderr)
+		}
+		eventually(t, id, func(session gateway.LocalSession) bool { return session.State == "external" })
+	}
+
+	// Pi CLI still runs with the session, named by the start of its ID.
+	pid := piCLI(t, "--session", "0a1-be")
+	code, stdout, stderr := runCLI("takeover", "0a1-b")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, fmt.Sprintf("Pi CLI still has the session open (process %d)", pid)) {
+		t.Fatalf("gripi takeover while Pi CLI runs = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI("takeover", "0a1-b", "--force", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.State != "idle" {
+		t.Fatalf("gripi takeover --force = %d, stderr %q, session %+v", code, stderr, session)
+	}
+
+	code, stdout, stderr = runCLI("takeover", "0a1-a", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.State != "idle" {
+		t.Fatalf("gripi takeover = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if code, _, stderr := runCLI("send", "0a1-a", "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send after the takeover = %d, stderr %q", code, stderr)
+	}
+	if code, _, stderr := runCLI("wait", "0a1-a"); code != 0 {
+		t.Fatalf("gripi wait after the takeover = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr = runCLI("takeover", "0a1-a")
+	if code != 0 || !strings.Contains(stdout, "idle") || !strings.Contains(stderr, "already") {
+		t.Fatalf("gripi takeover of the gateway's session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	for _, usage := range [][]string{{"takeover"}, {"takeover", ""}, {"takeover", "0a1-a", "0a1-b"}, {"takeover", "0a1-a", "--bogus"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help takeover") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
 	}
 }

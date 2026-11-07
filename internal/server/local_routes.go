@@ -119,6 +119,7 @@ func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /conversation", app.localConversation)
 	mux.HandleFunc("GET /session_images/{entry_id}/{file}", app.sessionImage)
 	mux.HandleFunc("POST /search", app.localSearch)
+	mux.HandleFunc("POST /sessions/takeover", app.localTakeOver)
 	mux.HandleFunc("POST /prompt", app.prompt)
 	mux.HandleFunc("POST /abort", app.abortSession)
 	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
@@ -369,6 +370,33 @@ func (app *application) localSearch(response http.ResponseWriter, request *http.
 		}
 	}
 	writeJSON(response, map[string]any{"results": found})
+}
+
+// localTakeOver takes over a session as Take over does in the browser. An agent may run the command when nobody is
+// in front of the session's Pi CLI to say whether they are done there, so unless force is set it refuses while a
+// process of Pi CLI names the session.
+func (app *application) localTakeOver(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	path := request.FormValue("session")
+	detector, detects := app.guard.(agent.CLIDetector)
+	if detects && request.FormValue("force") != "true" && app.validOwnedSessionPath(request, path) {
+		processes, err := detector.CLIProcesses(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			writeInternalError(response, "look for Pi CLI before a takeover", err)
+			return
+		}
+		if len(processes) > 0 {
+			ids := make([]string, len(processes))
+			for index, process := range processes {
+				ids[index] = strconv.Itoa(process)
+			}
+			writeJSONStatus(response, http.StatusConflict, map[string]string{"error": fmt.Sprintf("Pi CLI still has the session open (process %s), and taking it over would leave the session file to two writers. Take it over once that Pi CLI has exited", strings.Join(ids, ", "))})
+			return
+		}
+	}
+	app.takeOverSession(response, request)
 }
 
 func (app *application) localSessionState(path string) string {

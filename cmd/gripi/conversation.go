@@ -286,7 +286,7 @@ does not return until Pi CLI exits.
 The gateway must not be running the session: its state has to be idle,
 external or conflict, and Pi must have replied in it at least once. Once Pi
 CLI has written to the session, the gateway only follows it (state external)
-until someone takes it over in the browser.
+until someone takes it over, in the browser or with 'gripi takeover'.
 
 Pi CLI starts as it does for any session. It does not get the environment
 variables saved in Gripi, and it asks before it trusts a project.
@@ -350,4 +350,78 @@ func openSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return failure(stderr, "open", err)
 	}
 	return 0
+}
+
+const takeoverHelp = `Usage:
+  gripi takeover <session> [--force] [--json]
+
+Takes over a session that Pi CLI used, as Take over does in the browser, then
+prints it. Once Pi CLI has written to a session, the gateway only follows it
+(state external) and accepts no messages for it, until someone takes it over.
+A session whose file changed in a way the gateway could not follow (state
+conflict) is taken over in the same way, if the gateway can. A session in any
+other state is the gateway's already, and is only printed.
+
+Take over only a session that nobody uses in Pi CLI any more. If Pi CLI writes
+to it again, the session ends in state conflict.
+
+The gateway refuses while a running pi process names the session in its
+arguments, as 'pi --session <path or ID>' or 'pi --session-id <ID>' do. It
+cannot see Pi CLI that was started with --continue or --resume, or that runs
+as another user or on another machine.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+
+Flags:
+  --force  Take over even while a pi process names the session. Agents use
+           it only when the user explicitly says so.
+  --json   Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  gripi takeover 01a107aa && gripi send 01a107aa "Carry on with the plan"
+
+Exit codes:
+  0  the gateway has the session
+  1  the gateway cannot be reached or did not answer, it refused the request,
+     such as while Pi CLI has the session open, or no single session matched
+  2  usage error
+`
+
+func takeOverSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("takeover", flag.ContinueOnError)
+	force := flags.Bool("force", false, "")
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "takeover", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "takeover", "takes exactly one session")
+	}
+	client, session, err := connect(positional[0])
+	if err != nil {
+		return failure(stderr, "takeover", err)
+	}
+	if session.State == "external" || session.State == "conflict" {
+		form := url.Values{"session": {session.Path}}
+		if *force {
+			form.Set("force", "true")
+		}
+		if err := client.post("/sessions/takeover", form, &struct{}{}); err != nil {
+			return failure(stderr, "takeover", err)
+		}
+		current, err := client.sessions(session.Path)
+		if err != nil {
+			return failure(stderr, "takeover", err)
+		}
+		if len(current) != 1 {
+			return failure(stderr, "takeover", fmt.Errorf("session %s no longer exists", session.Path))
+		}
+		session = current[0]
+	} else {
+		fmt.Fprintf(stderr, "gripi takeover: the gateway has the session already (%s)\n", session.State)
+	}
+	return printSession(stdout, stderr, "takeover", session, *asJSON)
 }

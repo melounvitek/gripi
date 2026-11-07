@@ -536,7 +536,8 @@ command, and the composer's own commands (/new, /compact, /name, /model,
 Pi still expands its skills, prompt templates and extension commands, such as
 /skill:name.
 
-A session in state external or conflict accepts no messages.
+A session in state external or conflict accepts no messages until it is
+taken over, in the browser or with 'gripi takeover'.
 
 ` + sessionFields + `
 Examples:
@@ -574,6 +575,9 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return failure(stderr, "send", err)
 	}
 	if session, err = client.deliver(session, message, *steer, "send", stderr); err != nil {
+		if session.State == "external" || session.State == "conflict" {
+			err = fmt.Errorf("%w. Once nobody uses the session in Pi CLI, 'gripi takeover %s' hands it to the gateway", err, session.ID)
+		}
 		return failure(stderr, "send", err)
 	}
 	return printSession(stdout, stderr, "send", session, *asJSON)

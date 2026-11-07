@@ -27,6 +27,7 @@ Session commands (need a running gateway on this machine):
   images    Write the images in a session to files
   stop      Stop what a session is working on
   open      Continue a session in Pi CLI
+  takeover  Take back a session that Pi CLI used
   rename    Name a session
   pin       Pin a session in the browser's sidebar
   unpin     Unpin a session
@@ -64,6 +65,7 @@ var commands = []command{
 	{name: "images", summary: "Write the images in a session to files", run: saveImages, help: imagesHelp},
 	{name: "stop", summary: "Stop what a session is working on", run: stopSession, help: stopHelp},
 	{name: "open", summary: "Continue a session in Pi CLI", run: openSession, help: openHelp},
+	{name: "takeover", summary: "Take back a session that Pi CLI used", run: takeOverSession, help: takeoverHelp},
 	{name: "rename", summary: "Name a session", run: renameSession, help: renameHelp},
 	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
 	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},

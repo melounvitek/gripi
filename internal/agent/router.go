@@ -288,6 +288,14 @@ func (guard routerGuard) TakeOver(ctx context.Context, key string, beforeManaged
 }
 
 // Message explains a blocked result, which only the first agent's guard reports.
+// CLIProcesses finds none for an agent whose guard cannot tell.
+func (guard routerGuard) CLIProcesses(key string) ([]int, error) {
+	if detector, ok := guard.of(key).(CLIDetector); ok {
+		return detector.CLIProcesses(key)
+	}
+	return nil, nil
+}
+
 func (guard routerGuard) Message(result SyncResult) string {
 	return guard.router.guards[0].Message(result)
 }
