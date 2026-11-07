@@ -23,6 +23,7 @@ Session commands (need a running gateway on this machine):
   send      Send a message to a session
   wait      Wait until a session stops working
   show      Print the latest reply or the conversation of a session
+  images    Write the images in a session to files
   stop      Stop what a session is working on
   open      Continue a session in Pi CLI
   rename    Name a session
@@ -58,6 +59,7 @@ var commands = []command{
 	{name: "send", summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
 	{name: "show", summary: "Print the latest reply or the conversation of a session", run: showConversation, help: showHelp},
+	{name: "images", summary: "Write the images in a session to files", run: saveImages, help: imagesHelp},
 	{name: "stop", summary: "Stop what a session is working on", run: stopSession, help: stopHelp},
 	{name: "open", summary: "Continue a session in Pi CLI", run: openSession, help: openHelp},
 	{name: "rename", summary: "Name a session", run: renameSession, help: renameHelp},

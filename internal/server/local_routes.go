@@ -46,6 +46,15 @@ type LocalMessage struct {
 	Role      string    `json:"role"`
 	Text      string    `json:"text"`
 	Timestamp Timestamp `json:"timestamp"`
+	// Images are those stored in the session itself, such as a tool's screenshots.
+	Images []LocalImage `json:"images,omitempty"`
+}
+
+// LocalImage locates an image that GET /session_images/{entry_id}/{index} returns.
+type LocalImage struct {
+	EntryID  string `json:"entry_id"`
+	Index    int    `json:"index"`
+	MIMEType string `json:"mime_type"`
 }
 
 type commandRequestKey struct{}
@@ -107,6 +116,7 @@ func (app *application) commandToken(workspaceID string) string {
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sessions", app.localSessions)
 	mux.HandleFunc("GET /conversation", app.localConversation)
+	mux.HandleFunc("GET /session_images/{entry_id}/{file}", app.sessionImage)
 	mux.HandleFunc("POST /prompt", app.prompt)
 	mux.HandleFunc("POST /abort", app.abortSession)
 	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
@@ -212,7 +222,8 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 }
 
 // localConversation answers with the most recent messages of a session, as many as the browser first shows, or with
-// those before the position in before. start is the position of the first, which the next older page ends before.
+// those before the position in before. start is the position of the first, which the next older page ends before,
+// and leaf the end of the branch, which the next page names so that it stays on the same branch.
 func (app *application) localConversation(response http.ResponseWriter, request *http.Request) {
 	path, owned := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
 	if !owned {
@@ -231,31 +242,51 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 		return
 	}
 	defer releaseRequestSlot(app.heavyRequests)
-	window, err := app.sessionStore.Window(path, "", false, before, nil)
+	leaf := request.URL.Query().Get("leaf")
+	window, err := app.sessionStore.Window(path, leaf, leaf != "", before, nil)
 	// A new session has no file, and so no messages, until Pi has replied once.
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeInternalError(response, "read conversation for gripi commands", err)
 		return
 	}
 	messages := []LocalMessage{}
+	// calls finds the listed tool call of each ID.
+	calls := map[string]int{}
 	for _, message := range window.Messages {
 		local := LocalMessage{Role: message.Role, Text: message.Text, Timestamp: Timestamp{message.Timestamp}}
+		for _, image := range message.Images {
+			// An image that the user attached in the browser is a file of its own, which commands can read already.
+			if image.EntryID != "" {
+				local.Images = append(local.Images, LocalImage{EntryID: image.EntryID, Index: image.Index, MIMEType: image.MIMEType})
+			}
+		}
 		switch {
 		case message.Thinking:
 			continue
-		// A result stored apart from its tool call would list the call twice.
-		// Only a subagent's call is not listed, so its result stands in for it.
+		// A result stored apart from its tool call would list the call twice, so its images, such as a
+		// screenshot, go with the call. Only a subagent's call is not listed, so its result stands in for it.
 		case message.Role == "toolResult" && message.ToolName != "subagent":
-			continue
+			if call, found := calls[message.ToolCallID]; found {
+				messages[call].Images = append(messages[call].Images, local.Images...)
+				continue
+			}
+			// The call is on an older page.
+			if len(local.Images) == 0 {
+				continue
+			}
+			local.Role, local.Text = "tool", message.ToolName
 		case message.Compaction:
 			local.Text = message.Summary
 		// Tool calls and shell commands: the summary says what ran, the text holds the output.
 		case message.Compact:
 			local.Role, local.Text = "tool", message.Summary
 		}
+		if message.ToolCallID != "" && message.Role != "toolResult" {
+			calls[message.ToolCallID] = len(messages)
+		}
 		messages = append(messages, local)
 	}
-	writeJSON(response, map[string]any{"messages": messages, "start": window.StartIndex})
+	writeJSON(response, map[string]any{"messages": messages, "start": window.StartIndex, "leaf": window.TreeLeafID})
 }
 
 func (app *application) localSessionState(path string) string {

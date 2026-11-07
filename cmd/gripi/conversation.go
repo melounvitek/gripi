@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,6 +54,9 @@ Message fields:
   text       The whole message, except for tool and status
   timestamp  Time the message was written, in UTC with milliseconds, such
              as 2026-10-06T18:47:02.725Z
+  images     Only in JSON, and only when the message has images, such as
+             the screenshots of a tool call; 'gripi images' writes them
+             to files
 
 Examples:
   gripi send 01a107aa "Run the tests" && gripi wait 01a107aa && gripi show 01a107aa
@@ -98,37 +102,16 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 	if err != nil {
 		return failure(stderr, "show", err)
 	}
-	page := func(before int) ([]gateway.LocalMessage, int, error) {
-		route := "/conversation?session=" + url.QueryEscape(session.Path)
-		if before >= 0 {
-			route += "&before=" + strconv.Itoa(before)
-		}
-		var conversation struct {
-			Messages []gateway.LocalMessage `json:"messages"`
-			Start    int                    `json:"start"`
-		}
-		err := client.get(route, &conversation)
-		return conversation.Messages, conversation.Start, err
-	}
 	selected := func(messages []gateway.LocalMessage) []gateway.LocalMessage {
 		return slices.DeleteFunc(slices.Clone(messages), func(message gateway.LocalMessage) bool {
 			return len(roles) > 0 && !slices.Contains(roles, message.Role)
 		})
 	}
-	conversation, start, err := page(-1)
+	conversation, err := client.conversation(session.Path, func(messages []gateway.LocalMessage) bool {
+		return *full || len(selected(messages)) < *tail
+	})
 	if err != nil {
 		return failure(stderr, "show", err)
-	}
-	// Each page ends where the one after it starts, so nothing is missed or listed twice.
-	for start > 0 && (*full || len(selected(conversation)) < *tail) {
-		older, olderStart, err := page(start)
-		if err != nil {
-			return failure(stderr, "show", err)
-		}
-		if olderStart >= start {
-			return failure(stderr, "show", errors.New("the conversation changed while it was read; run the command again"))
-		}
-		conversation, start = append(older, conversation...), olderStart
 	}
 	messages := selected(conversation)
 	if *tail > 0 && len(messages) > *tail {
@@ -164,6 +147,131 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 		if index < len(messages)-1 {
 			fmt.Fprintln(stdout)
 		}
+	}
+	return 0
+}
+
+// conversation reads a session's recent messages, then older ones for as long as more asks for them.
+func (client *gatewayClient) conversation(path string, more func([]gateway.LocalMessage) bool) ([]gateway.LocalMessage, error) {
+	var messages []gateway.LocalMessage
+	leaf := ""
+	for before := -1; ; {
+		route := "/conversation?session=" + url.QueryEscape(path)
+		if before >= 0 {
+			// The same branch, even when /tree has moved to another one meanwhile.
+			route += "&before=" + strconv.Itoa(before) + "&leaf=" + url.QueryEscape(leaf)
+		}
+		var page struct {
+			Messages []gateway.LocalMessage `json:"messages"`
+			Start    int                    `json:"start"`
+			Leaf     string                 `json:"leaf"`
+		}
+		if err := client.get(route, &page); err != nil {
+			return nil, err
+		}
+		if before >= 0 && page.Start >= before {
+			return nil, errors.New("the conversation changed while it was read; run the command again")
+		}
+		// Each page ends where the one after it starts, so nothing is missed or listed twice.
+		messages = append(page.Messages, messages...)
+		if page.Start == 0 || !more(messages) {
+			return messages, nil
+		}
+		if before < 0 {
+			leaf = page.Leaf
+		}
+		before = page.Start
+	}
+}
+
+const imagesHelp = `Usage:
+  gripi images <session> --out <directory> [--json]
+
+Writes the images stored in a session to files, such as the screenshots that
+Pi's tools took and the images sent to Pi, from the whole conversation. Then
+it prints the path of each file, oldest first.
+
+A file is named after the time of the message that holds the image, so the
+names sort in the conversation's order, such as
+2026-10-06T18-47-02.725Z-5f2a9c1e-0.png. A file that is already there is
+replaced, so running the command again writes the same files.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+
+Flags:
+  --out <directory>  Directory for the files; it is created when missing
+  --json             Print a JSON array instead, with the fields path, role,
+                     timestamp and mime_type of each file
+
+Example:
+  gripi images 01a107aa --out /tmp/screenshots
+
+Exit codes:
+` + sessionExitCodes
+
+// writtenImage is how gripi images reports a file that it wrote.
+type writtenImage struct {
+	Path      string            `json:"path"`
+	Role      string            `json:"role"`
+	Timestamp gateway.Timestamp `json:"timestamp"`
+	MIMEType  string            `json:"mime_type"`
+}
+
+func saveImages(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("images", flag.ContinueOnError)
+	out := flags.String("out", "", "")
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "images", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "images", "takes exactly one session")
+	}
+	if *out == "" {
+		return usageError(stderr, "images", "needs --out with a directory for the files")
+	}
+	client, session, err := connect(positional[0])
+	if err != nil {
+		return failure(stderr, "images", err)
+	}
+	messages, err := client.conversation(session.Path, func([]gateway.LocalMessage) bool { return true })
+	if err != nil {
+		return failure(stderr, "images", err)
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return failure(stderr, "images", err)
+	}
+	written := []writtenImage{}
+	for _, message := range messages {
+		for _, image := range message.Images {
+			var data []byte
+			route := fmt.Sprintf("/session_images/%s/%d?session=%s", url.PathEscape(image.EntryID), image.Index, url.QueryEscape(session.Path))
+			if err := client.get(route, &data); err != nil {
+				return failure(stderr, "images", err)
+			}
+			extension := strings.TrimPrefix(image.MIMEType, "image/")
+			if extension == "jpeg" {
+				extension = "jpg"
+			}
+			// Colons would not do in file names on every system.
+			name := fmt.Sprintf("%s-%s-%d.%s", message.Timestamp.UTC().Format("2006-01-02T15-04-05.000Z"), image.EntryID, image.Index, extension)
+			path := filepath.Join(*out, filepath.Base(name))
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				return failure(stderr, "images", err)
+			}
+			written = append(written, writtenImage{Path: path, Role: message.Role, Timestamp: message.Timestamp, MIMEType: image.MIMEType})
+		}
+	}
+	if *asJSON {
+		return printJSON(stdout, stderr, "images", written)
+	}
+	if len(written) == 0 {
+		fmt.Fprintln(stderr, "gripi images: the session has no images")
+	}
+	for _, image := range written {
+		fmt.Fprintln(stdout, image.Path)
 	}
 	return 0
 }

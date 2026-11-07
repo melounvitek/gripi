@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -147,6 +148,54 @@ func TestShowPagesThroughALongConversation(t *testing.T) {
 	for _, usage := range [][]string{{"--role", "system"}, {"--tail", "-1"}, {"--full", "--tail", "2"}} {
 		if code, stdout, stderr := runCLI(append([]string{"show", "0a1-b"}, usage...)...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help show") {
 			t.Fatalf("gripi show %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+}
+
+func TestImagesWritesTheImagesOfASessionToFiles(t *testing.T) {
+	_, beta := fakePiGateway(t)
+	image := func(data string) map[string]any {
+		return map[string]any{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString([]byte(data))}
+	}
+	appendSessionRecords(t, beta,
+		sessionMessage("user-2", "assistant-1", "1", map[string]any{"role": "user", "content": []any{textPart("Like this"), image("sketch")}}),
+		sessionMessage("assistant-2", "user-2", "2", map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{
+			map[string]any{"type": "toolCall", "id": "call-1", "name": "screenshot", "arguments": map[string]any{}},
+		}}),
+		sessionMessage("result-1", "assistant-2", "3", map[string]any{"role": "toolResult", "toolCallId": "call-1", "toolName": "screenshot", "isError": false, "content": []any{textPart("Two screens"), image("left screen"), image("right screen")}}),
+		sessionMessage("assistant-3", "result-1", "4", map[string]any{"role": "assistant", "stopReason": "stop", "content": []any{textPart("Done.")}}),
+	)
+	out := filepath.Join(t.TempDir(), "screenshots")
+
+	code, stdout, stderr := runCLI("images", "0a1-b", "--out", out)
+	paths := strings.Fields(stdout)
+	if code != 0 || stderr != "" || len(paths) != 3 {
+		t.Fatalf("gripi images = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	for index, expected := range []struct{ name, data string }{
+		{"2026-01-03T00-00-01.000Z-user-2-0.png", "sketch"},
+		{"2026-01-03T00-00-02.000Z-result-1-0.png", "left screen"},
+		{"2026-01-03T00-00-02.000Z-result-1-1.png", "right screen"},
+	} {
+		data, err := os.ReadFile(paths[index])
+		if paths[index] != filepath.Join(out, expected.name) || err != nil || string(data) != expected.data {
+			t.Fatalf("image %d: %s holds %q (%v), expected %s with %q", index, paths[index], data, err, expected.name, expected.data)
+		}
+	}
+
+	// Again, the same files come out.
+	code, stdout, stderr = runCLI("images", "0a1-b", "--out", out, "--json")
+	var written []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &written); err != nil || code != 0 || len(written) != 3 || written[1]["role"] != "tool" || written[1]["path"] != paths[1] {
+		t.Fatalf("gripi images --json = %d, stderr %q, %v:\n%s", code, stderr, err, stdout)
+	}
+
+	if code, stdout, stderr := runCLI("images", "0a1-a", "--out", t.TempDir()); code != 0 || stdout != "" || !strings.Contains(stderr, "no images") {
+		t.Fatalf("gripi images without images = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	for _, usage := range [][]string{{"images", "0a1-b"}, {"images", "--out", out}, {"images", "0a1-a", "0a1-b", "--out", out}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help images") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
 	}
 }

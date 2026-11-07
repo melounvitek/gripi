@@ -173,6 +173,11 @@ func (client *gatewayClient) do(request *http.Request, timeout time.Duration, re
 		}
 		return err
 	}
+	// An image comes as it is.
+	if raw, ok := result.(*[]byte); ok {
+		*raw = body
+		return nil
+	}
 	return json.Unmarshal(body, result)
 }
 

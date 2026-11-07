@@ -320,6 +320,32 @@ func TestNewDeletesTheSessionWhenItsFirstMessageIsRefused(t *testing.T) {
 	}
 }
 
+func TestShowStaysOnTheBranchOfItsFirstPage(t *testing.T) {
+	path, leaves := socketPath(t), []string{}
+	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/sessions" {
+			json.NewEncoder(response).Encode(map[string]any{"sessions": cannedSessions(1)})
+			return
+		}
+		leaves = append(leaves, request.URL.Query().Get("leaf"))
+		// Meanwhile /tree has moved the session to another branch, which an unpinned page would come from.
+		if request.URL.Query().Get("before") == "" {
+			io.WriteString(response, `{"messages":[{"role":"user","text":"newer"}],"start":1,"leaf":"leaf-a"}`)
+		} else {
+			io.WriteString(response, `{"messages":[{"role":"user","text":"older"}],"start":0,"leaf":"leaf-a"}`)
+		}
+	}), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { server.Close() })
+	t.Setenv("GRIPI_SOCKET_PATH", path)
+	code, stdout, stderr := runCLI("show", "session-00", "--full")
+	if code != 0 || stdout != "[user]\nolder\n\n[user]\nnewer\n" || !reflect.DeepEqual(leaves, []string{"", "leaf-a"}) {
+		t.Fatalf("gripi show --full = %d, stderr %q, leaves %q, stdout:\n%s", code, stderr, leaves, stdout)
+	}
+}
+
 func TestSessionCommandsExplainAnUnreachableGateway(t *testing.T) {
 	t.Setenv("GRIPI_SOCKET_PATH", socketPath(t))
 	code, stdout, stderr := runCLI("list")
