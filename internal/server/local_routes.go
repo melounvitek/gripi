@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/melounvitek/gripi/internal/access"
@@ -117,6 +118,7 @@ func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sessions", app.localSessions)
 	mux.HandleFunc("GET /conversation", app.localConversation)
 	mux.HandleFunc("GET /session_images/{entry_id}/{file}", app.sessionImage)
+	mux.HandleFunc("POST /search", app.localSearch)
 	mux.HandleFunc("POST /prompt", app.prompt)
 	mux.HandleFunc("POST /abort", app.abortSession)
 	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
@@ -287,6 +289,86 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 		messages = append(messages, local)
 	}
 	writeJSON(response, map[string]any{"messages": messages, "start": window.StartIndex, "leaf": window.TreeLeafID})
+}
+
+// LocalSearchResult is what gripi search finds in one session.
+type LocalSearchResult struct {
+	Session string `json:"session"`
+	Count   int    `json:"count"`
+	// Matches are the latest few, with a snippet of the message as their text.
+	Matches []LocalMessage `json:"matches"`
+}
+
+// searchMatchesPerSession is how many matches each session shows.
+const searchMatchesPerSession = 3
+
+// localSearch finds text in the sessions given by their paths, which the command has filtered as gripi list does.
+// It reads the files as they are, without keeping an index of their text, so that searching costs no memory between
+// searches.
+func (app *application) localSearch(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	query := strings.TrimSpace(request.FormValue("q"))
+	if query == "" {
+		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "the search text is empty"})
+		return
+	}
+	searcher, ok := app.sessionStore.(agent.Searcher)
+	if !ok {
+		writeJSON(response, map[string]any{"results": []LocalSearchResult{}})
+		return
+	}
+	if !acquireRequestSlot(response, request, app.heavyRequests) {
+		return
+	}
+	defer releaseRequestSlot(app.heavyRequests)
+	var paths []string
+	for _, path := range request.Form["session"] {
+		if app.validOwnedSessionPath(request, path) {
+			paths = append(paths, path)
+		}
+	}
+	results := make([]LocalSearchResult, len(paths))
+	failures := make([]error, len(paths))
+	next := make(chan int)
+	var searches sync.WaitGroup
+	// A few files at once keep the disk busy without taking every core from the sessions that run.
+	for range min(4, len(paths)) {
+		searches.Go(func() {
+			for index := range next {
+				found, err := searcher.Search(paths[index], query, request.Form["role"], searchMatchesPerSession)
+				// A session that Pi has not saved yet has nothing to find.
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				result := LocalSearchResult{Session: paths[index], Count: found.Count, Matches: []LocalMessage{}}
+				for _, match := range found.Matches {
+					result.Matches = append(result.Matches, LocalMessage{Role: match.Role, Text: match.Snippet, Timestamp: Timestamp{match.Timestamp}})
+				}
+				results[index], failures[index] = result, err
+			}
+		})
+	}
+	for index := range paths {
+		if request.Context().Err() != nil {
+			break
+		}
+		next <- index
+	}
+	close(next)
+	searches.Wait()
+	if err := errors.Join(failures...); err != nil {
+		writeInternalError(response, "search sessions for gripi search", err)
+		return
+	}
+	found := []LocalSearchResult{}
+	for _, result := range results {
+		if result.Count > 0 {
+			found = append(found, result)
+		}
+	}
+	writeJSON(response, map[string]any{"results": found})
 }
 
 func (app *application) localSessionState(path string) string {

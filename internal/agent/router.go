@@ -165,6 +165,17 @@ func (store routerStore) Window(key, leafID string, leafSupplied bool, cursor, a
 	return Window{}, fs.ErrNotExist
 }
 
+// Search finds nothing in the sessions of an agent whose store cannot search.
+func (store routerStore) Search(key, query string, roles []string, limit int) (SearchResult, error) {
+	if owner, ok := store.of(key); ok {
+		if searcher, ok := owner.(Searcher); ok {
+			return searcher.Search(key, query, roles, limit)
+		}
+		return SearchResult{}, nil
+	}
+	return SearchResult{}, fs.ErrNotExist
+}
+
 func (store routerStore) Status(key string) (Status, error) {
 	if owner, ok := store.of(key); ok {
 		return owner.Status(key)

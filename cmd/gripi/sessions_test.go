@@ -130,6 +130,9 @@ func TestListFiltersSessionsBeforeTheLimit(t *testing.T) {
 			t.Fatalf("gripi list %q = %q, expected %q", test.arguments, ids, test.ids)
 		}
 	}
+	if ids := listed("--cwd", "/"); len(ids) != 25 {
+		t.Fatalf("gripi list --cwd / = %d sessions", len(ids))
+	}
 	if ids := listed("--state", "working,idle"); len(ids) != 25 {
 		t.Fatalf("gripi list --state working,idle = %d sessions", len(ids))
 	}

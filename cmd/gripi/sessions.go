@@ -55,13 +55,7 @@ const sessionExitCodes = `  0  success
   2  usage error
 `
 
-const listHelp = `Usage:
-  gripi list [filters] [--all] [--json]
-
-Prints the 20 most recently active sessions, newest first. Filters narrow the
-list before the limit, and a session must match all of them.
-
-Filters:
+const sessionFilterHelp = `Filters:
   --state <state>  Only sessions in this state; repeat it or separate states
                    with commas for several, such as --state working,waiting
   --cwd <text>     Only sessions whose project directory contains the text.
@@ -74,7 +68,16 @@ Filters:
   --unread         Only sessions with an unread reply
   --since <age>    Only sessions with activity (activity_at) within this
                    age, such as 90s, 30m, 2h or 7d
+`
 
+const listHelp = `Usage:
+  gripi list [filters] [--all] [--json]
+
+Prints the 20 most recently active sessions, newest first by updated_at, as
+the browser's sidebar orders them. Filters narrow the list before the limit,
+and a session must match all of them.
+
+` + sessionFilterHelp + `
 Flags:
   --all   List every matching session instead of the latest 20
   --json  Print a JSON array instead of a table
@@ -217,45 +220,79 @@ func (client *gatewayClient) sessions(only string) ([]gateway.LocalSession, erro
 
 var sessionStates = []string{"working", "compacting", "waiting", "external", "conflict", "idle"}
 
-func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("list", flag.ContinueOnError)
-	all := flags.Bool("all", false, "")
-	asJSON := flags.Bool("json", false, "")
-	var states, tags []string
+// sessionFilters are the flags that choose sessions in gripi list and gripi search.
+type sessionFilters struct {
+	states, tags   []string
+	cwd, name      string
+	pinned, unread bool
+	since          time.Duration
+}
+
+func addSessionFilters(flags *flag.FlagSet) *sessionFilters {
+	filters := &sessionFilters{}
 	flags.Func("state", "", func(value string) error {
 		for state := range strings.SplitSeq(value, ",") {
 			// An unknown state would match nothing, which a typo must not pass for.
 			if !slices.Contains(sessionStates, state) {
 				return fmt.Errorf("%q is not a state; states are %s", state, strings.Join(sessionStates, ", "))
 			}
-			states = append(states, state)
+			filters.states = append(filters.states, state)
 		}
 		return nil
 	})
 	flags.Func("tag", "", func(value string) error {
-		tags = append(tags, value)
+		filters.tags = append(filters.tags, value)
 		return nil
 	})
-	cwd := flags.String("cwd", "", "")
-	name := flags.String("name", "", "")
-	pinned := flags.Bool("pinned", false, "")
-	unread := flags.Bool("unread", false, "")
-	var since time.Duration
+	flags.StringVar(&filters.cwd, "cwd", "", "")
+	flags.StringVar(&filters.name, "name", "", "")
+	flags.BoolVar(&filters.pinned, "pinned", false, "")
+	flags.BoolVar(&filters.unread, "unread", false, "")
 	flags.Func("since", "", func(value string) (err error) {
-		since, err = parseAge(value)
+		filters.since, err = parseAge(value)
 		return err
 	})
+	return filters
+}
+
+func (filters *sessionFilters) active() bool {
+	return len(filters.states) > 0 || len(filters.tags) > 0 || filters.cwd != "" || filters.name != "" || filters.pinned || filters.unread || filters.since > 0
+}
+
+// keep returns the sessions that match every filter.
+func (filters *sessionFilters) keep(sessions []gateway.LocalSession) ([]gateway.LocalSession, error) {
+	directory := ""
+	if strings.HasPrefix(filters.cwd, "/") || strings.HasPrefix(filters.cwd, ".") {
+		var err error
+		if directory, err = filepath.Abs(filters.cwd); err != nil {
+			return nil, err
+		}
+	}
+	return slices.DeleteFunc(sessions, func(session gateway.LocalSession) bool {
+		switch {
+		case len(filters.states) > 0 && !slices.Contains(filters.states, session.State),
+			slices.ContainsFunc(filters.tags, func(tag string) bool { return !slices.Contains(session.Tags, tag) }),
+			directory != "" && session.CWD != directory && !strings.HasPrefix(session.CWD, strings.TrimSuffix(directory, "/")+"/"),
+			directory == "" && !strings.Contains(session.CWD, filters.cwd),
+			!strings.Contains(strings.ToLower(session.Name), strings.ToLower(filters.name)),
+			filters.pinned && !session.Pinned,
+			filters.unread && !session.Unread,
+			filters.since > 0 && time.Since(session.ActivityAt.Time) > filters.since:
+			return true
+		}
+		return false
+	}), nil
+}
+
+func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("list", flag.ContinueOnError)
+	all := flags.Bool("all", false, "")
+	asJSON := flags.Bool("json", false, "")
+	filters := addSessionFilters(flags)
 	if positional, err := parseArguments(flags, arguments); err != nil {
 		return usageError(stderr, "list", err.Error())
 	} else if len(positional) > 0 {
 		return usageError(stderr, "list", "takes no arguments besides flags")
-	}
-	directory := ""
-	if strings.HasPrefix(*cwd, "/") || strings.HasPrefix(*cwd, ".") {
-		var err error
-		if directory, err = filepath.Abs(*cwd); err != nil {
-			return failure(stderr, "list", err)
-		}
 	}
 	client, err := newGatewayClient()
 	if err != nil {
@@ -265,21 +302,9 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 	if err != nil {
 		return failure(stderr, "list", err)
 	}
-	filtered := len(states) > 0 || len(tags) > 0 || *cwd != "" || *name != "" || *pinned || *unread || since > 0
-	sessions = slices.DeleteFunc(sessions, func(session gateway.LocalSession) bool {
-		switch {
-		case len(states) > 0 && !slices.Contains(states, session.State),
-			slices.ContainsFunc(tags, func(tag string) bool { return !slices.Contains(session.Tags, tag) }),
-			directory != "" && session.CWD != directory && !strings.HasPrefix(session.CWD, directory+"/"),
-			directory == "" && !strings.Contains(session.CWD, *cwd),
-			!strings.Contains(strings.ToLower(session.Name), strings.ToLower(*name)),
-			*pinned && !session.Pinned,
-			*unread && !session.Unread,
-			since > 0 && time.Since(session.ActivityAt.Time) > since:
-			return true
-		}
-		return false
-	})
+	if sessions, err = filters.keep(sessions); err != nil {
+		return failure(stderr, "list", err)
+	}
 	total := len(sessions)
 	if !*all && total > listLimit {
 		sessions = sessions[:listLimit]
@@ -290,7 +315,7 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 	printSessions(stdout, sessions)
 	if len(sessions) < total {
 		matching := ""
-		if filtered {
+		if filters.active() {
 			matching = "matching "
 		}
 		fmt.Fprintf(stderr, "Showing the latest %d of %d %ssessions; pass --all for the rest.\n", listLimit, total, matching)
