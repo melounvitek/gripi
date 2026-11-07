@@ -1,6 +1,10 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,5 +123,50 @@ func TestClaimOnASingleUserGatewayOnlyFindsTheSession(t *testing.T) {
 	}
 	if code, stdout, stderr := runCLI("claim", "0a1-a"); code != 1 || stdout != "" || !strings.Contains(stderr, "full ID") {
 		t.Fatalf("gripi claim with a prefix = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestTheNewLocalRoutesKeepToTheUsersOwnSessions(t *testing.T) {
+	_, beta := multiUserGateway(t)
+	appendSessionRecords(t, beta, sessionMessage("user-2", "assistant-1", "1", map[string]any{"role": "user", "content": []any{
+		textPart("Bob's secret plan"), map[string]any{"type": "image", "mimeType": "image/png", "data": "aW1hZ2U="},
+	}}))
+	before, err := os.ReadFile(beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := socketClient(os.Getenv("GRIPI_SOCKET_PATH"))
+	// Alice names Bob's session by its path, which the commands would not let her find.
+	request := func(method, route string, form url.Values) (int, string) {
+		t.Helper()
+		request, err := http.NewRequest(method, "http://gripi"+route, strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer "+aliceToken)
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response.StatusCode, string(body)
+	}
+
+	if status, body := request(http.MethodPost, "/search", url.Values{"q": {"secret plan"}, "session": {beta}}); status != http.StatusOK || strings.Contains(body, "secret") {
+		t.Fatalf("Alice's search of Bob's session = %d: %s", status, body)
+	}
+	if status, body := request(http.MethodGet, "/session_images/user-2/0?session="+url.QueryEscape(beta), nil); status != http.StatusNotFound {
+		t.Fatalf("Alice's read of Bob's image = %d: %s", status, body)
+	}
+	if status, body := request(http.MethodGet, "/conversation?session="+url.QueryEscape(beta)+"&before=1", nil); status != http.StatusNotFound {
+		t.Fatalf("Alice's read of Bob's conversation = %d: %s", status, body)
+	}
+	if status, body := request(http.MethodPost, "/sessions/takeover", url.Values{"session": {beta}, "force": {"true"}}); status != http.StatusNotFound {
+		t.Fatalf("Alice's takeover of Bob's session = %d: %s", status, body)
+	}
+	if after, err := os.ReadFile(beta); err != nil || string(after) != string(before) {
+		t.Fatalf("Bob's session changed (%v)", err)
 	}
 }

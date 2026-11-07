@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // CompactionPromptDeferrer is a client that holds prompts back during a compaction and delivers them after it.
@@ -39,6 +40,30 @@ type Forker interface {
 	// ForkMessages lists the messages a fork can start from, in the agent's format for the browser.
 	ForkMessages(context.Context) (json.RawMessage, error)
 	Fork(ctx context.Context, entryID string) (Branch, error)
+}
+
+// Searcher is a store that can find text in the messages of a saved session.
+type Searcher interface {
+	// Search counts the messages with the given roles whose text holds the query, ignoring case, and returns the
+	// latest limit of them, each cut to a snippet around the match. No roles means all of them.
+	Search(key, query string, roles []string, limit int) (SearchResult, error)
+}
+
+type SearchResult struct {
+	Count   int
+	Matches []SearchMatch
+}
+
+type SearchMatch struct {
+	Role      string
+	Snippet   string
+	Timestamp time.Time
+}
+
+// CLIDetector is a guard that can tell which processes of the agent's own CLI name a session, which taking it over
+// would then leave to two writers.
+type CLIDetector interface {
+	CLIProcesses(key string) ([]int, error)
 }
 
 type Cloner interface {

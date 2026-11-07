@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -38,8 +39,13 @@ const sessionFields = `Session fields:
   unread      true when a reply finished that nobody has opened in the browser
   pinned      true when the session is pinned in the browser's sidebar
   tags        Tags of the session
-  updated_at  Time of the latest message; in JSON it is in UTC with
-              milliseconds, such as 2026-10-06T18:47:02.725Z
+  updated_at  Time of the latest message that the user sent or that ended a
+              reply; in JSON it is in UTC with milliseconds, such as
+              2026-10-06T18:47:02.725Z
+  activity_at Time the session last changed, including Pi's tool calls and
+              their results, in the same format. While Pi works it shows
+              whether the turn moves on; one long tool call, such as a test
+              run, holds it still.
   last_reply  First 180 characters of the latest assistant reply
 `
 
@@ -49,19 +55,41 @@ const sessionExitCodes = `  0  success
   2  usage error
 `
 
+const sessionFilterHelp = `Filters:
+  --state <state>  Only sessions in this state; repeat it or separate states
+                   with commas for several, such as --state working,waiting
+  --cwd <text>     Only sessions whose project directory contains the text.
+                   A path that starts with / or . matches that directory
+                   and the directories below it instead, so --cwd . lists
+                   the sessions of the current directory.
+  --tag <tag>      Only sessions with this tag; repeat it to require several
+  --name <text>    Only sessions whose name contains the text, ignoring case
+  --pinned         Only pinned sessions
+  --unread         Only sessions with an unread reply
+  --since <age>    Only sessions with activity (activity_at) within this
+                   age, such as 90s, 30m, 2h or 7d
+`
+
 const listHelp = `Usage:
-  gripi list [--all] [--json]
+  gripi list [filters] [--all] [--json]
 
-Prints the 20 most recently active sessions, newest first.
+Prints the 20 most recently active sessions, newest first by updated_at, as
+the browser's sidebar orders them. Filters narrow the list before the limit,
+and a session must match all of them.
 
+` + sessionFilterHelp + `
 Flags:
-  --all   List every session instead of the latest 20
+  --all   List every matching session instead of the latest 20
   --json  Print a JSON array instead of a table
+
+No matching session is not an error: the table has only its header, and the
+JSON array is empty.
 
 ` + sessionFields + `
 Examples:
   gripi list
-  gripi list --all --json | jq -r '.[] | select(.state == "working") | .id'
+  gripi list --state working --json | jq -r '.[].id'
+  gripi list --all --cwd ~/Work/project --tag release
 
 Exit codes:
 ` + sessionExitCodes
@@ -148,6 +176,11 @@ func (client *gatewayClient) do(request *http.Request, timeout time.Duration, re
 		}
 		return err
 	}
+	// An image comes as it is.
+	if raw, ok := result.(*[]byte); ok {
+		*raw = body
+		return nil
+	}
 	return json.Unmarshal(body, result)
 }
 
@@ -185,10 +218,77 @@ func (client *gatewayClient) sessions(only string) ([]gateway.LocalSession, erro
 	return payload.Sessions, client.get(route, &payload)
 }
 
+var sessionStates = []string{"working", "compacting", "waiting", "external", "conflict", "idle"}
+
+// sessionFilters are the flags that choose sessions in gripi list and gripi search.
+type sessionFilters struct {
+	states, tags   []string
+	cwd, name      string
+	pinned, unread bool
+	since          time.Duration
+}
+
+func addSessionFilters(flags *flag.FlagSet) *sessionFilters {
+	filters := &sessionFilters{}
+	flags.Func("state", "", func(value string) error {
+		for state := range strings.SplitSeq(value, ",") {
+			// An unknown state would match nothing, which a typo must not pass for.
+			if !slices.Contains(sessionStates, state) {
+				return fmt.Errorf("%q is not a state; states are %s", state, strings.Join(sessionStates, ", "))
+			}
+			filters.states = append(filters.states, state)
+		}
+		return nil
+	})
+	flags.Func("tag", "", func(value string) error {
+		filters.tags = append(filters.tags, value)
+		return nil
+	})
+	flags.StringVar(&filters.cwd, "cwd", "", "")
+	flags.StringVar(&filters.name, "name", "", "")
+	flags.BoolVar(&filters.pinned, "pinned", false, "")
+	flags.BoolVar(&filters.unread, "unread", false, "")
+	flags.Func("since", "", func(value string) (err error) {
+		filters.since, err = parseAge(value)
+		return err
+	})
+	return filters
+}
+
+func (filters *sessionFilters) active() bool {
+	return len(filters.states) > 0 || len(filters.tags) > 0 || filters.cwd != "" || filters.name != "" || filters.pinned || filters.unread || filters.since > 0
+}
+
+// keep returns the sessions that match every filter.
+func (filters *sessionFilters) keep(sessions []gateway.LocalSession) ([]gateway.LocalSession, error) {
+	directory := ""
+	if strings.HasPrefix(filters.cwd, "/") || strings.HasPrefix(filters.cwd, ".") {
+		var err error
+		if directory, err = filepath.Abs(filters.cwd); err != nil {
+			return nil, err
+		}
+	}
+	return slices.DeleteFunc(sessions, func(session gateway.LocalSession) bool {
+		switch {
+		case len(filters.states) > 0 && !slices.Contains(filters.states, session.State),
+			slices.ContainsFunc(filters.tags, func(tag string) bool { return !slices.Contains(session.Tags, tag) }),
+			directory != "" && session.CWD != directory && !strings.HasPrefix(session.CWD, strings.TrimSuffix(directory, "/")+"/"),
+			directory == "" && !strings.Contains(session.CWD, filters.cwd),
+			!strings.Contains(strings.ToLower(session.Name), strings.ToLower(filters.name)),
+			filters.pinned && !session.Pinned,
+			filters.unread && !session.Unread,
+			filters.since > 0 && time.Since(session.ActivityAt.Time) > filters.since:
+			return true
+		}
+		return false
+	}), nil
+}
+
 func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("list", flag.ContinueOnError)
 	all := flags.Bool("all", false, "")
 	asJSON := flags.Bool("json", false, "")
+	filters := addSessionFilters(flags)
 	if positional, err := parseArguments(flags, arguments); err != nil {
 		return usageError(stderr, "list", err.Error())
 	} else if len(positional) > 0 {
@@ -202,6 +302,9 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 	if err != nil {
 		return failure(stderr, "list", err)
 	}
+	if sessions, err = filters.keep(sessions); err != nil {
+		return failure(stderr, "list", err)
+	}
 	total := len(sessions)
 	if !*all && total > listLimit {
 		sessions = sessions[:listLimit]
@@ -211,9 +314,27 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 	}
 	printSessions(stdout, sessions)
 	if len(sessions) < total {
-		fmt.Fprintf(stderr, "Showing the latest %d of %d sessions; pass --all for the rest.\n", listLimit, total)
+		matching := ""
+		if filters.active() {
+			matching = "matching "
+		}
+		fmt.Fprintf(stderr, "Showing the latest %d of %d %ssessions; pass --all for the rest.\n", listLimit, total, matching)
 	}
 	return 0
+}
+
+// parseAge reads an age such as 30m or 2h, as Go writes durations, or a whole number of days such as 7d.
+func parseAge(value string) (time.Duration, error) {
+	age, err := time.ParseDuration(value)
+	if days, found := strings.CutSuffix(value, "d"); found {
+		var count int
+		count, err = strconv.Atoi(days)
+		age = time.Duration(count) * 24 * time.Hour
+	}
+	if err != nil || age <= 0 {
+		return 0, fmt.Errorf("%q is not an age such as 90s, 30m, 2h or 7d", value)
+	}
+	return age, nil
 }
 
 // parseArguments accepts flags before, between and after positional arguments; "--" ends the flags.
@@ -299,35 +420,56 @@ func age(elapsed time.Duration) string {
 }
 
 const newHelp = `Usage:
-  gripi new <directory> [--json]
+  gripi new <directory> [message] [--id | --json]
 
-Starts a session in a project directory, then prints it. The session is empty
-until 'gripi send' gives it a first message, and it keeps a Pi process running
-until then, so start one only to use it.
+Starts a session in a project directory, then prints it. With a message, it
+also sends that as the first prompt, as 'gripi send' does, and returns once Pi
+has taken it. Without one, the session is empty until 'gripi send' gives it a
+first message, and it keeps a Pi process running until then, so start one
+only to use it.
+
+When the message cannot be sent, the new session is deleted again and the
+command fails.
 
 Arguments:
   directory  Project directory for the session; it must exist
+  message    The first prompt. Pass - to read it from stdin. Put -- before a
+             message that starts with a dash.
 
 Flags:
+  --id    Print only the session's ID
   --json  Print the session as a JSON object instead of a table
 
 ` + sessionFields + `
-Example:
-  session=$(gripi new ~/Work/project --json | jq -r .id)
-  gripi send "$session" "Run the tests" && gripi wait "$session"
+Examples:
+  session=$(gripi new ~/Work/project "Run the tests" --id) && gripi wait "$session"
+  git diff | gripi new ~/Work/project - --id
 
 Exit codes:
 ` + sessionExitCodes
 
-func newSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("new", flag.ContinueOnError)
 	asJSON := flags.Bool("json", false, "")
+	onlyID := flags.Bool("id", false, "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "new", err.Error())
 	}
-	if len(positional) != 1 || positional[0] == "" {
-		return usageError(stderr, "new", "takes exactly one directory")
+	if len(positional) < 1 || len(positional) > 2 || positional[0] == "" {
+		return usageError(stderr, "new", "takes a directory and at most one message; quote a message that has spaces")
+	}
+	if *asJSON && *onlyID {
+		return usageError(stderr, "new", "--id and --json cannot be combined")
+	}
+	message := ""
+	if len(positional) == 2 {
+		var problem string
+		if message, problem, err = readMessage(positional[1], stdin); err != nil {
+			return failure(stderr, "new", err)
+		} else if problem != "" {
+			return usageError(stderr, "new", problem)
+		}
 	}
 	// The gateway would resolve a relative directory against its own.
 	directory, err := filepath.Abs(positional[0])
@@ -351,7 +493,21 @@ func newSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	if len(sessions) != 1 {
 		return failure(stderr, "new", fmt.Errorf("session %s no longer exists", started.Session))
 	}
-	return printSession(stdout, stderr, "new", sessions[0], *asJSON)
+	session := sessions[0]
+	if message != "" {
+		if session, err = client.deliver(session, message, false, "new", stderr); err != nil {
+			// A session without its first message would only keep a Pi process running.
+			if deleteErr := client.post("/sessions/delete", url.Values{"session": {session.Path}}, &struct{}{}); deleteErr != nil {
+				return failure(stderr, "new", fmt.Errorf("%w; the session %s stays without a message, because deleting it failed too: %v", err, session.ID, deleteErr))
+			}
+			return failure(stderr, "new", fmt.Errorf("%w; the new session was deleted again", err))
+		}
+	}
+	if *onlyID {
+		fmt.Fprintln(stdout, session.ID)
+		return 0
+	}
+	return printSession(stdout, stderr, "new", session, *asJSON)
 }
 
 const sendHelp = `Usage:
@@ -380,7 +536,8 @@ command, and the composer's own commands (/new, /compact, /name, /model,
 Pi still expands its skills, prompt templates and extension commands, such as
 /skill:name.
 
-A session in state external or conflict accepts no messages.
+A session in state external or conflict accepts no messages until it is
+taken over, in the browser or with 'gripi takeover'.
 
 ` + sessionFields + `
 Examples:
@@ -402,36 +559,61 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if len(positional) < 1 || len(positional) > 2 || positional[0] == "" {
 		return usageError(stderr, "send", "takes a session and one message; quote a message that has spaces")
 	}
-	message := ""
-	if len(positional) == 2 && positional[1] != "-" {
-		message = positional[1]
-	} else {
-		// Without this, a forgotten message would leave the command waiting on a terminal forever.
-		if file, ok := stdin.(*os.File); ok {
-			if info, err := file.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
-				return usageError(stderr, "send", "needs a message as an argument or on stdin")
-			}
-		}
-		piped, err := io.ReadAll(stdin)
-		if err != nil {
-			return failure(stderr, "send", err)
-		}
-		message = string(piped)
+	argument := "-"
+	if len(positional) == 2 {
+		argument = positional[1]
 	}
-	if message = strings.TrimSpace(message); message == "" {
-		return usageError(stderr, "send", "the message is empty")
-	}
-	// Steered, the gateway would run these as the composer does; otherwise Pi would get them as text.
-	if (pi.Composer{}).SlashCommand(message).Name != "" {
-		return usageError(stderr, "send", strings.Fields(message)[0]+" is a command of the browser's composer, which send does not run")
+	message, problem, err := readMessage(argument, stdin)
+	if err != nil {
+		return failure(stderr, "send", err)
+	} else if problem != "" {
+		return usageError(stderr, "send", problem)
 	}
 
 	client, session, err := connect(positional[0])
 	if err != nil {
 		return failure(stderr, "send", err)
 	}
+	if session, err = client.deliver(session, message, *steer, "send", stderr); err != nil {
+		if session.State == "external" || session.State == "conflict" {
+			err = fmt.Errorf("%w. Once nobody uses the session in Pi CLI, 'gripi takeover %s' hands it to the gateway", err, session.ID)
+		}
+		return failure(stderr, "send", err)
+	}
+	return printSession(stdout, stderr, "send", session, *asJSON)
+}
+
+// readMessage returns the message in the argument, or on stdin when the argument is "-".
+// A message that cannot be sent gets a problem, which is a usage error.
+func readMessage(argument string, stdin io.Reader) (message, problem string, err error) {
+	message = argument
+	if argument == "-" {
+		// Without this, a forgotten message would leave the command waiting on a terminal forever.
+		if file, ok := stdin.(*os.File); ok {
+			if info, err := file.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+				return "", "needs a message as an argument or on stdin", nil
+			}
+		}
+		piped, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", "", err
+		}
+		message = string(piped)
+	}
+	if message = strings.TrimSpace(message); message == "" {
+		return "", "the message is empty", nil
+	}
+	// Steered, the gateway would run these as the composer does; otherwise Pi would get them as text.
+	if (pi.Composer{}).SlashCommand(message).Name != "" {
+		return "", strings.Fields(message)[0] + " is a command of the browser's composer, which gripi does not run", nil
+	}
+	return message, "", nil
+}
+
+// deliver sends a message to a session as a prompt and returns the session once Pi has taken it.
+func (client *gatewayClient) deliver(session gateway.LocalSession, message string, steer bool, name string, stderr io.Writer) (gateway.LocalSession, error) {
 	behavior := "follow_up"
-	if *steer {
+	if steer {
 		behavior = "steer"
 	}
 	var accepted struct {
@@ -440,6 +622,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	}
 	// bash_mode keeps a leading "!" from being run as a shell command.
 	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
+	var err error
 	for deadline := time.Now().Add(retryWindow); ; time.Sleep(100 * time.Millisecond) {
 		err = client.post("/prompt", form, &accepted)
 		if !errors.As(err, new(momentaryRefusal)) || time.Now().After(deadline) {
@@ -447,7 +630,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		}
 	}
 	if err != nil {
-		return failure(stderr, "send", err)
+		return session, err
 	}
 
 	// Pi accepts a prompt just before it reports the turn. Returning in that gap
@@ -457,12 +640,12 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		current, err := client.sessions(accepted.Session)
 		if err != nil {
 			// The message is delivered, so this must not look like a failed send.
-			fmt.Fprintf(stderr, "gripi send: delivered, but the session could not be read back: %v\n", err)
+			fmt.Fprintf(stderr, "gripi %s: delivered, but the session could not be read back: %v\n", name, err)
 		} else if len(current) == 1 {
 			session = current[0]
 		}
 		if err != nil || session.State != "idle" || accepted.Disposition == "handled" || time.Now().After(deadline) {
-			return printSession(stdout, stderr, "send", session, *asJSON)
+			return session, nil
 		}
 	}
 }
@@ -521,42 +704,50 @@ func printSession(stdout, stderr io.Writer, name string, session gateway.LocalSe
 }
 
 const waitHelp = `Usage:
-  gripi wait <session> [--timeout <seconds>] [--json]
+  gripi wait <session>... [--any] [--timeout <seconds>] [--json]
 
-Blocks until the session is no longer working or compacting, then prints it.
-Without --timeout it waits as long as that takes. Run it after 'gripi send',
-then read the reply with 'gripi show'. last_reply has the first 180 characters
-of the session's latest reply, which is an older one when the turn failed.
+Blocks until the sessions are no longer working or compacting, then prints
+them. Without --timeout it waits as long as that takes. Run it after 'gripi
+send', then read the reply with 'gripi show'. last_reply has the first 180
+characters of the session's latest reply, which is an older one when the turn
+failed.
 
 Check the printed state. idle means Pi finished. waiting, external and
 conflict also end the wait, because Pi will not continue until someone acts in
 the browser or in Pi CLI.
 
 Arguments:
-  session  Session ID, a unique prefix of it, or the session file path
+  session  Session ID, a unique prefix of it, or the session file path.
+           Give several to wait for all of them.
 
 Flags:
-  --timeout <seconds>  Give up after this long; the session is still printed
-  --json               Print the session as a JSON object instead of a table
+  --any                Return once one of the sessions is no longer working,
+                       which is at once when one is not working already
+  --timeout <seconds>  Give up after this long; the sessions are still printed
+  --json               Print the session as a JSON object instead of a table;
+                       for several sessions, a JSON array
 
 ` + sessionFields + `
-Example:
+Examples:
   gripi send 01a107aa "Run the tests" && gripi wait 01a107aa --timeout 900 --json
+  gripi wait 01a107aa 7c3e91d0 --any --json | jq -r '.[] | select(.state != "working") | .id'
 
 Exit codes:
-` + sessionExitCodes + `  3  --timeout passed while the session was still working
+` + sessionExitCodes + `  3  --timeout passed while the sessions were still working: all of them
+     with --any, otherwise at least one
 `
 
 func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("wait", flag.ContinueOnError)
 	timeout := flags.Float64("timeout", 0, "")
 	asJSON := flags.Bool("json", false, "")
+	anyOne := flags.Bool("any", false, "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "wait", err.Error())
 	}
-	if len(positional) != 1 || positional[0] == "" {
-		return usageError(stderr, "wait", "takes exactly one session")
+	if len(positional) == 0 || slices.Contains(positional, "") {
+		return usageError(stderr, "wait", "takes one or more sessions")
 	}
 	if *timeout < 0 {
 		return usageError(stderr, "wait", "--timeout cannot be negative")
@@ -568,45 +759,73 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 	if *timeout > 0 {
 		client.deadline = time.Now().Add(time.Duration(*timeout * float64(time.Second)))
 	}
-	session, err := client.session(positional[0])
+	sessions := make([]gateway.LocalSession, len(positional))
+	for index, reference := range positional {
+		if sessions[index], err = client.session(reference); err != nil {
+			return failure(stderr, "wait", err)
+		}
+	}
+	sessions, settled, err := client.settled(sessions, *anyOne)
 	if err != nil {
 		return failure(stderr, "wait", err)
 	}
-	session, settled, err := client.settled(session)
-	if err != nil {
-		return failure(stderr, "wait", err)
+	printSettled := func() int {
+		if len(sessions) == 1 {
+			return printSession(stdout, stderr, "wait", sessions[0], *asJSON)
+		}
+		if *asJSON {
+			return printJSON(stdout, stderr, "wait", sessions)
+		}
+		printSessions(stdout, sessions)
+		return 0
 	}
 	if !settled {
 		fmt.Fprintf(stderr, "gripi wait: still working after %g seconds\n", *timeout)
-		printSession(stdout, stderr, "wait", session, *asJSON)
+		printSettled()
 		return exitTimeout
 	}
-	return printSession(stdout, stderr, "wait", session, *asJSON)
+	return printSettled()
 }
 
-// settled polls the session until it is neither working nor compacting.
+// settled polls the sessions until they are neither working nor compacting, or with anyOne, until one of them is not.
 // It reports false when the client's deadline passes first.
-func (client *gatewayClient) settled(session gateway.LocalSession) (gateway.LocalSession, bool, error) {
-	for settled := false; ; {
-		current, err := client.sessions(session.Path)
+func (client *gatewayClient) settled(sessions []gateway.LocalSession, anyOne bool) ([]gateway.LocalSession, bool, error) {
+	// quiet marks the sessions that the previous poll found not working.
+	quiet := make([]bool, len(sessions))
+	for {
+		// One session is asked for alone, which spares the gateway the rest.
+		only := ""
+		if len(sessions) == 1 {
+			only = sessions[0].Path
+		}
+		current, err := client.sessions(only)
 		if err != nil {
-			return session, false, err
+			return sessions, false, err
 		}
-		if len(current) != 1 {
-			return session, false, fmt.Errorf("session %s no longer exists", session.Path)
+		settled, fresh := 0, false
+		for index, session := range sessions {
+			found := slices.IndexFunc(current, func(candidate gateway.LocalSession) bool { return candidate.Path == session.Path })
+			if found < 0 {
+				return sessions, false, fmt.Errorf("session %s no longer exists", session.Path)
+			}
+			sessions[index] = current[found]
+			working := current[found].State == "working" || current[found].State == "compacting"
+			// The gateway does not re-read a busy session's file, so the listing that
+			// first shows a finished turn can still carry the reply before it.
+			if !working && quiet[index] {
+				settled++
+			}
+			fresh = fresh || !working && !quiet[index]
+			quiet[index] = !working
 		}
-		session = current[0]
-		working := session.State == "working" || session.State == "compacting"
-		// The gateway does not re-read a busy session's file, so the listing that
-		// first shows a finished turn can still carry the reply before it.
-		if !working && settled {
-			return session, true, nil
+		if settled == len(sessions) || anyOne && settled > 0 {
+			return sessions, true, nil
 		}
-		if settled = !working; settled {
+		if fresh {
 			continue
 		}
 		if !client.deadline.IsZero() && time.Now().After(client.deadline) {
-			return session, false, nil
+			return sessions, false, nil
 		}
 		time.Sleep(time.Second)
 	}
@@ -679,10 +898,11 @@ func stopSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int 
 		}
 		// The gateway may answer while it is still stopping the session.
 		client.deadline = time.Now().Add(stopWindow)
-		var stopped bool
-		if session, stopped, err = client.settled(session); err != nil {
+		stoppedSessions, stopped, err := client.settled([]gateway.LocalSession{session}, false)
+		if err != nil {
 			return failure(stderr, "stop", err)
 		}
+		session = stoppedSessions[0]
 		if !stopped {
 			return failure(stderr, "stop", fmt.Errorf("the session is still %s. If a shell command was running in it, only that was stopped; run 'gripi stop' again", session.State))
 		}

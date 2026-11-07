@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -125,6 +128,27 @@ func eventually(t *testing.T, reference string, done func(gateway.LocalSession) 
 	}
 	t.Fatalf("%s never reached the expected state: %+v", reference, listed)
 	return gateway.LocalSession{}
+}
+
+func TestActivityFollowsToolCallsThatTheLatestMessageMisses(t *testing.T) {
+	_, beta := fakePiGateway(t)
+	before := eventually(t, "0a1-beta", func(gateway.LocalSession) bool { return true })
+	if before.ActivityAt.Before(before.UpdatedAt.Time) {
+		t.Fatalf("activity_at %s is before updated_at %s", before.ActivityAt, before.UpdatedAt)
+	}
+	started := time.Now()
+	appendSessionRecords(t, beta, sessionMessage("user-2", "assistant-1", "3", map[string]any{"role": "user", "content": []any{textPart("Run the tests")}}))
+	updated := eventually(t, "0a1-beta", func(session gateway.LocalSession) bool { return session.UpdatedAt.After(before.UpdatedAt.Time) })
+
+	// A tool call is not a reply, so it leaves updated_at as it was.
+	time.Sleep(20 * time.Millisecond)
+	appendSessionRecords(t, beta, sessionMessage("assistant-2", "user-2", "4", map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{
+		map[string]any{"type": "toolCall", "id": "call-1", "name": "bash", "arguments": map[string]any{"command": "make test"}},
+	}}))
+	after := eventually(t, "0a1-beta", func(session gateway.LocalSession) bool { return session.ActivityAt.After(updated.ActivityAt.Time) })
+	if !after.UpdatedAt.Equal(updated.UpdatedAt.Time) || after.ActivityAt.Before(started) {
+		t.Fatalf("after a tool call: updated_at %s (was %s), activity_at %s", after.UpdatedAt, updated.UpdatedAt, after.ActivityAt)
+	}
 }
 
 func TestSendDeliversPromptsAndReturnsOnceTheSessionIsWorking(t *testing.T) {
@@ -296,9 +320,46 @@ func TestWaitEndsWhenPiNeedsAnAnswerInTheBrowser(t *testing.T) {
 	}
 }
 
+func TestWaitForSeveralSessions(t *testing.T) {
+	fakePiGateway(t)
+	if code, _, stderr := runCLI("send", "0a1-a", "Start the follow-up scenario"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	states := func(stdout string) map[string]string {
+		t.Helper()
+		var sessions []gateway.LocalSession
+		if err := json.Unmarshal([]byte(stdout), &sessions); err != nil {
+			t.Fatalf("not a JSON array of sessions (%v): %q", err, stdout)
+		}
+		result := map[string]string{}
+		for _, session := range sessions {
+			result[session.ID] = session.State
+		}
+		return result
+	}
+
+	code, stdout, stderr := runCLI("wait", "0a1-a", "0a1-b", "--timeout", "0.6", "--json")
+	if listed := states(stdout); code != 3 || listed["0a1-alpha"] != "working" || listed["0a1-beta"] != "idle" {
+		t.Fatalf("gripi wait for both = %d, stderr %q, states %v", code, stderr, listed)
+	}
+	started := time.Now()
+	code, stdout, stderr = runCLI("wait", "0a1-a", "0a1-b", "--any", "--timeout", "5", "--json")
+	if listed := states(stdout); code != 0 || time.Since(started) > 3*time.Second || listed["0a1-alpha"] != "working" || listed["0a1-beta"] != "idle" {
+		t.Fatalf("gripi wait --any = %d after %s, stderr %q, states %v", code, time.Since(started), stderr, listed)
+	}
+
+	if code, _, stderr := runCLI("stop", "0a1-a"); code != 0 {
+		t.Fatalf("gripi stop = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr = runCLI("wait", "0a1-a", "0a1-b")
+	if code != 0 || stderr != "" || strings.Count(stdout, "\n") != 3 || strings.Contains(stdout, "working") {
+		t.Fatalf("gripi wait for two stopped sessions = %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+}
+
 func TestWaitExplainsWhatItCannotWaitFor(t *testing.T) {
 	fakePiGateway(t)
-	for _, usage := range [][]string{{"wait"}, {"wait", "0a1-a", "0a1-b"}, {"wait", "0a1-a", "--timeout", "soon"}, {"wait", "0a1-a", "--timeout", "-1"}} {
+	for _, usage := range [][]string{{"wait"}, {"wait", "0a1-a", ""}, {"wait", "0a1-a", "--timeout", "soon"}, {"wait", "0a1-a", "--timeout", "-1"}} {
 		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help wait") {
 			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
@@ -477,9 +538,34 @@ func TestNewStartsASessionThatTakesMessages(t *testing.T) {
 	}
 }
 
+func TestNewSendsTheFirstMessage(t *testing.T) {
+	fakePiGateway(t)
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("new", directory, "Show the deterministic browser response", "--id")
+	id := strings.TrimSuffix(stdout, "\n")
+	if code != 0 || stderr != "" || id == "" || strings.ContainsAny(id, " \n") {
+		t.Fatalf("gripi new with a message = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI("wait", id, "--json")
+	if session := decodeSession(t, stdout); code != 0 || session.CWD != directory || session.LastReply != "Deterministic browser response complete." {
+		t.Fatalf("gripi wait on the new session = %d, stderr %q, session %+v", code, stderr, session)
+	}
+
+	code, stdout, stderr = runCLIWithInput("Show the deterministic browser response\n", "new", directory, "-", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID == id || session.State != "working" {
+		t.Fatalf("gripi new with a message on stdin = %d, stderr %q, session %+v", code, stderr, session)
+	}
+}
+
 func TestNewExplainsWhereItCannotStartASession(t *testing.T) {
 	fakePiGateway(t)
-	for _, usage := range [][]string{{"new"}, {"new", ""}, {"new", "one", "two"}, {"new", ".", "--bogus"}} {
+	_, before, _ := runCLI("list", "--all", "--json")
+	// A message that cannot be sent is refused before a session starts.
+	for _, usage := range [][]string{{"new"}, {"new", ""}, {"new", "one", "two", "three"}, {"new", ".", "--bogus"}, {"new", ".", "  "}, {"new", ".", "/compact"}, {"new", ".", "message", "--id", "--json"}} {
 		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help new") {
 			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
@@ -487,6 +573,9 @@ func TestNewExplainsWhereItCannotStartASession(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	if code, stdout, stderr := runCLI("new", missing); code != 1 || stdout != "" || !strings.Contains(stderr, "existing directory") {
 		t.Fatalf("gripi new in a missing directory = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, after, _ := runCLI("list", "--all", "--json"); after != before {
+		t.Fatalf("a refused gripi new left a session:\n%s", after)
 	}
 }
 
@@ -540,6 +629,69 @@ func TestDeleteExplainsWhatItCannotDelete(t *testing.T) {
 	for _, path := range []string{alpha, beta} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("a refused gripi delete removed %s (%v)", path, err)
+		}
+	}
+}
+
+// piCLI starts a process whose arguments are those given, such as Pi CLI's, which outlives its parent, so that it
+// descends from no gateway. It ends with the test.
+func piCLI(t *testing.T, arguments ...string) int {
+	t.Helper()
+	output, err := exec.Command("sh", append([]string{"-c", `sh -c 'while :; do sleep 1; done' pi "$@" </dev/null >/dev/null 2>&1 & echo $!`, "sh"}, arguments...)...).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
+}
+
+func TestTakeoverHandsASessionThatPiCLIUsedBackToTheGateway(t *testing.T) {
+	alpha, beta := fakePiGateway(t)
+	// Pi CLI writes to sessions that the gateway has seen.
+	runCLI("list")
+	for _, path := range []string{alpha, beta} {
+		appendSessionRecords(t, path, map[string]any{"type": "message", "id": "external", "parentId": "assistant-1", "timestamp": "2026-01-02T00:00:09Z", "message": map[string]any{"role": "assistant", "stopReason": "stop", "content": []any{map[string]any{"type": "text", "text": "From Pi CLI"}}}})
+	}
+	// The gateway notices Pi CLI's writes once it is to write the session itself.
+	for _, id := range []string{"0a1-alpha", "0a1-beta"} {
+		if code, _, stderr := runCLI("send", id, "message"); code != 1 || !strings.Contains(stderr, "'gripi takeover "+id+"'") {
+			t.Fatalf("send to a session used in Pi CLI = %d, stderr %q", code, stderr)
+		}
+		eventually(t, id, func(session gateway.LocalSession) bool { return session.State == "external" })
+	}
+
+	// Pi CLI still runs with the session, named by the start of its ID.
+	pid := piCLI(t, "--session", "0a1-be")
+	code, stdout, stderr := runCLI("takeover", "0a1-b")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, fmt.Sprintf("Pi CLI still has the session open (process %d)", pid)) {
+		t.Fatalf("gripi takeover while Pi CLI runs = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI("takeover", "0a1-b", "--force", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.State != "idle" {
+		t.Fatalf("gripi takeover --force = %d, stderr %q, session %+v", code, stderr, session)
+	}
+
+	code, stdout, stderr = runCLI("takeover", "0a1-a", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.State != "idle" {
+		t.Fatalf("gripi takeover = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if code, _, stderr := runCLI("send", "0a1-a", "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send after the takeover = %d, stderr %q", code, stderr)
+	}
+	if code, _, stderr := runCLI("wait", "0a1-a"); code != 0 {
+		t.Fatalf("gripi wait after the takeover = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr = runCLI("takeover", "0a1-a")
+	if code != 0 || !strings.Contains(stdout, "idle") || !strings.Contains(stderr, "already") {
+		t.Fatalf("gripi takeover of the gateway's session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	for _, usage := range [][]string{{"takeover"}, {"takeover", ""}, {"takeover", "0a1-a", "0a1-b"}, {"takeover", "0a1-a", "--bogus"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help takeover") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
 	}
 }

@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/melounvitek/gripi/internal/access"
@@ -33,7 +35,9 @@ type LocalSession struct {
 	Pinned    bool      `json:"pinned"`
 	Tags      []string  `json:"tags"`
 	UpdatedAt Timestamp `json:"updated_at"`
-	LastReply string    `json:"last_reply"`
+	// ActivityAt is when the session file last changed, which tool calls do too, and never before UpdatedAt.
+	ActivityAt Timestamp `json:"activity_at"`
+	LastReply  string    `json:"last_reply"`
 	// Agent names the session's agent when the gateway runs several.
 	Agent string `json:"agent,omitempty"`
 }
@@ -43,6 +47,15 @@ type LocalMessage struct {
 	Role      string    `json:"role"`
 	Text      string    `json:"text"`
 	Timestamp Timestamp `json:"timestamp"`
+	// Images are those stored in the session itself, such as a tool's screenshots.
+	Images []LocalImage `json:"images,omitempty"`
+}
+
+// LocalImage locates an image that GET /session_images/{entry_id}/{index} returns.
+type LocalImage struct {
+	EntryID  string `json:"entry_id"`
+	Index    int    `json:"index"`
+	MIMEType string `json:"mime_type"`
 }
 
 type commandRequestKey struct{}
@@ -104,6 +117,9 @@ func (app *application) commandToken(workspaceID string) string {
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sessions", app.localSessions)
 	mux.HandleFunc("GET /conversation", app.localConversation)
+	mux.HandleFunc("GET /session_images/{entry_id}/{file}", app.sessionImage)
+	mux.HandleFunc("POST /search", app.localSearch)
+	mux.HandleFunc("POST /sessions/takeover", app.localTakeOver)
 	mux.HandleFunc("POST /prompt", app.prompt)
 	mux.HandleFunc("POST /abort", app.abortSession)
 	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
@@ -188,10 +204,15 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 		if tags == nil {
 			tags = []string{}
 		}
+		// A session that Pi has not saved yet has no file, and a Hermes session is not a file.
+		activity := session.ConversationActivityAt
+		if info, err := os.Stat(session.Path); err == nil && info.ModTime().After(activity) {
+			activity = info.ModTime()
+		}
 		result = append(result, LocalSession{
 			ID: session.ID, Path: session.Path, Name: session.DisplayName, CWD: session.CWD,
 			State: app.localSessionState(session.Path), Unread: view.Unread[session.Path], Pinned: view.Pinned[session.Path],
-			Tags: tags, UpdatedAt: Timestamp{session.ConversationActivityAt}, LastReply: session.LatestAssistantResponsePreview,
+			Tags: tags, UpdatedAt: Timestamp{session.ConversationActivityAt}, ActivityAt: Timestamp{activity}, LastReply: session.LatestAssistantResponsePreview,
 			Agent: session.Agent,
 		})
 	}
@@ -203,41 +224,179 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 	writeJSON(response, payload)
 }
 
-// localConversation answers with the most recent messages of a session, as many as the browser first shows.
+// localConversation answers with the most recent messages of a session, as many as the browser first shows, or with
+// those before the position in before. start is the position of the first, which the next older page ends before,
+// and leaf the end of the branch, which the next page names so that it stays on the same branch.
 func (app *application) localConversation(response http.ResponseWriter, request *http.Request) {
 	path, owned := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
 	if !owned {
 		return
 	}
+	var before *int
+	if value := request.URL.Query().Get("before"); value != "" {
+		position, err := strconv.Atoi(value)
+		if err != nil || position < 0 {
+			writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "before must be a position in the conversation"})
+			return
+		}
+		before = &position
+	}
 	if !acquireRequestSlot(response, request, app.heavyRequests) {
 		return
 	}
 	defer releaseRequestSlot(app.heavyRequests)
-	window, err := app.sessionStore.Window(path, "", false, nil, nil)
+	leaf := request.URL.Query().Get("leaf")
+	window, err := app.sessionStore.Window(path, leaf, leaf != "", before, nil)
 	// A new session has no file, and so no messages, until Pi has replied once.
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeInternalError(response, "read conversation for gripi commands", err)
 		return
 	}
 	messages := []LocalMessage{}
+	// calls finds the listed tool call of each ID.
+	calls := map[string]int{}
 	for _, message := range window.Messages {
 		local := LocalMessage{Role: message.Role, Text: message.Text, Timestamp: Timestamp{message.Timestamp}}
+		for _, image := range message.Images {
+			// An image that the user attached in the browser is a file of its own, which commands can read already.
+			if image.EntryID != "" {
+				local.Images = append(local.Images, LocalImage{EntryID: image.EntryID, Index: image.Index, MIMEType: image.MIMEType})
+			}
+		}
 		switch {
 		case message.Thinking:
 			continue
-		// A result stored apart from its tool call would list the call twice.
-		// Only a subagent's call is not listed, so its result stands in for it.
+		// A result stored apart from its tool call would list the call twice, so its images, such as a
+		// screenshot, go with the call. Only a subagent's call is not listed, so its result stands in for it.
 		case message.Role == "toolResult" && message.ToolName != "subagent":
-			continue
+			if call, found := calls[message.ToolCallID]; found {
+				messages[call].Images = append(messages[call].Images, local.Images...)
+				continue
+			}
+			// The call is on an older page.
+			if len(local.Images) == 0 {
+				continue
+			}
+			local.Role, local.Text = "tool", message.ToolName
 		case message.Compaction:
 			local.Text = message.Summary
 		// Tool calls and shell commands: the summary says what ran, the text holds the output.
 		case message.Compact:
 			local.Role, local.Text = "tool", message.Summary
 		}
+		if message.ToolCallID != "" && message.Role != "toolResult" {
+			calls[message.ToolCallID] = len(messages)
+		}
 		messages = append(messages, local)
 	}
-	writeJSON(response, map[string]any{"messages": messages})
+	writeJSON(response, map[string]any{"messages": messages, "start": window.StartIndex, "leaf": window.TreeLeafID})
+}
+
+// LocalSearchResult is what gripi search finds in one session.
+type LocalSearchResult struct {
+	Session string `json:"session"`
+	Count   int    `json:"count"`
+	// Matches are the latest few, with a snippet of the message as their text.
+	Matches []LocalMessage `json:"matches"`
+}
+
+// searchMatchesPerSession is how many matches each session shows.
+const searchMatchesPerSession = 3
+
+// localSearch finds text in the sessions given by their paths, which the command has filtered as gripi list does.
+// It reads the files as they are, without keeping an index of their text, so that searching costs no memory between
+// searches.
+func (app *application) localSearch(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	query := strings.TrimSpace(request.FormValue("q"))
+	if query == "" {
+		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "the search text is empty"})
+		return
+	}
+	searcher, ok := app.sessionStore.(agent.Searcher)
+	if !ok {
+		writeJSON(response, map[string]any{"results": []LocalSearchResult{}})
+		return
+	}
+	if !acquireRequestSlot(response, request, app.heavyRequests) {
+		return
+	}
+	defer releaseRequestSlot(app.heavyRequests)
+	var paths []string
+	for _, path := range request.Form["session"] {
+		if app.validOwnedSessionPath(request, path) {
+			paths = append(paths, path)
+		}
+	}
+	results := make([]LocalSearchResult, len(paths))
+	failures := make([]error, len(paths))
+	next := make(chan int)
+	var searches sync.WaitGroup
+	// A few files at once keep the disk busy without taking every core from the sessions that run.
+	for range min(4, len(paths)) {
+		searches.Go(func() {
+			for index := range next {
+				found, err := searcher.Search(paths[index], query, request.Form["role"], searchMatchesPerSession)
+				// A session that Pi has not saved yet has nothing to find.
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				result := LocalSearchResult{Session: paths[index], Count: found.Count, Matches: []LocalMessage{}}
+				for _, match := range found.Matches {
+					result.Matches = append(result.Matches, LocalMessage{Role: match.Role, Text: match.Snippet, Timestamp: Timestamp{match.Timestamp}})
+				}
+				results[index], failures[index] = result, err
+			}
+		})
+	}
+	for index := range paths {
+		if request.Context().Err() != nil {
+			break
+		}
+		next <- index
+	}
+	close(next)
+	searches.Wait()
+	if err := errors.Join(failures...); err != nil {
+		writeInternalError(response, "search sessions for gripi search", err)
+		return
+	}
+	found := []LocalSearchResult{}
+	for _, result := range results {
+		if result.Count > 0 {
+			found = append(found, result)
+		}
+	}
+	writeJSON(response, map[string]any{"results": found})
+}
+
+// localTakeOver takes over a session as Take over does in the browser. An agent may run the command when nobody is
+// in front of the session's Pi CLI to say whether they are done there, so unless force is set it refuses while a
+// process of Pi CLI names the session.
+func (app *application) localTakeOver(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	path := request.FormValue("session")
+	detector, detects := app.guard.(agent.CLIDetector)
+	if detects && request.FormValue("force") != "true" && app.validOwnedSessionPath(request, path) {
+		processes, err := detector.CLIProcesses(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			writeInternalError(response, "look for Pi CLI before a takeover", err)
+			return
+		}
+		if len(processes) > 0 {
+			ids := make([]string, len(processes))
+			for index, process := range processes {
+				ids[index] = strconv.Itoa(process)
+			}
+			writeJSONStatus(response, http.StatusConflict, map[string]string{"error": fmt.Sprintf("Pi CLI still has the session open (process %s), and taking it over would leave the session file to two writers. Take it over once that Pi CLI has exited", strings.Join(ids, ", "))})
+			return
+		}
+	}
+	app.takeOverSession(response, request)
 }
 
 func (app *application) localSessionState(path string) string {

@@ -19,12 +19,15 @@ Usage:
 
 Session commands (need a running gateway on this machine):
   list      List sessions with their state
+  search    Find sessions whose conversation holds a text
   new       Start a session in a directory
   send      Send a message to a session
   wait      Wait until a session stops working
   show      Print the latest reply or the conversation of a session
+  images    Write the images in a session to files
   stop      Stop what a session is working on
   open      Continue a session in Pi CLI
+  takeover  Take back a session that Pi CLI used
   rename    Name a session
   pin       Pin a session in the browser's sidebar
   unpin     Unpin a session
@@ -54,12 +57,15 @@ type command struct {
 
 var commands = []command{
 	{name: "list", summary: "List sessions with their state", run: listSessions, help: listHelp},
+	{name: "search", summary: "Find sessions whose conversation holds a text", run: searchSessions, help: searchHelp},
 	{name: "new", summary: "Start a session in a directory", run: newSession, help: newHelp},
 	{name: "send", summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
 	{name: "show", summary: "Print the latest reply or the conversation of a session", run: showConversation, help: showHelp},
+	{name: "images", summary: "Write the images in a session to files", run: saveImages, help: imagesHelp},
 	{name: "stop", summary: "Stop what a session is working on", run: stopSession, help: stopHelp},
 	{name: "open", summary: "Continue a session in Pi CLI", run: openSession, help: openHelp},
+	{name: "takeover", summary: "Take back a session that Pi CLI used", run: takeOverSession, help: takeoverHelp},
 	{name: "rename", summary: "Name a session", run: renameSession, help: renameHelp},
 	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
 	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},
