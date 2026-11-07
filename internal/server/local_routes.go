@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -210,17 +211,27 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 	writeJSON(response, payload)
 }
 
-// localConversation answers with the most recent messages of a session, as many as the browser first shows.
+// localConversation answers with the most recent messages of a session, as many as the browser first shows, or with
+// those before the position in before. start is the position of the first, which the next older page ends before.
 func (app *application) localConversation(response http.ResponseWriter, request *http.Request) {
 	path, owned := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
 	if !owned {
 		return
 	}
+	var before *int
+	if value := request.URL.Query().Get("before"); value != "" {
+		position, err := strconv.Atoi(value)
+		if err != nil || position < 0 {
+			writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "before must be a position in the conversation"})
+			return
+		}
+		before = &position
+	}
 	if !acquireRequestSlot(response, request, app.heavyRequests) {
 		return
 	}
 	defer releaseRequestSlot(app.heavyRequests)
-	window, err := app.sessionStore.Window(path, "", false, nil, nil)
+	window, err := app.sessionStore.Window(path, "", false, before, nil)
 	// A new session has no file, and so no messages, until Pi has replied once.
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeInternalError(response, "read conversation for gripi commands", err)
@@ -244,7 +255,7 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 		}
 		messages = append(messages, local)
 	}
-	writeJSON(response, map[string]any{"messages": messages})
+	writeJSON(response, map[string]any{"messages": messages, "start": window.StartIndex})
 }
 
 func (app *application) localSessionState(path string) string {

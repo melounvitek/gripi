@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -15,7 +17,7 @@ import (
 )
 
 const showHelp = `Usage:
-  gripi show <session> [--all] [--json]
+  gripi show <session> [--all | --full | --tail <count>] [--role <role>] [--json]
 
 Prints Pi's reply to the latest message of a session, in full. Run it after
 'gripi wait' to read what Pi answered. It prints nothing when there is no
@@ -23,14 +25,22 @@ such reply, for example because the turn ended in an error.
 
 With --all it prints the recent conversation instead: each message under its
 role, and each tool call on one line. A long conversation starts at a recent
-message; the session file has all of it.
+message; --full prints all of it, and --tail as much as it takes for the last
+messages. They follow the conversation's current branch, as the browser shows
+it, without the branches that /tree left behind.
 
 Arguments:
   session  Session ID, a unique prefix of it, or the session file path
 
 Flags:
-  --all   Print the recent conversation instead of only the latest reply
-  --json  Print the messages as a JSON array instead of text
+  --all            Print the recent conversation instead of only the latest
+                   reply
+  --full           Print the whole conversation
+  --tail <count>   Print the last messages of the conversation, this many
+  --role <role>    Print only the messages with this role; repeat it or
+                   separate roles with commas for several. Without --full
+                   or --tail it filters the recent conversation.
+  --json           Print the messages as a JSON array instead of text
 
 Message fields:
   role       user       a message sent to Pi
@@ -46,15 +56,30 @@ Message fields:
 
 Examples:
   gripi send 01a107aa "Run the tests" && gripi wait 01a107aa && gripi show 01a107aa
-  gripi show 01a107aa --all --json | jq -r '.[] | select(.role == "user") | .text'
+  gripi show 01a107aa --tail 5           # what Pi is doing now
+  gripi show 01a107aa --full --role user  # every message sent to Pi
 
 Exit codes:
 ` + sessionExitCodes
 
+var messageRoles = []string{"user", "assistant", "tool", "status", "error", "custom"}
+
 func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("show", flag.ContinueOnError)
 	all := flags.Bool("all", false, "")
+	full := flags.Bool("full", false, "")
+	tail := flags.Int("tail", 0, "")
 	asJSON := flags.Bool("json", false, "")
+	var roles []string
+	flags.Func("role", "", func(value string) error {
+		for role := range strings.SplitSeq(value, ",") {
+			if !slices.Contains(messageRoles, role) {
+				return fmt.Errorf("%q is not a role; roles are %s", role, strings.Join(messageRoles, ", "))
+			}
+			roles = append(roles, role)
+		}
+		return nil
+	})
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "show", err.Error())
@@ -62,20 +87,56 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 	if len(positional) != 1 || positional[0] == "" {
 		return usageError(stderr, "show", "takes exactly one session")
 	}
+	if *tail < 0 {
+		return usageError(stderr, "show", "--tail cannot be negative")
+	}
+	if *full && *tail > 0 {
+		return usageError(stderr, "show", "--full and --tail cannot be combined")
+	}
+	conversationMode := *all || *full || *tail > 0 || len(roles) > 0
 	client, session, err := connect(positional[0])
 	if err != nil {
 		return failure(stderr, "show", err)
 	}
-	var conversation struct {
-		Messages []gateway.LocalMessage `json:"messages"`
+	page := func(before int) ([]gateway.LocalMessage, int, error) {
+		route := "/conversation?session=" + url.QueryEscape(session.Path)
+		if before >= 0 {
+			route += "&before=" + strconv.Itoa(before)
+		}
+		var conversation struct {
+			Messages []gateway.LocalMessage `json:"messages"`
+			Start    int                    `json:"start"`
+		}
+		err := client.get(route, &conversation)
+		return conversation.Messages, conversation.Start, err
 	}
-	if err := client.get("/conversation?session="+url.QueryEscape(session.Path), &conversation); err != nil {
+	selected := func(messages []gateway.LocalMessage) []gateway.LocalMessage {
+		return slices.DeleteFunc(slices.Clone(messages), func(message gateway.LocalMessage) bool {
+			return len(roles) > 0 && !slices.Contains(roles, message.Role)
+		})
+	}
+	conversation, start, err := page(-1)
+	if err != nil {
 		return failure(stderr, "show", err)
 	}
-	messages := conversation.Messages
-	if !*all {
+	// Each page ends where the one after it starts, so nothing is missed or listed twice.
+	for start > 0 && (*full || len(selected(conversation)) < *tail) {
+		older, olderStart, err := page(start)
+		if err != nil {
+			return failure(stderr, "show", err)
+		}
+		if olderStart >= start {
+			return failure(stderr, "show", errors.New("the conversation changed while it was read; run the command again"))
+		}
+		conversation, start = append(older, conversation...), olderStart
+	}
+	messages := selected(conversation)
+	if *tail > 0 && len(messages) > *tail {
+		messages = messages[len(messages)-*tail:]
+	}
+	if !conversationMode {
 		messages = []gateway.LocalMessage{}
-		for _, message := range conversation.Messages {
+		for _, message := range conversation {
 			switch message.Role {
 			// Neither a reply from before the latest message nor what Pi wrote before a turn failed is an answer.
 			case "user", "error":
@@ -88,12 +149,12 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 	if *asJSON {
 		return printJSON(stdout, stderr, "show", messages)
 	}
-	if len(messages) == 0 && !*all {
+	if len(messages) == 0 && !conversationMode {
 		fmt.Fprintln(stderr, "gripi show: there is no reply to the latest message; 'gripi show --all' prints what happened")
 	}
 	for index, message := range messages {
 		switch {
-		case !*all:
+		case !conversationMode:
 			fmt.Fprintln(stdout, message.Text)
 		case message.Role == "tool" || message.Role == "status":
 			fmt.Fprintf(stdout, "[%s] %s\n", message.Role, strings.Join(strings.Fields(message.Text), " "))

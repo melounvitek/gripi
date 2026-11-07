@@ -111,7 +111,7 @@ gripi wait 01a107aa --timeout 900 --json  # block until it stops working
 gripi show 01a107aa                       # print the reply
 ```
 
-`gripi wait` also takes several sessions, and with `--any` returns once one of them stops. Other commands start a session (`new`, which can also send its first message), stop what one is working on (`stop`), continue one in Pi CLI (`open`), name one (`rename`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), delete one (`delete`), and claim one that has no owner (`claim`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running. In [multi-user mode](docs/configuration.md#multi-user-mode), the commands act for the user named by `GRIPI_USER_TOKEN`.
+`gripi wait` also takes several sessions, and with `--any` returns once one of them stops. `gripi show --tail 5` prints what a session did last, and `--full` its whole conversation. Other commands start a session (`new`, which can also send its first message), stop what one is working on (`stop`), continue one in Pi CLI (`open`), name one (`rename`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), delete one (`delete`), and claim one that has no owner (`claim`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running. In [multi-user mode](docs/configuration.md#multi-user-mode), the commands act for the user named by `GRIPI_USER_TOKEN`.
 
 An agent in a Gripi session can also [run a command as root](docs/configuration.md#running-commands-as-root) with `gripi sudo -- <command>`, once you enter your password in Gripi.
 

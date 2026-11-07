@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
@@ -86,6 +88,66 @@ func TestShowPrintsTheConversationWithToolCallsOnOneLine(t *testing.T) {
 	// Thinking is left out, and a tool call carries what was run, not its output.
 	if !reflect.DeepEqual(roles, []string{"user", "assistant", "user", "assistant", "tool", "tool", "tool", "assistant"}) || messages[4].Text != "$ ls\n  -la" {
 		t.Fatalf("conversation = %+v", messages)
+	}
+}
+
+func TestShowPagesThroughALongConversation(t *testing.T) {
+	_, beta := fakePiGateway(t)
+	// More turns than the gateway answers with at once.
+	var records []map[string]any
+	parent := "assistant-1"
+	for turn := range 400 {
+		when := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC).Add(time.Duration(turn) * time.Minute)
+		for _, role := range []string{"user", "assistant"} {
+			id := fmt.Sprintf("%s-turn-%d", role, turn)
+			body := map[string]any{"role": role, "content": []any{textPart(fmt.Sprintf("%s %d", role, turn))}}
+			if role == "assistant" {
+				body["stopReason"] = "stop"
+			}
+			records = append(records, map[string]any{"type": "message", "id": id, "parentId": parent, "timestamp": when.Format(time.RFC3339), "message": body})
+			parent = id
+		}
+	}
+	appendSessionRecords(t, beta, records...)
+	texts := func(arguments ...string) []string {
+		t.Helper()
+		code, stdout, stderr := runCLI(append([]string{"show", "0a1-b", "--json"}, arguments...)...)
+		var messages []gateway.LocalMessage
+		if err := json.Unmarshal([]byte(stdout), &messages); err != nil || code != 0 || stderr != "" {
+			t.Fatalf("gripi show %q = %d, stderr %q, %v", arguments, code, stderr, err)
+		}
+		result := []string{}
+		for _, message := range messages {
+			result = append(result, message.Text)
+		}
+		return result
+	}
+
+	if recent := texts("--all"); len(recent) >= 802 {
+		t.Fatalf("the recent conversation has all %d messages, so nothing tests the paging", len(recent))
+	}
+	prompts := texts("--full", "--role", "user")
+	if len(prompts) != 401 || prompts[0] != "Prompt for 0a1-beta" || prompts[1] != "user 0" || prompts[400] != "user 399" {
+		t.Fatalf("every prompt: %d of them, %q", len(prompts), prompts)
+	}
+	if all := texts("--full"); len(all) != 802 || all[801] != "assistant 399" {
+		t.Fatalf("whole conversation: %d messages", len(all))
+	}
+	if last := texts("--tail", "3"); !reflect.DeepEqual(last, []string{"assistant 398", "user 399", "assistant 399"}) {
+		t.Fatalf("gripi show --tail 3 = %q", last)
+	}
+	if last := texts("--tail", "300", "--role", "assistant"); len(last) != 300 || last[0] != "assistant 100" || last[299] != "assistant 399" {
+		t.Fatalf("gripi show --tail 300 --role assistant: %d messages from %q", len(last), last[0])
+	}
+
+	code, stdout, stderr := runCLI("show", "0a1-b", "--tail", "2", "--role", "user")
+	if code != 0 || stderr != "" || stdout != "[user]\nuser 398\n\n[user]\nuser 399\n" {
+		t.Fatalf("gripi show --tail 2 --role user = %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	for _, usage := range [][]string{{"--role", "system"}, {"--tail", "-1"}, {"--full", "--tail", "2"}} {
+		if code, stdout, stderr := runCLI(append([]string{"show", "0a1-b"}, usage...)...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help show") {
+			t.Fatalf("gripi show %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
 	}
 }
 
