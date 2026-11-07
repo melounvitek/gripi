@@ -91,6 +91,62 @@ func TestListPrintsJSONForPrograms(t *testing.T) {
 	}
 }
 
+func TestListFiltersSessionsBeforeTheLimit(t *testing.T) {
+	directory := t.TempDir()
+	sessions := cannedSessions(25)
+	sessions[24].CWD = filepath.Join(directory, "subfolder")
+	cannedGateway(t, sessions)
+	t.Chdir(directory)
+	listed := func(arguments ...string) []string {
+		t.Helper()
+		code, stdout, stderr := runCLI(append([]string{"list", "--all", "--json"}, arguments...)...)
+		var matches []gateway.LocalSession
+		if err := json.Unmarshal([]byte(stdout), &matches); err != nil || code != 0 || stderr != "" {
+			t.Fatalf("gripi list %q = %d, stderr %q, %v:\n%s", arguments, code, stderr, err, stdout)
+		}
+		ids := []string{}
+		for _, session := range matches {
+			ids = append(ids, session.ID)
+		}
+		return ids
+	}
+	for _, test := range []struct {
+		arguments []string
+		ids       []string
+	}{
+		{[]string{"--state", "working"}, []string{"session-00"}},
+		{[]string{"--tag", "cli", "--tag", "urgent"}, []string{"session-00"}},
+		{[]string{"--tag", "cli", "--tag", "missing"}, []string{}},
+		{[]string{"--name", "FLAKY"}, []string{"session-00"}},
+		{[]string{"--pinned"}, []string{"session-00"}},
+		{[]string{"--unread", "--state", "idle"}, []string{}},
+		// Text matches anywhere in the directory, and a path only that directory and those below it.
+		{[]string{"--cwd", "project-2"}, []string{"session-20", "session-21", "session-22", "session-23"}},
+		{[]string{"--cwd", "/work/project-03"}, []string{"session-03"}},
+		{[]string{"--cwd", "/work/project-0"}, []string{}},
+		{[]string{"--cwd", "."}, []string{"session-24"}},
+	} {
+		if ids := listed(test.arguments...); !reflect.DeepEqual(ids, test.ids) {
+			t.Fatalf("gripi list %q = %q, expected %q", test.arguments, ids, test.ids)
+		}
+	}
+	if ids := listed("--state", "working,idle"); len(ids) != 25 {
+		t.Fatalf("gripi list --state working,idle = %d sessions", len(ids))
+	}
+
+	code, stdout, stderr := runCLI("list", "--state", "idle")
+	if lines := strings.Split(strings.TrimSpace(stdout), "\n"); code != 0 || len(lines) != 21 || !strings.Contains(stderr, "20 of 24 matching") {
+		t.Fatalf("gripi list --state idle = %d with %d lines, stderr %q", code, len(lines), stderr)
+	}
+	if code, stdout, stderr := runCLI("list", "--name", "nothing like it"); code != 0 || stderr != "" || !strings.HasPrefix(stdout, "ID") || strings.Count(stdout, "\n") != 1 {
+		t.Fatalf("gripi list without a match = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// A misspelt state must not pass for a state that no session is in.
+	if code, stdout, stderr := runCLI("list", "--state", "running"); code != 2 || stdout != "" || !strings.Contains(stderr, "working, compacting") {
+		t.Fatalf("gripi list --state running = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
 func TestJSONOutputHasOneTimestampFormatThatSortsAsText(t *testing.T) {
 	path := socketPath(t)
 	// The shapes that one listing used to mix: the source's zone, and only as many digits as it had.

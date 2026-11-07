@@ -105,6 +105,7 @@ Scripts and agents on the gateway machine can work with sessions through the `gr
 
 ```sh
 gripi list                                # sessions with their live state
+gripi list --state working --cwd .        # only those working in this directory
 gripi send 01a107aa "Run the tests"       # prompt a session
 gripi wait 01a107aa --timeout 900 --json  # block until it stops working
 gripi show 01a107aa                       # print the reply
