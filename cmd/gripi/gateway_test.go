@@ -127,6 +127,27 @@ func eventually(t *testing.T, reference string, done func(gateway.LocalSession) 
 	return gateway.LocalSession{}
 }
 
+func TestActivityFollowsToolCallsThatTheLatestMessageMisses(t *testing.T) {
+	_, beta := fakePiGateway(t)
+	before := eventually(t, "0a1-beta", func(gateway.LocalSession) bool { return true })
+	if before.ActivityAt.Before(before.UpdatedAt.Time) {
+		t.Fatalf("activity_at %s is before updated_at %s", before.ActivityAt, before.UpdatedAt)
+	}
+	started := time.Now()
+	appendSessionRecords(t, beta, sessionMessage("user-2", "assistant-1", "3", map[string]any{"role": "user", "content": []any{textPart("Run the tests")}}))
+	updated := eventually(t, "0a1-beta", func(session gateway.LocalSession) bool { return session.UpdatedAt.After(before.UpdatedAt.Time) })
+
+	// A tool call is not a reply, so it leaves updated_at as it was.
+	time.Sleep(20 * time.Millisecond)
+	appendSessionRecords(t, beta, sessionMessage("assistant-2", "user-2", "4", map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{
+		map[string]any{"type": "toolCall", "id": "call-1", "name": "bash", "arguments": map[string]any{"command": "make test"}},
+	}}))
+	after := eventually(t, "0a1-beta", func(session gateway.LocalSession) bool { return session.ActivityAt.After(updated.ActivityAt.Time) })
+	if !after.UpdatedAt.Equal(updated.UpdatedAt.Time) || after.ActivityAt.Before(started) {
+		t.Fatalf("after a tool call: updated_at %s (was %s), activity_at %s", after.UpdatedAt, updated.UpdatedAt, after.ActivityAt)
+	}
+}
+
 func TestSendDeliversPromptsAndReturnsOnceTheSessionIsWorking(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 

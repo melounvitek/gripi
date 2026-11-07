@@ -33,7 +33,9 @@ type LocalSession struct {
 	Pinned    bool      `json:"pinned"`
 	Tags      []string  `json:"tags"`
 	UpdatedAt Timestamp `json:"updated_at"`
-	LastReply string    `json:"last_reply"`
+	// ActivityAt is when the session file last changed, which tool calls do too, and never before UpdatedAt.
+	ActivityAt Timestamp `json:"activity_at"`
+	LastReply  string    `json:"last_reply"`
 	// Agent names the session's agent when the gateway runs several.
 	Agent string `json:"agent,omitempty"`
 }
@@ -188,10 +190,15 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 		if tags == nil {
 			tags = []string{}
 		}
+		// A session that Pi has not saved yet has no file, and a Hermes session is not a file.
+		activity := session.ConversationActivityAt
+		if info, err := os.Stat(session.Path); err == nil && info.ModTime().After(activity) {
+			activity = info.ModTime()
+		}
 		result = append(result, LocalSession{
 			ID: session.ID, Path: session.Path, Name: session.DisplayName, CWD: session.CWD,
 			State: app.localSessionState(session.Path), Unread: view.Unread[session.Path], Pinned: view.Pinned[session.Path],
-			Tags: tags, UpdatedAt: Timestamp{session.ConversationActivityAt}, LastReply: session.LatestAssistantResponsePreview,
+			Tags: tags, UpdatedAt: Timestamp{session.ConversationActivityAt}, ActivityAt: Timestamp{activity}, LastReply: session.LatestAssistantResponsePreview,
 			Agent: session.Agent,
 		})
 	}

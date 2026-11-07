@@ -147,6 +147,26 @@ func TestListFiltersSessionsBeforeTheLimit(t *testing.T) {
 	}
 }
 
+func TestListSinceKeepsOnlyRecentActivity(t *testing.T) {
+	sessions := cannedSessions(3)
+	// The latest message is old, but a tool call ran a moment ago.
+	sessions[1].ActivityAt = gateway.Timestamp{Time: time.Now().Add(-10 * time.Minute)}
+	sessions[2].ActivityAt = gateway.Timestamp{Time: time.Now().Add(-3 * 24 * time.Hour)}
+	cannedGateway(t, sessions)
+	for since, expected := range map[string]int{"1h": 1, "90s": 0, "7d": 2} {
+		code, stdout, stderr := runCLI("list", "--since", since, "--json")
+		var listed []gateway.LocalSession
+		if err := json.Unmarshal([]byte(stdout), &listed); err != nil || code != 0 || len(listed) != expected {
+			t.Fatalf("gripi list --since %s = %d, stderr %q, %d sessions", since, code, stderr, len(listed))
+		}
+	}
+	for _, since := range []string{"soon", "1.5d", "-2h", "0"} {
+		if code, stdout, stderr := runCLI("list", "--since", since); code != 2 || stdout != "" || !strings.Contains(stderr, "7d") {
+			t.Fatalf("gripi list --since %s = %d, stdout %q, stderr %q", since, code, stdout, stderr)
+		}
+	}
+}
+
 func TestJSONOutputHasOneTimestampFormatThatSortsAsText(t *testing.T) {
 	path := socketPath(t)
 	// The shapes that one listing used to mix: the source's zone, and only as many digits as it had.

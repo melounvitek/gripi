@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -38,8 +39,13 @@ const sessionFields = `Session fields:
   unread      true when a reply finished that nobody has opened in the browser
   pinned      true when the session is pinned in the browser's sidebar
   tags        Tags of the session
-  updated_at  Time of the latest message; in JSON it is in UTC with
-              milliseconds, such as 2026-10-06T18:47:02.725Z
+  updated_at  Time of the latest message that the user sent or that ended a
+              reply; in JSON it is in UTC with milliseconds, such as
+              2026-10-06T18:47:02.725Z
+  activity_at Time the session last changed, including Pi's tool calls and
+              their results, in the same format. While Pi works it shows
+              whether the turn moves on; one long tool call, such as a test
+              run, holds it still.
   last_reply  First 180 characters of the latest assistant reply
 `
 
@@ -66,6 +72,8 @@ Filters:
   --name <text>    Only sessions whose name contains the text, ignoring case
   --pinned         Only pinned sessions
   --unread         Only sessions with an unread reply
+  --since <age>    Only sessions with activity (activity_at) within this
+                   age, such as 90s, 30m, 2h or 7d
 
 Flags:
   --all   List every matching session instead of the latest 20
@@ -227,6 +235,11 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 	name := flags.String("name", "", "")
 	pinned := flags.Bool("pinned", false, "")
 	unread := flags.Bool("unread", false, "")
+	var since time.Duration
+	flags.Func("since", "", func(value string) (err error) {
+		since, err = parseAge(value)
+		return err
+	})
 	if positional, err := parseArguments(flags, arguments); err != nil {
 		return usageError(stderr, "list", err.Error())
 	} else if len(positional) > 0 {
@@ -247,7 +260,7 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 	if err != nil {
 		return failure(stderr, "list", err)
 	}
-	filtered := len(states) > 0 || len(tags) > 0 || *cwd != "" || *name != "" || *pinned || *unread
+	filtered := len(states) > 0 || len(tags) > 0 || *cwd != "" || *name != "" || *pinned || *unread || since > 0
 	sessions = slices.DeleteFunc(sessions, func(session gateway.LocalSession) bool {
 		switch {
 		case len(states) > 0 && !slices.Contains(states, session.State),
@@ -256,7 +269,8 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 			directory == "" && !strings.Contains(session.CWD, *cwd),
 			!strings.Contains(strings.ToLower(session.Name), strings.ToLower(*name)),
 			*pinned && !session.Pinned,
-			*unread && !session.Unread:
+			*unread && !session.Unread,
+			since > 0 && time.Since(session.ActivityAt.Time) > since:
 			return true
 		}
 		return false
@@ -277,6 +291,20 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "Showing the latest %d of %d %ssessions; pass --all for the rest.\n", listLimit, total, matching)
 	}
 	return 0
+}
+
+// parseAge reads an age such as 30m or 2h, as Go writes durations, or a whole number of days such as 7d.
+func parseAge(value string) (time.Duration, error) {
+	age, err := time.ParseDuration(value)
+	if days, found := strings.CutSuffix(value, "d"); found {
+		var count int
+		count, err = strconv.Atoi(days)
+		age = time.Duration(count) * 24 * time.Hour
+	}
+	if err != nil || age <= 0 {
+		return 0, fmt.Errorf("%q is not an age such as 90s, 30m, 2h or 7d", value)
+	}
+	return age, nil
 }
 
 // parseArguments accepts flags before, between and after positional arguments; "--" ends the flags.
