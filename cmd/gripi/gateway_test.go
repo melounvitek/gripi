@@ -477,9 +477,34 @@ func TestNewStartsASessionThatTakesMessages(t *testing.T) {
 	}
 }
 
+func TestNewSendsTheFirstMessage(t *testing.T) {
+	fakePiGateway(t)
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("new", directory, "Show the deterministic browser response", "--id")
+	id := strings.TrimSuffix(stdout, "\n")
+	if code != 0 || stderr != "" || id == "" || strings.ContainsAny(id, " \n") {
+		t.Fatalf("gripi new with a message = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI("wait", id, "--json")
+	if session := decodeSession(t, stdout); code != 0 || session.CWD != directory || session.LastReply != "Deterministic browser response complete." {
+		t.Fatalf("gripi wait on the new session = %d, stderr %q, session %+v", code, stderr, session)
+	}
+
+	code, stdout, stderr = runCLIWithInput("Show the deterministic browser response\n", "new", directory, "-", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID == id || session.State != "working" {
+		t.Fatalf("gripi new with a message on stdin = %d, stderr %q, session %+v", code, stderr, session)
+	}
+}
+
 func TestNewExplainsWhereItCannotStartASession(t *testing.T) {
 	fakePiGateway(t)
-	for _, usage := range [][]string{{"new"}, {"new", ""}, {"new", "one", "two"}, {"new", ".", "--bogus"}} {
+	_, before, _ := runCLI("list", "--all", "--json")
+	// A message that cannot be sent is refused before a session starts.
+	for _, usage := range [][]string{{"new"}, {"new", ""}, {"new", "one", "two", "three"}, {"new", ".", "--bogus"}, {"new", ".", "  "}, {"new", ".", "/compact"}, {"new", ".", "message", "--id", "--json"}} {
 		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help new") {
 			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
@@ -487,6 +512,9 @@ func TestNewExplainsWhereItCannotStartASession(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	if code, stdout, stderr := runCLI("new", missing); code != 1 || stdout != "" || !strings.Contains(stderr, "existing directory") {
 		t.Fatalf("gripi new in a missing directory = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, after, _ := runCLI("list", "--all", "--json"); after != before {
+		t.Fatalf("a refused gripi new left a session:\n%s", after)
 	}
 }
 

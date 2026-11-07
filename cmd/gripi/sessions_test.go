@@ -272,6 +272,34 @@ func TestNewNamesARelativeDirectoryInFullBecauseTheGatewayRunsElsewhere(t *testi
 	}
 }
 
+func TestNewDeletesTheSessionWhenItsFirstMessageIsRefused(t *testing.T) {
+	path, deleted := socketPath(t), ""
+	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/sessions/new_at_cwd":
+			json.NewEncoder(response).Encode(map[string]any{"session": "/sessions/00.jsonl"})
+		case "/sessions":
+			json.NewEncoder(response).Encode(map[string]any{"sessions": cannedSessions(1)})
+		case "/prompt":
+			response.WriteHeader(http.StatusInternalServerError)
+			io.WriteString(response, `{"error":"Pi exited"}`)
+		case "/sessions/delete":
+			deleted = request.FormValue("session")
+			io.WriteString(response, `{}`)
+		}
+	}), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { server.Close() })
+	t.Setenv("GRIPI_SOCKET_PATH", path)
+
+	code, stdout, stderr := runCLI("new", t.TempDir(), "Run the tests", "--id")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "Pi exited") || !strings.Contains(stderr, "deleted again") || deleted != "/sessions/00.jsonl" {
+		t.Fatalf("gripi new with a refused message = %d, stdout %q, stderr %q, deleted %q", code, stdout, stderr, deleted)
+	}
+}
+
 func TestSessionCommandsExplainAnUnreachableGateway(t *testing.T) {
 	t.Setenv("GRIPI_SOCKET_PATH", socketPath(t))
 	code, stdout, stderr := runCLI("list")

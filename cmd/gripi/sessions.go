@@ -362,35 +362,56 @@ func age(elapsed time.Duration) string {
 }
 
 const newHelp = `Usage:
-  gripi new <directory> [--json]
+  gripi new <directory> [message] [--id | --json]
 
-Starts a session in a project directory, then prints it. The session is empty
-until 'gripi send' gives it a first message, and it keeps a Pi process running
-until then, so start one only to use it.
+Starts a session in a project directory, then prints it. With a message, it
+also sends that as the first prompt, as 'gripi send' does, and returns once Pi
+has taken it. Without one, the session is empty until 'gripi send' gives it a
+first message, and it keeps a Pi process running until then, so start one
+only to use it.
+
+When the message cannot be sent, the new session is deleted again and the
+command fails.
 
 Arguments:
   directory  Project directory for the session; it must exist
+  message    The first prompt. Pass - to read it from stdin. Put -- before a
+             message that starts with a dash.
 
 Flags:
+  --id    Print only the session's ID
   --json  Print the session as a JSON object instead of a table
 
 ` + sessionFields + `
-Example:
-  session=$(gripi new ~/Work/project --json | jq -r .id)
-  gripi send "$session" "Run the tests" && gripi wait "$session"
+Examples:
+  session=$(gripi new ~/Work/project "Run the tests" --id) && gripi wait "$session"
+  git diff | gripi new ~/Work/project - --id
 
 Exit codes:
 ` + sessionExitCodes
 
-func newSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("new", flag.ContinueOnError)
 	asJSON := flags.Bool("json", false, "")
+	onlyID := flags.Bool("id", false, "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "new", err.Error())
 	}
-	if len(positional) != 1 || positional[0] == "" {
-		return usageError(stderr, "new", "takes exactly one directory")
+	if len(positional) < 1 || len(positional) > 2 || positional[0] == "" {
+		return usageError(stderr, "new", "takes a directory and at most one message; quote a message that has spaces")
+	}
+	if *asJSON && *onlyID {
+		return usageError(stderr, "new", "--id and --json cannot be combined")
+	}
+	message := ""
+	if len(positional) == 2 {
+		var problem string
+		if message, problem, err = readMessage(positional[1], stdin); err != nil {
+			return failure(stderr, "new", err)
+		} else if problem != "" {
+			return usageError(stderr, "new", problem)
+		}
 	}
 	// The gateway would resolve a relative directory against its own.
 	directory, err := filepath.Abs(positional[0])
@@ -414,7 +435,21 @@ func newSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	if len(sessions) != 1 {
 		return failure(stderr, "new", fmt.Errorf("session %s no longer exists", started.Session))
 	}
-	return printSession(stdout, stderr, "new", sessions[0], *asJSON)
+	session := sessions[0]
+	if message != "" {
+		if session, err = client.deliver(session, message, false, "new", stderr); err != nil {
+			// A session without its first message would only keep a Pi process running.
+			if deleteErr := client.post("/sessions/delete", url.Values{"session": {session.Path}}, &struct{}{}); deleteErr != nil {
+				return failure(stderr, "new", fmt.Errorf("%w; the session %s stays without a message, because deleting it failed too: %v", err, session.ID, deleteErr))
+			}
+			return failure(stderr, "new", fmt.Errorf("%w; the new session was deleted again", err))
+		}
+	}
+	if *onlyID {
+		fmt.Fprintln(stdout, session.ID)
+		return 0
+	}
+	return printSession(stdout, stderr, "new", session, *asJSON)
 }
 
 const sendHelp = `Usage:
@@ -465,36 +500,58 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if len(positional) < 1 || len(positional) > 2 || positional[0] == "" {
 		return usageError(stderr, "send", "takes a session and one message; quote a message that has spaces")
 	}
-	message := ""
-	if len(positional) == 2 && positional[1] != "-" {
-		message = positional[1]
-	} else {
-		// Without this, a forgotten message would leave the command waiting on a terminal forever.
-		if file, ok := stdin.(*os.File); ok {
-			if info, err := file.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
-				return usageError(stderr, "send", "needs a message as an argument or on stdin")
-			}
-		}
-		piped, err := io.ReadAll(stdin)
-		if err != nil {
-			return failure(stderr, "send", err)
-		}
-		message = string(piped)
+	argument := "-"
+	if len(positional) == 2 {
+		argument = positional[1]
 	}
-	if message = strings.TrimSpace(message); message == "" {
-		return usageError(stderr, "send", "the message is empty")
-	}
-	// Steered, the gateway would run these as the composer does; otherwise Pi would get them as text.
-	if (pi.Composer{}).SlashCommand(message).Name != "" {
-		return usageError(stderr, "send", strings.Fields(message)[0]+" is a command of the browser's composer, which send does not run")
+	message, problem, err := readMessage(argument, stdin)
+	if err != nil {
+		return failure(stderr, "send", err)
+	} else if problem != "" {
+		return usageError(stderr, "send", problem)
 	}
 
 	client, session, err := connect(positional[0])
 	if err != nil {
 		return failure(stderr, "send", err)
 	}
+	if session, err = client.deliver(session, message, *steer, "send", stderr); err != nil {
+		return failure(stderr, "send", err)
+	}
+	return printSession(stdout, stderr, "send", session, *asJSON)
+}
+
+// readMessage returns the message in the argument, or on stdin when the argument is "-".
+// A message that cannot be sent gets a problem, which is a usage error.
+func readMessage(argument string, stdin io.Reader) (message, problem string, err error) {
+	message = argument
+	if argument == "-" {
+		// Without this, a forgotten message would leave the command waiting on a terminal forever.
+		if file, ok := stdin.(*os.File); ok {
+			if info, err := file.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+				return "", "needs a message as an argument or on stdin", nil
+			}
+		}
+		piped, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", "", err
+		}
+		message = string(piped)
+	}
+	if message = strings.TrimSpace(message); message == "" {
+		return "", "the message is empty", nil
+	}
+	// Steered, the gateway would run these as the composer does; otherwise Pi would get them as text.
+	if (pi.Composer{}).SlashCommand(message).Name != "" {
+		return "", strings.Fields(message)[0] + " is a command of the browser's composer, which gripi does not run", nil
+	}
+	return message, "", nil
+}
+
+// deliver sends a message to a session as a prompt and returns the session once Pi has taken it.
+func (client *gatewayClient) deliver(session gateway.LocalSession, message string, steer bool, name string, stderr io.Writer) (gateway.LocalSession, error) {
 	behavior := "follow_up"
-	if *steer {
+	if steer {
 		behavior = "steer"
 	}
 	var accepted struct {
@@ -503,6 +560,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	}
 	// bash_mode keeps a leading "!" from being run as a shell command.
 	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
+	var err error
 	for deadline := time.Now().Add(retryWindow); ; time.Sleep(100 * time.Millisecond) {
 		err = client.post("/prompt", form, &accepted)
 		if !errors.As(err, new(momentaryRefusal)) || time.Now().After(deadline) {
@@ -510,7 +568,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		}
 	}
 	if err != nil {
-		return failure(stderr, "send", err)
+		return session, err
 	}
 
 	// Pi accepts a prompt just before it reports the turn. Returning in that gap
@@ -520,12 +578,12 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		current, err := client.sessions(accepted.Session)
 		if err != nil {
 			// The message is delivered, so this must not look like a failed send.
-			fmt.Fprintf(stderr, "gripi send: delivered, but the session could not be read back: %v\n", err)
+			fmt.Fprintf(stderr, "gripi %s: delivered, but the session could not be read back: %v\n", name, err)
 		} else if len(current) == 1 {
 			session = current[0]
 		}
 		if err != nil || session.State != "idle" || accepted.Disposition == "handled" || time.Now().After(deadline) {
-			return printSession(stdout, stderr, "send", session, *asJSON)
+			return session, nil
 		}
 	}
 }
