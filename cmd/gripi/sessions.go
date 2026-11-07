@@ -642,42 +642,50 @@ func printSession(stdout, stderr io.Writer, name string, session gateway.LocalSe
 }
 
 const waitHelp = `Usage:
-  gripi wait <session> [--timeout <seconds>] [--json]
+  gripi wait <session>... [--any] [--timeout <seconds>] [--json]
 
-Blocks until the session is no longer working or compacting, then prints it.
-Without --timeout it waits as long as that takes. Run it after 'gripi send',
-then read the reply with 'gripi show'. last_reply has the first 180 characters
-of the session's latest reply, which is an older one when the turn failed.
+Blocks until the sessions are no longer working or compacting, then prints
+them. Without --timeout it waits as long as that takes. Run it after 'gripi
+send', then read the reply with 'gripi show'. last_reply has the first 180
+characters of the session's latest reply, which is an older one when the turn
+failed.
 
 Check the printed state. idle means Pi finished. waiting, external and
 conflict also end the wait, because Pi will not continue until someone acts in
 the browser or in Pi CLI.
 
 Arguments:
-  session  Session ID, a unique prefix of it, or the session file path
+  session  Session ID, a unique prefix of it, or the session file path.
+           Give several to wait for all of them.
 
 Flags:
-  --timeout <seconds>  Give up after this long; the session is still printed
-  --json               Print the session as a JSON object instead of a table
+  --any                Return once one of the sessions is no longer working,
+                       which is at once when one is not working already
+  --timeout <seconds>  Give up after this long; the sessions are still printed
+  --json               Print the session as a JSON object instead of a table;
+                       for several sessions, a JSON array
 
 ` + sessionFields + `
-Example:
+Examples:
   gripi send 01a107aa "Run the tests" && gripi wait 01a107aa --timeout 900 --json
+  gripi wait 01a107aa 7c3e91d0 --any --json | jq -r '.[] | select(.state != "working") | .id'
 
 Exit codes:
-` + sessionExitCodes + `  3  --timeout passed while the session was still working
+` + sessionExitCodes + `  3  --timeout passed while the sessions were still working: all of them
+     with --any, otherwise at least one
 `
 
 func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("wait", flag.ContinueOnError)
 	timeout := flags.Float64("timeout", 0, "")
 	asJSON := flags.Bool("json", false, "")
+	anyOne := flags.Bool("any", false, "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "wait", err.Error())
 	}
-	if len(positional) != 1 || positional[0] == "" {
-		return usageError(stderr, "wait", "takes exactly one session")
+	if len(positional) == 0 || slices.Contains(positional, "") {
+		return usageError(stderr, "wait", "takes one or more sessions")
 	}
 	if *timeout < 0 {
 		return usageError(stderr, "wait", "--timeout cannot be negative")
@@ -689,45 +697,73 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 	if *timeout > 0 {
 		client.deadline = time.Now().Add(time.Duration(*timeout * float64(time.Second)))
 	}
-	session, err := client.session(positional[0])
+	sessions := make([]gateway.LocalSession, len(positional))
+	for index, reference := range positional {
+		if sessions[index], err = client.session(reference); err != nil {
+			return failure(stderr, "wait", err)
+		}
+	}
+	sessions, settled, err := client.settled(sessions, *anyOne)
 	if err != nil {
 		return failure(stderr, "wait", err)
 	}
-	session, settled, err := client.settled(session)
-	if err != nil {
-		return failure(stderr, "wait", err)
+	printSettled := func() int {
+		if len(sessions) == 1 {
+			return printSession(stdout, stderr, "wait", sessions[0], *asJSON)
+		}
+		if *asJSON {
+			return printJSON(stdout, stderr, "wait", sessions)
+		}
+		printSessions(stdout, sessions)
+		return 0
 	}
 	if !settled {
 		fmt.Fprintf(stderr, "gripi wait: still working after %g seconds\n", *timeout)
-		printSession(stdout, stderr, "wait", session, *asJSON)
+		printSettled()
 		return exitTimeout
 	}
-	return printSession(stdout, stderr, "wait", session, *asJSON)
+	return printSettled()
 }
 
-// settled polls the session until it is neither working nor compacting.
+// settled polls the sessions until they are neither working nor compacting, or with anyOne, until one of them is not.
 // It reports false when the client's deadline passes first.
-func (client *gatewayClient) settled(session gateway.LocalSession) (gateway.LocalSession, bool, error) {
-	for settled := false; ; {
-		current, err := client.sessions(session.Path)
+func (client *gatewayClient) settled(sessions []gateway.LocalSession, anyOne bool) ([]gateway.LocalSession, bool, error) {
+	// quiet marks the sessions that the previous poll found not working.
+	quiet := make([]bool, len(sessions))
+	for {
+		// One session is asked for alone, which spares the gateway the rest.
+		only := ""
+		if len(sessions) == 1 {
+			only = sessions[0].Path
+		}
+		current, err := client.sessions(only)
 		if err != nil {
-			return session, false, err
+			return sessions, false, err
 		}
-		if len(current) != 1 {
-			return session, false, fmt.Errorf("session %s no longer exists", session.Path)
+		settled, fresh := 0, false
+		for index, session := range sessions {
+			found := slices.IndexFunc(current, func(candidate gateway.LocalSession) bool { return candidate.Path == session.Path })
+			if found < 0 {
+				return sessions, false, fmt.Errorf("session %s no longer exists", session.Path)
+			}
+			sessions[index] = current[found]
+			working := current[found].State == "working" || current[found].State == "compacting"
+			// The gateway does not re-read a busy session's file, so the listing that
+			// first shows a finished turn can still carry the reply before it.
+			if !working && quiet[index] {
+				settled++
+			}
+			fresh = fresh || !working && !quiet[index]
+			quiet[index] = !working
 		}
-		session = current[0]
-		working := session.State == "working" || session.State == "compacting"
-		// The gateway does not re-read a busy session's file, so the listing that
-		// first shows a finished turn can still carry the reply before it.
-		if !working && settled {
-			return session, true, nil
+		if settled == len(sessions) || anyOne && settled > 0 {
+			return sessions, true, nil
 		}
-		if settled = !working; settled {
+		if fresh {
 			continue
 		}
 		if !client.deadline.IsZero() && time.Now().After(client.deadline) {
-			return session, false, nil
+			return sessions, false, nil
 		}
 		time.Sleep(time.Second)
 	}
@@ -800,10 +836,11 @@ func stopSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int 
 		}
 		// The gateway may answer while it is still stopping the session.
 		client.deadline = time.Now().Add(stopWindow)
-		var stopped bool
-		if session, stopped, err = client.settled(session); err != nil {
+		stoppedSessions, stopped, err := client.settled([]gateway.LocalSession{session}, false)
+		if err != nil {
 			return failure(stderr, "stop", err)
 		}
+		session = stoppedSessions[0]
 		if !stopped {
 			return failure(stderr, "stop", fmt.Errorf("the session is still %s. If a shell command was running in it, only that was stopped; run 'gripi stop' again", session.State))
 		}

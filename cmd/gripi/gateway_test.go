@@ -296,9 +296,46 @@ func TestWaitEndsWhenPiNeedsAnAnswerInTheBrowser(t *testing.T) {
 	}
 }
 
+func TestWaitForSeveralSessions(t *testing.T) {
+	fakePiGateway(t)
+	if code, _, stderr := runCLI("send", "0a1-a", "Start the follow-up scenario"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	states := func(stdout string) map[string]string {
+		t.Helper()
+		var sessions []gateway.LocalSession
+		if err := json.Unmarshal([]byte(stdout), &sessions); err != nil {
+			t.Fatalf("not a JSON array of sessions (%v): %q", err, stdout)
+		}
+		result := map[string]string{}
+		for _, session := range sessions {
+			result[session.ID] = session.State
+		}
+		return result
+	}
+
+	code, stdout, stderr := runCLI("wait", "0a1-a", "0a1-b", "--timeout", "0.6", "--json")
+	if listed := states(stdout); code != 3 || listed["0a1-alpha"] != "working" || listed["0a1-beta"] != "idle" {
+		t.Fatalf("gripi wait for both = %d, stderr %q, states %v", code, stderr, listed)
+	}
+	started := time.Now()
+	code, stdout, stderr = runCLI("wait", "0a1-a", "0a1-b", "--any", "--timeout", "5", "--json")
+	if listed := states(stdout); code != 0 || time.Since(started) > 3*time.Second || listed["0a1-alpha"] != "working" || listed["0a1-beta"] != "idle" {
+		t.Fatalf("gripi wait --any = %d after %s, stderr %q, states %v", code, time.Since(started), stderr, listed)
+	}
+
+	if code, _, stderr := runCLI("stop", "0a1-a"); code != 0 {
+		t.Fatalf("gripi stop = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr = runCLI("wait", "0a1-a", "0a1-b")
+	if code != 0 || stderr != "" || strings.Count(stdout, "\n") != 3 || strings.Contains(stdout, "working") {
+		t.Fatalf("gripi wait for two stopped sessions = %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+}
+
 func TestWaitExplainsWhatItCannotWaitFor(t *testing.T) {
 	fakePiGateway(t)
-	for _, usage := range [][]string{{"wait"}, {"wait", "0a1-a", "0a1-b"}, {"wait", "0a1-a", "--timeout", "soon"}, {"wait", "0a1-a", "--timeout", "-1"}} {
+	for _, usage := range [][]string{{"wait"}, {"wait", "0a1-a", ""}, {"wait", "0a1-a", "--timeout", "soon"}, {"wait", "0a1-a", "--timeout", "-1"}} {
 		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help wait") {
 			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
