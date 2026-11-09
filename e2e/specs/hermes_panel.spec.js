@@ -117,6 +117,22 @@ test("dragging the Hermes tab resizes the open panel, which keeps its width afte
   await expect(shown).toBeHidden();
 });
 
+test("the panel grows as wide as leaves room for the sessions and the conversation, and wider with the sessions hidden", async ({ page }) => {
+  const shown = page.locator("#hermes-panel");
+  const conversationWidth = async () => (await page.locator("#conversation-scroll").boundingBox()).width;
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+
+  await dragHermesTab(page, -1000);
+  await expect.poll(async () => Math.round((await shown.boundingBox()).width)).toBe(1440 - 42 * 16);
+  expect(Math.round(await conversationWidth())).toBe(20 * 16);
+
+  await page.getByRole("button", { name: "Hide sessions" }).click();
+  await dragHermesTab(page, -1000);
+  await expect.poll(async () => Math.round((await shown.boundingBox()).width)).toBe(1440 - 20 * 16);
+  expect(Math.round(await conversationWidth())).toBe(20 * 16);
+});
+
 test("the panel says Hermes is starting until its conversation shows", async ({ page }) => {
   let release;
   const held = new Promise((resolve) => { release = resolve; });
