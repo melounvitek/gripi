@@ -555,10 +555,7 @@ func (view *pageView) prepareSidebar() {
 		if view.Pinned[session.Path] {
 			continue
 		}
-		// Tags, like pins, keep a Pi CLI session listed.
-		hideable := view.ExternalFollow[session.Path] && len(view.SessionTags[session.Path]) == 0
-		hidden := hideable && !view.CLISessionsShown
-		if !hidden {
+		if !view.ExternalFollow[session.Path] || view.CLISessionsShown {
 			view.SessionTotal++
 		}
 		if view.SelectedTag != "" && !slices.Contains(view.SessionTags[session.Path], view.SelectedTag) {
@@ -570,10 +567,12 @@ func (view *pageView) prepareSidebar() {
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
 			continue
 		}
+		// A tag filter lists its Pi CLI sessions too, so a group such as an orchestration run shows whole.
+		hideable := view.ExternalFollow[session.Path] && view.SelectedTag == ""
 		if hideable {
 			view.CLISessionCount++
 		}
-		if hidden {
+		if hideable && !view.CLISessionsShown {
 			continue
 		}
 		pool = append(pool, session)
