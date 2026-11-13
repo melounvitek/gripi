@@ -663,11 +663,23 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		if !ok {
 			return
 		}
-		if reason := app.deleteSessionBlockReason("", source.Path); reason != "" {
+		forkFrom = source.Path
+		// Held until the original is deleted, so that a second move waits and then finds it gone.
+		unlock := app.sessionMutationLocks.Lock(forkFrom)
+		defer unlock()
+		_, release, err := app.promptAdmissions.navigate(func() (string, error) { return forkFrom, nil })
+		if app.writeRPCError(response, err) {
+			return
+		}
+		defer release()
+		if !app.sessionStore.Exists(forkFrom) {
+			http.NotFound(response, request)
+			return
+		}
+		if reason := app.deleteSessionBlockReason("", forkFrom); reason != "" {
 			writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
 			return
 		}
-		forkFrom = source.Path
 	}
 	request.Form.Del("project")
 	newPath, err := app.startNewSession(request, cwd, forkFrom, "")
@@ -676,14 +688,7 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		return
 	}
 	if forkFrom != "" {
-		unlock := app.sessionMutationLocks.Lock(forkFrom)
-		_, release, err := app.promptAdmissions.navigate(func() (string, error) { return forkFrom, nil })
-		if err == nil {
-			_, err = app.deleteSessionData(request, forkFrom)
-			release()
-		}
-		unlock()
-		if err != nil {
+		if _, err := app.deleteSessionData(request, forkFrom); err != nil {
 			logInternalError("delete moved session", err)
 			writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "The session was copied to " + tildePath(app.config.Home, cwd) + ", but the original could not be deleted."})
 			return

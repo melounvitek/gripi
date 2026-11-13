@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	gripi "github.com/melounvitek/gripi"
@@ -154,11 +156,25 @@ func TestMovingToAnotherFolderLeavesOnlyPisCopyThere(t *testing.T) {
 		t.Fatalf("pin = %d %s", pinned.Code, pinned.Body.String())
 	}
 
-	response := continueIn(source)
+	// A second press of the button, or another tab, must not make a second copy.
+	responses := make([]*httptest.ResponseRecorder, 2)
+	var moves sync.WaitGroup
+	for index := range responses {
+		moves.Go(func() { responses[index] = continueIn(source) })
+	}
+	moves.Wait()
+	slices.SortFunc(responses, func(left, right *httptest.ResponseRecorder) int { return left.Code - right.Code })
+	if responses[1].Code != http.StatusNotFound {
+		t.Fatalf("second move = %d %s", responses[1].Code, responses[1].Body.String())
+	}
+	response := responses[0]
 	var payload struct{ Session string }
 	decodeActionJSON(t, response, &payload)
 	if response.Code != http.StatusOK || payload.Session == "" || payload.Session == source {
-		t.Fatalf("continue = %d %s", response.Code, response.Body.String())
+		t.Fatalf("move = %d %s", response.Code, response.Body.String())
+	}
+	if copies, err := filepath.Glob(filepath.Join(sessionsRoot, "*", "*.jsonl")); err != nil || len(copies) != 1 {
+		t.Fatalf("copies = %v", copies)
 	}
 	forked, err := os.ReadFile(payload.Session)
 	if err != nil {
