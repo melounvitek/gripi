@@ -512,6 +512,27 @@ func TestUnnamedSessionIsTitledByFirstUserMessageAfterSystemMessage(t *testing.T
 	}
 }
 
+func TestCopiedSessionKeepsTheActivityTimeOfItsMessages(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	writeSessionLines(t, path, []string{
+		`{"type":"session","version":3,"id":"copy","timestamp":"2026-02-01T00:00:00Z","cwd":"` + project + `"}`,
+		userLine("user", "", "2026-01-01T00:00:02Z", "Question"),
+	})
+	empty := filepath.Join(root, "empty.jsonl")
+	writeSessionLines(t, empty, []string{sessionLine(project)})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	for file, want := range map[string]string{path: "2026-01-01T00:00:02Z", empty: "2026-01-01T00:00:00Z"} {
+		session, ok := store.Session(file)
+		if !ok {
+			t.Fatalf("%s was not discovered", file)
+		}
+		if got := session.ConversationActivityAt.UTC().Format(time.RFC3339); got != want {
+			t.Fatalf("%s activity = %s, want %s", filepath.Base(file), got, want)
+		}
+	}
+}
+
 func TestOversizedNativeGeneralSubagentEntriesRemainDiscoverable(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	toolCount := 400

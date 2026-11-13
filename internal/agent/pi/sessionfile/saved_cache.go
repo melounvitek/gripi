@@ -11,7 +11,7 @@ import (
 // savedCacheVersion must change whenever the metadata derived from a session
 // file changes. Saved entries are trusted for as long as their file is
 // unchanged, so an older save would otherwise keep serving the old values.
-const savedCacheVersion = 2
+const savedCacheVersion = 3
 
 type savedCache struct {
 	Version int
