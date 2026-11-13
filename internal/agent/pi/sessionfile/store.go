@@ -729,6 +729,10 @@ func buildIndexOnce(path string, stat os.FileInfo, beforeValidation func()) (*in
 		}
 	}
 	if result.session != nil {
+		// Like Pi's session list, the creation time counts only without messages, so a copy keeps the original's time.
+		if result.session.ConversationActivityAt.IsZero() {
+			result.session.ConversationActivityAt = result.session.CreatedAt
+		}
 		if result.session.DisplayName == "" {
 			result.session.DisplayName = result.session.FirstUserMessage
 			if result.session.DisplayName == "" {
@@ -1002,7 +1006,7 @@ func (indexed *index) applySessionMetadata(raw map[string]any, item entry, stat 
 		if created.IsZero() {
 			created = stat.ModTime()
 		}
-		indexed.session = &agent.Session{Path: indexed.path, CWD: stringValue(raw["cwd"]), ID: stringValue(raw["id"]), ParentSessionPath: stringValue(raw["parentSession"]), CreatedAt: created, ModifiedAt: stat.ModTime(), ConversationActivityAt: created}
+		indexed.session = &agent.Session{Path: indexed.path, CWD: stringValue(raw["cwd"]), ID: stringValue(raw["id"]), ParentSessionPath: stringValue(raw["parentSession"]), CreatedAt: created, ModifiedAt: stat.ModTime()}
 	}
 	if indexed.session == nil {
 		return

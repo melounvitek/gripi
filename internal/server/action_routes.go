@@ -657,19 +657,42 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 	}
 	forkFrom := ""
 	if raw := request.FormValue("fork_from"); raw != "" {
-		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so Pi forks the session into the
-		// folder as it does when told to open a session from another project.
+		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so the session moves as Pi's fork
+		// of it in the folder, and the original is deleted.
 		source, ok := app.persistedActionSession(response, request, raw)
 		if !ok {
 			return
 		}
 		forkFrom = source.Path
+		// Held until the original is deleted, so that a second move waits and then finds it gone.
+		unlock := app.sessionMutationLocks.Lock(forkFrom)
+		defer unlock()
+		_, release, err := app.promptAdmissions.navigate(func() (string, error) { return forkFrom, nil })
+		if app.writeRPCError(response, err) {
+			return
+		}
+		defer release()
+		if !app.sessionStore.Exists(forkFrom) {
+			http.NotFound(response, request)
+			return
+		}
+		if reason := app.deleteSessionBlockReason("", forkFrom); reason != "" {
+			writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
+			return
+		}
 	}
 	request.Form.Del("project")
 	newPath, err := app.startNewSession(request, cwd, forkFrom, "")
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
+	}
+	if forkFrom != "" {
+		if _, err := app.deleteSessionData(request, forkFrom); err != nil {
+			logInternalError("delete moved session", err)
+			writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "The session was copied to " + tildePath(app.config.Home, cwd) + ", but the original could not be deleted."})
+			return
+		}
 	}
 	app.redirectToNewSession(response, request, newPath, "")
 }
@@ -1479,23 +1502,23 @@ func (app *application) startNewSession(request *http.Request, cwd, forkFrom, ag
 				return nil, err
 			}
 		}
-		var projectRollback, tagRollback func() error
+		var projectRollback, stateRollback func() error
 		rollback := func() error {
 			var rollbackErr error
 			if projectRollback != nil {
 				rollbackErr = projectRollback()
 			}
-			if tagRollback != nil {
-				rollbackErr = errors.Join(rollbackErr, tagRollback())
+			if stateRollback != nil {
+				rollbackErr = errors.Join(rollbackErr, stateRollback())
 			}
 			if claimed && app.releaseSession != nil {
 				rollbackErr = errors.Join(rollbackErr, app.releaseSession(request, path))
 			}
 			return rollbackErr
 		}
-		if app.gatewayState != nil && forkFrom != "" {
-			// Like a fork in Gripi, the copy keeps the original's tags.
-			tagRollback, err = app.gatewayState.CopyTags(forkFrom, path)
+		if forkFrom != "" {
+			// The copy takes what Gripi keeps about the original, such as its pin and tags, as the original goes.
+			stateRollback, err = app.migratePendingSessionState(forkFrom, path, true)
 			if err != nil {
 				return nil, errors.Join(err, rollback())
 			}

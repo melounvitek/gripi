@@ -92,7 +92,7 @@ type application struct {
 	hermes hermesConversation
 }
 
-var errSessionFolderMissing = &agent.SyncBlockedError{Mode: agent.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
+var errSessionFolderMissing = &agent.SyncBlockedError{Mode: agent.SyncFolderMissing, Message: "This session’s folder no longer exists. Move it to another folder to keep working."}
 
 func (app *application) sessionFolderMissing(path string) bool {
 	session, found := app.sessionStore.Session(path)
