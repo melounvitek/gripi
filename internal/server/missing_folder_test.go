@@ -86,7 +86,7 @@ func TestSessionWhoseFolderIsGoneIsReadOnlyAndNeverStartsPi(t *testing.T) {
 		response := serveAction(handler, request)
 		var payload map[string]any
 		_ = json.Unmarshal(response.Body.Bytes(), &payload)
-		if response.Code != http.StatusConflict || payload["error"] != "This session’s folder no longer exists. Continue in another folder to keep working." {
+		if response.Code != http.StatusConflict || payload["error"] != "This session’s folder no longer exists. Move it to another folder to keep working." {
 			t.Fatalf("%s %s = %d %s", request.Method, request.URL, response.Code, response.Body.String())
 		}
 	}
@@ -104,7 +104,7 @@ func TestSessionWhoseFolderIsGoneIsReadOnlyAndNeverStartsPi(t *testing.T) {
 	}
 }
 
-func TestContinuingInAnotherFolderForksTheSessionThere(t *testing.T) {
+func TestMovingToAnotherFolderLeavesOnlyPisCopyThere(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Node is required for the fake Pi")
 	}
@@ -150,6 +150,9 @@ func TestContinuingInAnotherFolderForksTheSessionThere(t *testing.T) {
 	if tagged := serveAction(handler, formActionRequest("/sessions/tags", map[string]string{"session": source, "tag": "work", "assigned": "true"}, true)); tagged.Code != http.StatusOK {
 		t.Fatalf("tag = %d %s", tagged.Code, tagged.Body.String())
 	}
+	if pinned := serveAction(handler, formActionRequest("/sessions/pin", map[string]string{"session": source, "pinned": "true"}, true)); pinned.Code != http.StatusOK {
+		t.Fatalf("pin = %d %s", pinned.Code, pinned.Body.String())
+	}
 
 	response := continueIn(source)
 	var payload struct{ Session string }
@@ -165,8 +168,14 @@ func TestContinuingInAnotherFolderForksTheSessionThere(t *testing.T) {
 	if err := json.Unmarshal(forked[:strings.IndexByte(string(forked), '\n')], &header); err != nil || header.CWD != target || header.ParentSession != source || !strings.Contains(string(forked), "Fixture answer") {
 		t.Fatalf("forked session = %s", forked)
 	}
-	if after, err := os.ReadFile(source); err != nil || string(after) != string(original) {
-		t.Fatalf("the original session changed: %s", after)
+	if !strings.HasSuffix(string(forked), string(original[strings.IndexByte(string(original), '\n'):])) {
+		t.Fatalf("the copy differs from the original:\n%s", forked)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("the original session was kept: %v", err)
+	}
+	if pinned, err := os.ReadFile(filepath.Join(root, "pinned.json")); err != nil || !strings.Contains(string(pinned), payload.Session) || strings.Contains(string(pinned), source) {
+		t.Fatalf("pinned sessions = %s", pinned)
 	}
 	var tags struct{ Tags []string }
 	decodeActionJSON(t, serveAction(handler, getActionRequest("/sessions/tags?session="+url.QueryEscape(payload.Session))), &tags)

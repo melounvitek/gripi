@@ -1,6 +1,6 @@
 import { expect, test as base } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { access, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sessions } from "../support/contract.mjs";
 import { message } from "../support/ui.mjs";
@@ -23,7 +23,7 @@ const test = base.extend({
     try {
       await use({ file, title, folder, seedURL: seedURL.href });
     } finally {
-      await unlink(file);
+      await rm(file, { force: true });
     }
   },
 });
@@ -46,7 +46,7 @@ for (const touch of [false, true]) {
       await expect(message(page, "assistant", "The external E2E target is disposable.")).toBeVisible();
       const banner = page.locator("[data-session-sync-banner]");
       await expect(banner).toContainText("This session’s folder no longer exists.");
-      await expect(banner).toContainText(`${orphan.folder} was moved or deleted. You can read the history here, or continue in another folder.`);
+      await expect(banner).toContainText(`${orphan.folder} was moved or deleted. You can read the history here, or move the session to another folder.`);
       await expectPaused(page);
 
       // Polling keeps reporting the missing folder, which must not lift the pause.
@@ -55,13 +55,16 @@ for (const touch of [false, true]) {
       await expectPaused(page);
     });
 
-    test("continuing in another folder forks the session there and keeps the original", async ({ page, orphan }) => {
+    test("moving to another folder leaves only Pi's copy there, as it was", async ({ page, orphan }) => {
       await page.goto(`/?${new URLSearchParams({ session: orphan.file, show_all_sessions: "1" })}`);
-      await activate(page.getByRole("button", { name: "Continue in another folder" }), touch);
-      const dialog = page.getByRole("dialog", { name: "Continue in another folder" });
+      // The seeded session has the same messages, so the moved session must show its time.
+      const seedPath = new URL(orphan.seedURL).searchParams.get("session");
+      const time = await page.locator(`.session-row[data-session-path="${seedPath}"] .session-meta`).textContent();
+      await activate(page.getByRole("button", { name: "Move to another folder" }), touch);
+      const dialog = page.getByRole("dialog", { name: "Move to another folder" });
       await expect(dialog.locator("[data-new-session-label]")).toHaveText("Folder:");
-      await expect(dialog).toContainText(`Pi forks “${orphan.title}” into the folder you pick. The original stays as it is.`);
-      if (!touch) await expect(dialog.locator("[data-new-session-hint]")).toHaveText("↑↓ navigate · enter continue · ctrl+1…9 continue directly · esc cancel");
+      await expect(dialog).toContainText(`Pi copies “${orphan.title}” into the folder you pick, and Gripi deletes the original.`);
+      if (!touch) await expect(dialog.locator("[data-new-session-hint]")).toHaveText("↑↓ navigate · enter move · ctrl+1…9 move directly · esc cancel");
 
       const project = dialog.locator("[data-new-session-project]").first();
       const cwd = await project.getAttribute("data-new-session-project");
@@ -76,8 +79,9 @@ for (const touch of [false, true]) {
         await expect(message(page, "assistant", "The external E2E target is disposable.")).toBeVisible();
         await expect(page.locator("[data-session-sync-banner]")).toHaveCount(0);
         await expect(page.getByLabel("Message to Pi")).toBeEnabled();
-        await page.goBack();
-        await expect(page.locator("[data-session-sync-banner]")).toContainText("This session’s folder no longer exists.");
+        await expect(page.locator(`.session-row[data-session-path="${forked}"] .session-meta`)).toHaveText(time);
+        await expect(page.locator(`.session-row[data-session-path="${orphan.file}"]`)).toHaveCount(0);
+        await expect(access(orphan.file)).rejects.toThrow();
       } finally {
         // Leftover sessions push seeded ones off the first sidebar page for later tests.
         expect((await page.request.post("/sessions/delete", { form: { session: forked } })).ok()).toBe(true);
