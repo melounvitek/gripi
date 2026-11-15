@@ -2,11 +2,9 @@ package hermes
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -27,12 +25,13 @@ type listedSession struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
+// session describes a listed session. Its folder is on the machine that Hermes runs on, which need not be the
+// gateway's, so the gateway doesn't check that it exists: Hermes says so as a run starts.
 func (listed listedSession) session() *agent.Session {
 	updated, _ := time.Parse(time.RFC3339Nano, listed.UpdatedAt)
-	_, err := os.Stat(listed.CWD)
 	return &agent.Session{
 		Path: sessionKey(listed.SessionID), CWD: listed.CWD, ID: listed.SessionID, DisplayName: listed.Title,
-		CreatedAt: updated, ModifiedAt: updated, ConversationActivityAt: updated, FolderMissing: errors.Is(err, fs.ErrNotExist),
+		CreatedAt: updated, ModifiedAt: updated, ConversationActivityAt: updated,
 	}
 }
 

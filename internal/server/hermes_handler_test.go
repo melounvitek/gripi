@@ -52,7 +52,7 @@ func hermesConfig(t *testing.T, sessions ...map[string]any) config.Config {
 		SessionsRoot: filepath.Join(root, "sessions"), AttachmentsRoot: filepath.Join(root, "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true, PermittedHosts: []string{"example.com"},
-		EnvironmentPath: filepath.Join(root, "environment.json"), RPCIdleTimeout: time.Hour,
+		EnvironmentPath: filepath.Join(root, "environment.json"), RPCIdleTimeout: time.Hour, HermesCWD: root,
 		PiCommand: []string{"node", filepath.Join(support, "fake_pi.mjs")}, HermesPath: filepath.Join(support, "fake_hermes.mjs"),
 	}
 }
@@ -700,6 +700,14 @@ func TestEveryHermesPanelShowsOneConversationUntilANewOneReplacesIt(t *testing.T
 	}
 
 	// A Hermes conversation belongs to no project, so it starts in the home folder.
+	if cwds := startedFolders(t, log); !slices.Equal(cwds, []string{cfg.Home, cfg.Home}) {
+		t.Fatalf("Hermes started conversations in %v", cwds)
+	}
+}
+
+// startedFolders reads the folders that the fake Hermes was asked to start sessions in from its log.
+func startedFolders(t *testing.T, log string) []string {
+	t.Helper()
 	contents, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
@@ -716,8 +724,36 @@ func TestEveryHermesPanelShowsOneConversationUntilANewOneReplacesIt(t *testing.T
 			cwds = append(cwds, record.Params.CWD)
 		}
 	}
-	if !slices.Equal(cwds, []string{cfg.Home, cfg.Home}) {
-		t.Fatalf("Hermes started conversations in %v", cwds)
+	return cwds
+}
+
+func TestHermesOnAnotherMachineWorksInFoldersThatOnlyThatMachineHas(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "hermes.log")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	// Neither folder exists on the gateway's machine.
+	remoteHome := filepath.Join(t.TempDir(), "hermes")
+	cfg := hermesConfig(t, map[string]any{
+		"sessionId": "hermes-notes", "cwd": filepath.Join(remoteHome, "notes"), "title": "Sort my notes", "updatedAt": "2026-03-01T10:00:00Z",
+		"history": []any{textUpdate("user_message_chunk", "Sort my notes"), textUpdate("agent_message_chunk", "Sorted.")},
+	})
+	cfg.HermesCWD = remoteHome
+	handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+
+	newHermesConversation(t, handler)
+	if cwds := startedFolders(t, log); !slices.Equal(cwds, []string{remoteHome}) {
+		t.Fatalf("Hermes started conversations in %v, not in %s", cwds, remoteHome)
+	}
+
+	saved := "hermes:hermes-notes"
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {saved}, "message": {"And the old ones"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+	if _, text := repliedText(eventsUntil(t, handler, saved, "agent_settled")); !strings.Contains(text, "Hermes says: And the old ones") {
+		t.Fatalf("Hermes replied %q", text)
 	}
 }
 

@@ -148,6 +148,25 @@ func TestLoadEnablesHermesWithItsPathFromTheGatewayEnv(t *testing.T) {
 	if cfg.HermesPath != "/home/me/.local/bin/work" {
 		t.Fatalf("HermesPath = %q", cfg.HermesPath)
 	}
+	if cfg.HermesCWD != home {
+		t.Fatalf("HermesCWD = %q, not the home folder", cfg.HermesCWD)
+	}
+}
+
+func TestLoadReadsTheFolderOfHermesConversationsOnAnotherMachine(t *testing.T) {
+	home := t.TempDir()
+	envPath := filepath.Join(home, "gateway.env")
+	if err := os.WriteFile(envPath, []byte("GRIPI_ADMIN_PASSWORD=secret\nGRIPI_HERMES=/home/me/bin/hermes-remote\nGRIPI_HERMES_CWD= /home/hermes \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load([]string{"HOME=" + home, "GRIPI_ENV_PATH=" + envPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HermesCWD != "/home/hermes" {
+		t.Fatalf("HermesCWD = %q", cfg.HermesCWD)
+	}
 }
 
 func TestLoadReadsTheHermesDashboardForVoiceFromTheGatewayEnv(t *testing.T) {
@@ -342,6 +361,8 @@ func TestLoadValidatesRuntimeConfiguration(t *testing.T) {
 		{"overflowing sweep", []string{"GRIPI_RPC_IDLE_SWEEP_SECONDS=1e20"}},
 		{"invalid port", []string{"GRIPI_PORT=70000"}},
 		{"Hermes in multi-user mode", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_MULTI_USER_MODE=1"}},
+		{"Hermes folder without Hermes", []string{"GRIPI_HERMES_CWD=/home/hermes"}},
+		{"relative Hermes folder", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_HERMES_CWD=hermes"}},
 		{"Hermes dashboard without Hermes", []string{"GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_USERNAME=me", "GRIPI_HERMES_DASHBOARD_PASSWORD=secret"}},
 		{"Hermes dashboard without a password", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_USERNAME=me"}},
 		{"Hermes dashboard without a username", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_PASSWORD=secret"}},

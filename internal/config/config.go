@@ -52,6 +52,9 @@ type Config struct {
 	PiCommand                 []string
 	// HermesPath runs Hermes Agent, or one of its profiles, next to Pi. Hermes is off when it is empty.
 	HermesPath string
+	// HermesCWD is the folder that Hermes conversations start in, on the machine that Hermes runs on. It is the home
+	// folder unless Hermes runs on another machine.
+	HermesCWD string
 	// HermesDashboardURL reaches Hermes's dashboard for voice conversations, which are off when it is empty.
 	HermesDashboardURL      string
 	HermesDashboardUsername string
@@ -139,6 +142,15 @@ func Load(environ []string) (Config, error) {
 	if hermesPath != "" && multiUserMode {
 		return Config{}, errors.New("GRIPI_HERMES is not supported in multi-user mode")
 	}
+	hermesCWD := strings.TrimSpace(values["GRIPI_HERMES_CWD"])
+	if hermesCWD != "" {
+		if hermesPath == "" {
+			return Config{}, errors.New("GRIPI_HERMES_CWD needs GRIPI_HERMES")
+		}
+		if !filepath.IsAbs(hermesCWD) {
+			return Config{}, errors.New("GRIPI_HERMES_CWD must be an absolute path")
+		}
+	}
 	dashboardURL := strings.TrimSpace(values["GRIPI_HERMES_DASHBOARD_URL"])
 	dashboardUsername := values["GRIPI_HERMES_DASHBOARD_USERNAME"]
 	dashboardPassword := values["GRIPI_HERMES_DASHBOARD_PASSWORD"]
@@ -202,6 +214,7 @@ func Load(environ []string) (Config, error) {
 		RPCIdleSweep:              idleSweep,
 		PiCommand:                 piCommand,
 		HermesPath:                hermesPath,
+		HermesCWD:                 firstNonempty(hermesCWD, home),
 		HermesDashboardURL:        dashboardURL,
 		HermesDashboardUsername:   dashboardUsername,
 		HermesDashboardPassword:   dashboardPassword,
