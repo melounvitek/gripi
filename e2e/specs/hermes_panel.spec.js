@@ -302,6 +302,8 @@ test("Ctrl+Shift+H starts and ends Hermes's voice call while the panel shows, an
   await hermesButton(page).click();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
   await page.keyboard.press("Control+h");
+  // From the panel's page, the keys ask the page around it to hide the panel, which takes a moment.
+  await expect(page.locator("#hermes-panel")).toBeHidden();
   await page.keyboard.press("Control+Shift+h");
   await hermesButton(page).click();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
