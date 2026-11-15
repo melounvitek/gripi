@@ -1,4 +1,6 @@
-// Stands in for Hermes's dashboard in tests: its password login, and the speech endpoints that voice conversations use.
+// Stands in for Hermes's dashboard in tests: its password login, the speech endpoints that voice conversations use, and
+// the file downloads that read the images Hermes shares.
+import { readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { hermes } from "./contract.mjs";
 
@@ -26,6 +28,24 @@ export function startFakeHermesDashboard({ username, password }) {
       // A second and a half of silence, long enough for a test to see the call speaking.
       const speech = wav(new Float32Array(RATE * 1.5));
       return answer(200, { ok: true, data_url: `data:audio/wav;base64,${speech.toString("base64")}`, mime_type: "audio/wav", provider: "fake" });
+    }
+    if (request.method === "GET" && request.url.startsWith("/api/files/download?")) {
+      // Like the dashboard: a regular file on its machine, the tests' here, or the start of it that Range asks for.
+      const filePath = new URL(request.url, "http://dashboard").searchParams.get("path");
+      let contents;
+      try {
+        if (!statSync(filePath).isFile()) return answer(400, { detail: "Path is not a file" });
+        contents = readFileSync(filePath);
+      } catch {
+        return answer(404, { detail: "Path not found" });
+      }
+      const range = /^bytes=0-(\d+)$/.exec(request.headers.range ?? "");
+      const part = range ? contents.subarray(0, Number(range[1]) + 1) : contents;
+      response.writeHead(range ? 206 : 200, {
+        "Content-Type": "application/octet-stream", "Content-Length": part.length,
+        ...(range ? { "Content-Range": `bytes 0-${part.length - 1}/${contents.length}` } : {})
+      });
+      return response.end(part);
     }
     answer(404, { detail: "Not Found" });
   });
