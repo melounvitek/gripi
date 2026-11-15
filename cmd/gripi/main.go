@@ -163,7 +163,7 @@ func newAdapter(cfg config.Config, piAdapter *pi.Adapter) agent.Adapter {
 	}
 	return agent.NewRouter(
 		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
-		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)})},
+		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.HermesCWD, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)})},
 	)
 }
 

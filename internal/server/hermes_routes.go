@@ -39,7 +39,7 @@ func (app *application) openHermesConversation(response http.ResponseWriter, req
 	_, pending := app.pendingSessions.CWD(key)
 	if !listed && !pending {
 		var err error
-		if key, err = app.startNewSession(request, app.config.Home, "", "hermes"); err != nil {
+		if key, err = app.startNewSession(request, app.config.HermesCWD, "", "hermes"); err != nil {
 			app.writeActionRPCError(response, err)
 			return
 		}
@@ -51,7 +51,7 @@ func (app *application) openHermesConversation(response http.ResponseWriter, req
 func (app *application) newHermesConversation(response http.ResponseWriter, request *http.Request) {
 	app.hermes.starting.Lock()
 	defer app.hermes.starting.Unlock()
-	key, err := app.startNewSession(request, app.config.Home, "", "hermes")
+	key, err := app.startNewSession(request, app.config.HermesCWD, "", "hermes")
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return

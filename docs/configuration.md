@@ -18,6 +18,7 @@ Boolean settings accept `1`, `true`, `yes`, or `on` for true and `0`, `false`, `
 | `GRIPI_AUTO_APPROVE_PROJECTS` | on | [Project resource approval](#project-resource-approval) |
 | `GRIPI_NODE`, `GRIPI_PI` | `pi` from `PATH` | [Custom Pi runtime](#custom-pi-runtime) |
 | `GRIPI_HERMES` | off | [Hermes Agent (experimental)](#hermes-agent-experimental) |
+| `GRIPI_HERMES_CWD` | home folder | [Hermes on another machine](#hermes-on-another-machine) |
 | `GRIPI_HERMES_DASHBOARD_URL`, `GRIPI_HERMES_DASHBOARD_USERNAME`, `GRIPI_HERMES_DASHBOARD_PASSWORD` | none | [Voice conversations](#voice-conversations) |
 | `GRIPI_SESSIONS_ROOT` | `~/.pi/agent/sessions` | [Session location](#session-location) |
 | `GRIPI_RPC_IDLE_TIMEOUT_SECONDS` | `300` | [Pi process lifetime](#pi-process-lifetime) |
@@ -257,7 +258,7 @@ The path can also be a Hermes profile wrapper, which `hermes profile alias <name
 
 With Hermes on, the Hermes tab on the window's right edge opens and closes the panel, as do Ctrl+H and `hermes` typed in the Ctrl+K palette. The panel stays put while you switch sessions. On a wide screen it takes a column of its own, and on a narrower one it lies over the conversation, with the tab on its edge. With the panel open, Tab goes from a composer to its conversation and then on to the other side's composer. On a phone it fills the screen, and on a touch screen `‹ Gripi` closes it instead of `×`. `↗` opens it in a window of its own.
 
-The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. If Hermes replies after you close the panel, the tab's line turns orange. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
+The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. If Hermes replies after you close the panel, the tab's line turns orange. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder, or in `GRIPI_HERMES_CWD` for a [Hermes on another machine](#hermes-on-another-machine).
 
 What to expect:
 
@@ -274,9 +275,32 @@ What to expect:
 
 - Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the panel. Other edits go ahead without asking, as in Hermes's CLI. A dialog stays open after Hermes has stopped waiting for the answer, after its `approvals.timeout`, until you close it.
 - A session that another ACP client, such as an editor, continues keeps showing what Gripi's Hermes loaded, until that Hermes restarts.
-- Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next conversation starts, once no other Hermes session is open. A new conversation's first message still runs with the variables from before, because the conversation lives only in the running Hermes until then.
+- Saved [environment variables](#environment-variables) reach `hermes acp` when it starts, but Hermes runs its tools in its gateway service, with that service's environment: a gateway that runs already, such as Hermes's systemd service, doesn't get them. After a change, Hermes restarts with them before the next conversation starts, once no other Hermes session is open. A new conversation's first message still runs with the variables from before, because the conversation lives only in the running Hermes until then.
 - After `hermes update`, Gripi restarts its Hermes before a conversation starts or opens, unless Hermes is replying. It compares the first line of `<path> --version`. A message sent right after that into another open conversation fails once, and sending it again works. A new conversation without a message is gone, as when Hermes stops.
 - [Multi-user mode](#multi-user-mode) refuses the setting, because every user would share the one Hermes, with its memory, skills and messaging accounts.
+
+### Hermes on another machine
+
+Hermes can run on another computer, such as a server that keeps its memory, skills and messaging accounts, with Gripi reaching it over SSH. Point `GRIPI_HERMES` at a script that runs that Hermes with `ssh`, and set `GRIPI_HERMES_CWD` to the folder on that computer that conversations start in, such as the home folder of Hermes's user there:
+
+```sh
+#!/bin/sh
+exec ssh -T hermes@server.example.ts.net /home/hermes/.local/bin/hermes "$@"
+```
+
+```sh
+GRIPI_HERMES=/home/me/.local/bin/hermes-remote
+GRIPI_HERMES_CWD=/home/hermes
+```
+
+`GRIPI_HERMES_CWD` must be an absolute path; without it, conversations start in the gateway's home folder, which Hermes refuses when that computer has no such folder. `ssh` must log in without a prompt as the gateway's OS user. Gripi runs the script for `hermes acp`, and for `hermes --version` before each new conversation; `ControlMaster auto` and `ControlPersist` in that user's `~/.ssh/config` let them share one connection. Stopping Hermes, such as when it is idle, ends `ssh`, and with it `hermes acp` on the other computer.
+
+Hermes's tools then run on that computer, so:
+
+- Images that Hermes shares don't show, because Gripi looks for their files on its own machine.
+- The [`gripi` command](../README.md#command-line) doesn't work there, `gripi sudo` included, because it reaches the gateway through a socket on Gripi's machine. Hermes can run it over `ssh` on Gripi's machine instead, which gives Hermes a shell there.
+- A reply that runs when the connection breaks goes on there, and Stop no longer reaches it.
+- Updates of Gripi fail while that computer can't be reached, because they run `gripi check`, which starts Hermes.
 
 ### Voice conversations
 
