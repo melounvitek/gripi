@@ -83,7 +83,8 @@ func (client *Client) ReadFile(ctx context.Context, path string, limit int64) ([
 		return nil, 0, errors.New("the dashboard didn't answer a moment ago")
 	}
 	data, size, err := client.readFile(ctx, path, limit)
-	if errors.Is(err, context.DeadlineExceeded) {
+	// The error needn't say so, such as when the dashboard's error text didn't arrive.
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		client.filesMu.Lock()
 		client.filesPausedUntil = time.Now().Add(filesPause)
 		client.filesMu.Unlock()
