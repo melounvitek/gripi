@@ -25,7 +25,15 @@ type Client struct {
 	httpClient                  *http.Client
 	loginMu                     sync.Mutex
 	loggedIn                    bool
+
+	filesMu sync.Mutex
+	// filesPausedUntil is when ReadFile asks the dashboard again after it didn't answer in time.
+	filesPausedUntil time.Time
 }
+
+// filesPause is how long ReadFile fails at once after the dashboard didn't answer in time, rather than have every
+// shared image wait as long.
+const filesPause = 30 * time.Second
 
 func New(baseURL, username, password string) *Client {
 	jar, _ := cookiejar.New(nil)
@@ -68,6 +76,22 @@ func (client *Client) Speak(ctx context.Context, text string) ([]byte, string, e
 // ReadFile reads at most limit bytes from the start of a file on the dashboard's machine, and answers them with the
 // file's size. The dashboard reads only regular files.
 func (client *Client) ReadFile(ctx context.Context, path string, limit int64) ([]byte, int64, error) {
+	client.filesMu.Lock()
+	paused := time.Now().Before(client.filesPausedUntil)
+	client.filesMu.Unlock()
+	if paused {
+		return nil, 0, errors.New("the dashboard didn't answer a moment ago")
+	}
+	data, size, err := client.readFile(ctx, path, limit)
+	if errors.Is(err, context.DeadlineExceeded) {
+		client.filesMu.Lock()
+		client.filesPausedUntil = time.Now().Add(filesPause)
+		client.filesMu.Unlock()
+	}
+	return data, size, err
+}
+
+func (client *Client) readFile(ctx context.Context, path string, limit int64) ([]byte, int64, error) {
 	header := http.Header{"Range": {fmt.Sprintf("bytes=0-%d", limit-1)}}
 	response, err := client.call(ctx, http.MethodGet, "/api/files/download?path="+url.QueryEscape(path), nil, header)
 	if err != nil {
@@ -93,9 +117,6 @@ func (client *Client) post(ctx context.Context, path string, payload map[string]
 		return err
 	}
 	defer response.Body.Close()
-	if answer == nil {
-		return nil
-	}
 	return json.NewDecoder(response.Body).Decode(answer)
 }
 

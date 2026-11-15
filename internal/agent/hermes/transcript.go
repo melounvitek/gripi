@@ -95,7 +95,7 @@ func (transcript *transcript) commit() {
 	transcript.open = nil
 	if open.FinalAssistantResponse {
 		var images []mediaImage
-		open.Text, images = mediaImages(open.Text, transcript.files)
+		open.Text, images = mediaImages(open.Text, transcript.files.sniffImage)
 		entry := len(transcript.messages)
 		for index, image := range images {
 			open.Images = append(open.Images, agent.Image{MIMEType: image.mimeType, EntryID: strconv.Itoa(entry), Index: index})

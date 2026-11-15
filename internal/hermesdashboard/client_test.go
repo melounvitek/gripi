@@ -17,13 +17,15 @@ import (
 
 // fakeDashboard serves the speech and file endpoints of Hermes's dashboard to the session that its last login started.
 type fakeDashboard struct {
-	url      string
-	mu       sync.Mutex
-	logins   int
-	session  string
-	refuse   bool                // refuses every session, as if each had expired
-	received []map[string]string // the bodies of the speech calls
-	files    map[string][]byte   // the files on the dashboard's machine, by path
+	url       string
+	mu        sync.Mutex
+	logins    int
+	session   string
+	refuse    bool                // refuses every session, as if each had expired
+	received  []map[string]string // the bodies of the speech calls
+	files     map[string][]byte   // the files on the dashboard's machine, by path
+	hang      bool                // answers no file request until it is cancelled
+	fileCalls int
 }
 
 func startFakeDashboard(t *testing.T) (*fakeDashboard, *hermesdashboard.Client) {
@@ -62,7 +64,13 @@ func startFakeDashboard(t *testing.T) (*fakeDashboard, *hermesdashboard.Client) 
 		}
 		dashboard.mu.Lock()
 		contents, found := dashboard.files[request.URL.Query().Get("path")]
+		dashboard.fileCalls++
+		hang := dashboard.hang
 		dashboard.mu.Unlock()
+		if hang {
+			<-request.Context().Done()
+			return
+		}
 		if !found {
 			answer(response, http.StatusNotFound, map[string]string{"detail": "Path not found"})
 			return
@@ -215,5 +223,29 @@ func TestReadFileReadsTheStartOfAFileOnTheDashboardsMachine(t *testing.T) {
 	}
 	if _, _, err := client.ReadFile(ctx, "/home/hermes/gone.png", 100); err == nil || err.Error() != "Path not found" {
 		t.Fatalf("ReadFile of a missing file = %v", err)
+	}
+}
+
+func TestADashboardThatDoesNotAnswerPausesReadingFiles(t *testing.T) {
+	dashboard, client := startFakeDashboard(t)
+	dashboard.mu.Lock()
+	dashboard.files, dashboard.hang = map[string][]byte{"/home/hermes/shot.png": []byte("png!")}, true
+	dashboard.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, _, err := client.ReadFile(ctx, "/home/hermes/shot.png", 100); err == nil {
+		t.Fatal("ReadFile from a dashboard that doesn't answer succeeded")
+	}
+
+	// Every image would otherwise wait as long, while the gateway holds Hermes's updates.
+	started := time.Now()
+	if _, _, err := client.ReadFile(context.Background(), "/home/hermes/shot.png", 100); err == nil || time.Since(started) > time.Second {
+		t.Fatalf("ReadFile right after = %v, after %v", err, time.Since(started))
+	}
+	dashboard.mu.Lock()
+	calls := dashboard.fileCalls
+	dashboard.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("the dashboard got %d file requests", calls)
 	}
 }

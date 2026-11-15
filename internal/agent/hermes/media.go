@@ -21,13 +21,16 @@ var mediaTag = regexp.MustCompile("[`*_]{0,3}MEDIA:[ \t]*(`[^`\n]+`|\"[^\"\n]+\"
 // codeFence is a line that opens or closes a Markdown code block, with the fence and what follows it.
 var codeFence = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})(.*)$")
 
-// mediaImage is an image file that a reply shares.
-type mediaImage struct{ path, mimeType string }
+// mediaImage is an image file that a reply shares, with what read of it.
+type mediaImage struct {
+	path, mimeType string
+	data           []byte
+}
 
-// mediaImages takes the tags of the images that the browser can show out of a reply's text. Like Hermes, it leaves
-// tags in code blocks and quotes, which are examples, and tags of other files. A reply of nothing but tags keeps them
-// as its text, which the page needs to show and announce it as a reply.
-func mediaImages(text string, files sharedFiles) (string, []mediaImage) {
+// mediaImages takes the tags of the images that the browser can show, which read reads, out of a reply's text. Like
+// Hermes, it leaves tags in code blocks and quotes, which are examples, and tags of other files. A reply of nothing but
+// tags keeps them as its text, which the page needs to show and announce it as a reply.
+func mediaImages(text string, read func(path string) ([]byte, string, error)) (string, []mediaImage) {
 	var images []mediaImage
 	lines := strings.SplitAfter(text, "\n")
 	// fence opened the code block that the line is in. Only a fence of its character, at least as long, closes it.
@@ -49,11 +52,11 @@ func mediaImages(text string, files sharedFiles) (string, []mediaImage) {
 		}
 		lines[index] = mediaTag.ReplaceAllStringFunc(line, func(tag string) string {
 			path := strings.TrimRight(strings.Trim(mediaTag.FindStringSubmatch(tag)[1], "`\""), "`*_.,;:!?)")
-			_, mimeType, err := files.image(path, sniffBytes)
+			data, mimeType, err := read(path)
 			if err != nil {
 				return tag
 			}
-			images = append(images, mediaImage{path, mimeType})
+			images = append(images, mediaImage{path, mimeType, data})
 			return ""
 		})
 	}
@@ -119,6 +122,11 @@ func (files sharedFiles) image(path string, limit int64) ([]byte, string, error)
 		return nil, "", fs.ErrNotExist
 	}
 	return data, mimeType, nil
+}
+
+// sniffImage reads as much of an image file that the browser can show as tells its type, and returns it with the type.
+func (files sharedFiles) sniffImage(path string) ([]byte, string, error) {
+	return files.image(path, sniffBytes)
 }
 
 // readImage reads an image file that the browser can show, and returns it with its type.
