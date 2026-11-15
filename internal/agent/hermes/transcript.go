@@ -38,6 +38,7 @@ type transcript struct {
 	tools     map[string]*agent.Message
 	// media are the image files that the replies share, by the reply's index.
 	media map[int][]string
+	files sharedFiles
 }
 
 func (transcript *transcript) apply(value update) {
@@ -94,7 +95,7 @@ func (transcript *transcript) commit() {
 	transcript.open = nil
 	if open.FinalAssistantResponse {
 		var images []mediaImage
-		open.Text, images = mediaImages(open.Text)
+		open.Text, images = mediaImages(open.Text, transcript.files)
 		entry := len(transcript.messages)
 		for index, image := range images {
 			open.Images = append(open.Images, agent.Image{MIMEType: image.mimeType, EntryID: strconv.Itoa(entry), Index: index})

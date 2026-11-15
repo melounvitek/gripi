@@ -10,6 +10,7 @@ import (
 	agenthermes "github.com/melounvitek/gripi/internal/agent/hermes"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
+	"github.com/melounvitek/gripi/internal/hermesdashboard"
 )
 
 // NewPiHandler builds the gateway with the Pi adapter configured from cfg, as cmd/gripi does.
@@ -68,9 +69,13 @@ func NewHandlerWithHermes(cfg config.Config, files fs.FS) (http.Handler, error) 
 	if err != nil {
 		return nil, err
 	}
+	options := agenthermes.Options{Path: cfg.HermesPath, Home: cfg.HermesCWD, IdleTimeout: cfg.RPCIdleTimeout, StateDir: filepath.Dir(cfg.ReadStatePath)}
+	if cfg.HermesDashboardURL != "" {
+		options.ReadFile = hermesdashboard.New(cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword).ReadFile
+	}
 	router := agent.NewRouter(
 		agent.RoutedAgent{Name: "pi", Adapter: pi},
-		agent.RoutedAgent{Name: "hermes", Adapter: agenthermes.New(agenthermes.Options{Path: cfg.HermesPath, Home: cfg.HermesCWD, IdleTimeout: cfg.RPCIdleTimeout, StateDir: filepath.Dir(cfg.ReadStatePath)})},
+		agent.RoutedAgent{Name: "hermes", Adapter: agenthermes.New(options)},
 	)
 	return newHandler(cfg, files, router, randomBrowserToken)
 }

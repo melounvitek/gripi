@@ -1,6 +1,7 @@
 package hermesdashboard_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -9,11 +10,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/hermesdashboard"
 )
 
-// fakeDashboard serves the speech endpoints of Hermes's dashboard to the session that its last login started.
+// fakeDashboard serves the speech and file endpoints of Hermes's dashboard to the session that its last login started.
 type fakeDashboard struct {
 	url      string
 	mu       sync.Mutex
@@ -21,6 +23,7 @@ type fakeDashboard struct {
 	session  string
 	refuse   bool                // refuses every session, as if each had expired
 	received []map[string]string // the bodies of the speech calls
+	files    map[string][]byte   // the files on the dashboard's machine, by path
 }
 
 func startFakeDashboard(t *testing.T) (*fakeDashboard, *hermesdashboard.Client) {
@@ -51,6 +54,21 @@ func startFakeDashboard(t *testing.T) (*fakeDashboard, *hermesdashboard.Client) 
 		audio := base64.StdEncoding.EncodeToString([]byte("spoken: " + body["text"]))
 		return http.StatusOK, map[string]any{"ok": true, "data_url": "data:audio/mpeg;base64," + audio, "mime_type": "audio/mpeg", "provider": "piper"}
 	}))
+	// Like the dashboard, which answers a range of a file.
+	mux.HandleFunc("GET /api/files/download", func(response http.ResponseWriter, request *http.Request) {
+		if !dashboard.authorized(request) {
+			answer(response, http.StatusUnauthorized, map[string]string{"detail": "Unauthorized"})
+			return
+		}
+		dashboard.mu.Lock()
+		contents, found := dashboard.files[request.URL.Query().Get("path")]
+		dashboard.mu.Unlock()
+		if !found {
+			answer(response, http.StatusNotFound, map[string]string{"detail": "Path not found"})
+			return
+		}
+		http.ServeContent(response, request, "", time.Time{}, bytes.NewReader(contents))
+	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	dashboard.url = server.URL
@@ -59,11 +77,7 @@ func startFakeDashboard(t *testing.T) (*fakeDashboard, *hermesdashboard.Client) 
 
 func (dashboard *fakeDashboard) api(handle func(map[string]string) (int, any)) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
-		cookie, err := request.Cookie("hermes_session_at")
-		dashboard.mu.Lock()
-		valid := err == nil && cookie.Value == dashboard.session && !dashboard.refuse
-		dashboard.mu.Unlock()
-		if !valid {
+		if !dashboard.authorized(request) {
 			answer(response, http.StatusUnauthorized, map[string]string{"error": "unauthenticated", "detail": "Unauthorized", "reason": "invalid_or_expired_session"})
 			return
 		}
@@ -75,6 +89,13 @@ func (dashboard *fakeDashboard) api(handle func(map[string]string) (int, any)) h
 		status, reply := handle(body)
 		answer(response, status, reply)
 	}
+}
+
+func (dashboard *fakeDashboard) authorized(request *http.Request) bool {
+	cookie, err := request.Cookie("hermes_session_at")
+	dashboard.mu.Lock()
+	defer dashboard.mu.Unlock()
+	return err == nil && cookie.Value == dashboard.session && !dashboard.refuse
 }
 
 func (dashboard *fakeDashboard) loginCount() int {
@@ -170,5 +191,29 @@ func TestErrorsCarryTheDashboardsReason(t *testing.T) {
 	wrongPassword := hermesdashboard.New(dashboard.url, "me", "wrong")
 	if _, _, err := wrongPassword.Speak(context.Background(), "Hi"); err == nil || err.Error() != "log in: Invalid credentials" {
 		t.Fatalf("Speak with a wrong password = %v", err)
+	}
+}
+
+func TestReadFileReadsTheStartOfAFileOnTheDashboardsMachine(t *testing.T) {
+	dashboard, client := startFakeDashboard(t)
+	path := "/home/hermes/page shot.png"
+	contents := bytes.Repeat([]byte("png!"), 250)
+	dashboard.mu.Lock()
+	dashboard.files = map[string][]byte{path: contents}
+	dashboard.mu.Unlock()
+	ctx := context.Background()
+
+	if data, size, err := client.ReadFile(ctx, path, 100); err != nil || !bytes.Equal(data, contents[:100]) || size != 1000 {
+		t.Fatalf("ReadFile of 100 bytes = %d bytes of a file of %d, %v", len(data), size, err)
+	}
+	// A limit past the file's end reads all of it, also after the session has expired.
+	dashboard.mu.Lock()
+	dashboard.session = "expired"
+	dashboard.mu.Unlock()
+	if data, size, err := client.ReadFile(ctx, path, 5000); err != nil || !bytes.Equal(data, contents) || size != 1000 {
+		t.Fatalf("ReadFile of 5000 bytes = %d bytes of a file of %d, %v", len(data), size, err)
+	}
+	if _, _, err := client.ReadFile(ctx, "/home/hermes/gone.png", 100); err == nil || err.Error() != "Path not found" {
+		t.Fatalf("ReadFile of a missing file = %v", err)
 	}
 }

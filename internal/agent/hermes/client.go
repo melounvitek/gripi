@@ -539,9 +539,9 @@ func (client *client) endReply(stopReason string) *agent.Reply {
 			continue
 		}
 		var shared []mediaImage
-		message.Content[index].Text, shared = mediaImages(part.Text)
+		message.Content[index].Text, shared = mediaImages(part.Text, client.adapter.files)
 		for _, image := range shared {
-			if data, mimeType, err := readImage(image.path); err == nil {
+			if data, mimeType, err := client.adapter.files.readImage(image.path); err == nil {
 				images = append(images, piPart{Type: "image", Data: base64.StdEncoding.EncodeToString(data), MIMEType: mimeType})
 			}
 		}

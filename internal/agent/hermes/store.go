@@ -205,7 +205,7 @@ func (store store) Image(key, entryID string, index int) ([]byte, string, error)
 	if index < 0 || index >= len(paths) {
 		return nil, "", fs.ErrNotExist
 	}
-	return readImage(paths[index])
+	return store.adapter.files.readImage(paths[index])
 }
 
 func (store store) SubagentToolCallContext(string, string, []string) map[string]agent.ToolCallContext {
