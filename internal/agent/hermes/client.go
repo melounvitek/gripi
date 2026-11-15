@@ -539,11 +539,10 @@ func (client *client) endReply(stopReason string) *agent.Reply {
 			continue
 		}
 		var shared []mediaImage
-		message.Content[index].Text, shared = mediaImages(part.Text)
+		// A tag stays unless its image could be read, which the live event carries.
+		message.Content[index].Text, shared = mediaImages(part.Text, client.adapter.files.readImage)
 		for _, image := range shared {
-			if data, mimeType, err := readImage(image.path); err == nil {
-				images = append(images, piPart{Type: "image", Data: base64.StdEncoding.EncodeToString(data), MIMEType: mimeType})
-			}
+			images = append(images, piPart{Type: "image", Data: base64.StdEncoding.EncodeToString(image.data), MIMEType: image.mimeType})
 		}
 	}
 	message.Content = append(message.Content, images...)

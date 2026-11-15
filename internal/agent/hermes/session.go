@@ -36,7 +36,7 @@ func (adapter *Adapter) session(id string) *session {
 		adapter.sessions = make(map[string]*session)
 	}
 	if adapter.sessions[id] == nil {
-		adapter.sessions[id] = &session{id: id}
+		adapter.sessions[id] = &session{id: id, transcript: transcript{files: adapter.files}}
 	}
 	return adapter.sessions[id]
 }
@@ -121,7 +121,7 @@ func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*sessio
 		return nil, nil, err
 	}
 	session.mu.Lock()
-	session.transcript = transcript{}
+	session.transcript = transcript{files: adapter.files}
 	session.mu.Unlock()
 	var answer struct {
 		Models struct {

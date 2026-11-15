@@ -266,7 +266,7 @@ What to expect:
 - All Hermes sessions run in one Hermes process. Gripi starts it only for the Hermes panel and `gripi` commands, which then wait a few seconds, and it stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
 - While Hermes works, the composer waits: Stop is the only action. Gripi doesn't choose Hermes's model yet, and `gripi open` refuses Hermes's sessions.
 - A message to Hermes takes up to about 36 MB of images, which Hermes reads encoded on one line of at most 50 MB.
-- Hermes shares a file by writing `MEDIA:` and the file's absolute path in its reply. Gripi shows a PNG, JPEG, GIF or WebP image of up to 10 MB in place of the tag, for as long as the file exists. It leaves tags in code blocks and quotes, tags of other files, and the tags of a reply that has nothing else to say as they are. Hermes tells its model about the tag only in its screenshot tool, unless `~/.hermes/config.yaml` does so for every ACP client, which editors then show as plain text:
+- Hermes shares a file by writing `MEDIA:` and the file's absolute path in its reply. Gripi shows a PNG, JPEG, GIF or WebP image of up to 10 MB in place of the tag, for as long as the file exists. With the [dashboard](#voice-conversations) set, Gripi reads the file through it, on the machine that Hermes runs on; otherwise from its own disk. It leaves tags in code blocks and quotes, tags of other files, and the tags of a reply that has nothing else to say as they are. Hermes tells its model about the tag only in its screenshot tool, unless `~/.hermes/config.yaml` does so for every ACP client, which editors then show as plain text:
 
   ```yaml
   platform_hints:
@@ -297,7 +297,7 @@ GRIPI_HERMES_CWD=/home/hermes
 
 Hermes's tools then run on that computer, so:
 
-- Images that Hermes shares don't show, because Gripi looks for their files on its own machine.
+- Images that Hermes shares show only through Hermes's [dashboard](#voice-conversations), which Gripi must then reach there, such as at that computer's Tailscale address.
 - The [`gripi` command](../README.md#command-line) doesn't work there, `gripi sudo` included, because it reaches the gateway through a socket on Gripi's machine. Hermes can run it over `ssh` on Gripi's machine instead, which gives Hermes a shell there.
 - A reply that runs when the connection breaks goes on there, and Stop no longer reaches it.
 - Updates of Gripi fail while that computer can't be reached, because they run `gripi check`, which starts Hermes.
@@ -312,7 +312,7 @@ GRIPI_HERMES_DASHBOARD_USERNAME=me
 GRIPI_HERMES_DASHBOARD_PASSWORD=...
 ```
 
-Gripi logs in with the dashboard's password login, its `basic` provider, which `dashboard.basic_auth` in Hermes's `config.yaml` sets up. The dashboard asks for a login only when it listens on more than localhost or has a `dashboard.public_url`; otherwise Gripi can't use it. Only the gateway talks to the dashboard, never the browser.
+Gripi logs in with the dashboard's password login, its `basic` provider, which `dashboard.basic_auth` in Hermes's `config.yaml` sets up. The dashboard asks for a login only when it listens on more than localhost or has a `dashboard.public_url`; otherwise Gripi can't use it. Only the gateway talks to the dashboard, never the browser. Gripi also reads the [images that Hermes shares](#hermes-agent-experimental) through it. With its password, the dashboard serves any file that Hermes's OS user can read, such as SSH keys, so treat the password like that user's login.
 
 Browsers allow the microphone only over HTTPS or on `localhost`, so other devices need [HTTPS](examples.md#https-through-tailscale-serve).
 

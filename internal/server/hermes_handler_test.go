@@ -397,6 +397,13 @@ func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
 		t.Fatalf("prompt = %d %v", code, payload)
 	}
 
+	checkSharedImageLiveAndAfterTheRun(t, handler, key, contents)
+}
+
+// checkSharedImageLiveAndAfterTheRun checks that the run's reply to "Look: " and an image shows the image, live and on
+// the page after the run.
+func checkSharedImageLiveAndAfterTheRun(t *testing.T, handler http.Handler, key string, contents []byte) {
+	t.Helper()
 	var reply []any
 	for _, event := range eventsUntil(t, handler, key, "agent_settled") {
 		if message, _ := event.Message.(map[string]any); event.Type == "message_end" && message["role"] == "assistant" {
@@ -409,6 +416,81 @@ func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
 	}
 	if images := shownImages(t, handler, getPage(t, handler, panelPage(key))); len(images) != 1 || !bytes.Equal(images[0], contents) {
 		t.Fatalf("the page after the run shows the images %q", images)
+	}
+}
+
+// dashboardHandler runs the gateway with the fake Hermes and a fake of Hermes's dashboard, whose logged-in file
+// downloads download serves.
+func dashboardHandler(t *testing.T, download http.HandlerFunc) http.Handler {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/password-login", func(response http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(response, &http.Cookie{Name: "hermes_session_at", Value: "session", Path: "/"})
+		_, _ = io.WriteString(response, `{"ok":true,"next":"/"}`)
+	})
+	mux.HandleFunc("GET /api/files/download", func(response http.ResponseWriter, request *http.Request) {
+		if cookie, err := request.Cookie("hermes_session_at"); err != nil || cookie.Value != "session" {
+			http.Error(response, `{"detail":"Unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		download(response, request)
+	})
+	dashboard := httptest.NewServer(mux)
+	t.Cleanup(dashboard.Close)
+	cfg := hermesConfig(t)
+	cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword = dashboard.URL, "me", "secret"
+	handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	return handler
+}
+
+func TestAnImageThatHermesSharesOnItsOwnMachineShowsThroughItsDashboard(t *testing.T) {
+	// The image is only on Hermes's machine, whose dashboard reads it there.
+	image := filepath.Join(t.TempDir(), "hermes", "page shot.png")
+	contents := []byte("\x89PNG\r\n\x1a\nremote-image")
+	handler := dashboardHandler(t, func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Get("path") != image {
+			http.NotFound(response, request)
+			return
+		}
+		http.ServeContent(response, request, "", time.Time{}, bytes.NewReader(contents))
+	})
+
+	key := newHermesConversation(t, handler)
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {`Look: MEDIA:"` + image + `"`}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+	checkSharedImageLiveAndAfterTheRun(t, handler, key, contents)
+}
+
+func TestALiveReplyKeepsTheTagOfAnImageThatTheDashboardCouldNotSend(t *testing.T) {
+	image := "/home/hermes/page.png"
+	contents := []byte("\x89PNG\r\n\x1a\nremote-image")
+	// The dashboard sends the start of the image, which tells its type, but fails to send all of it.
+	handler := dashboardHandler(t, func(response http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Range") != "bytes=0-511" {
+			http.Error(response, `{"detail":"Filesystem request failed"}`, http.StatusInternalServerError)
+			return
+		}
+		http.ServeContent(response, request, "", time.Time{}, bytes.NewReader(contents))
+	})
+
+	key := newHermesConversation(t, handler)
+	message := `Look: MEDIA:` + image
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {message}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+	var reply []any
+	for _, event := range eventsUntil(t, handler, key, "agent_settled") {
+		if message, _ := event.Message.(map[string]any); event.Type == "message_end" && message["role"] == "assistant" {
+			reply = message["content"].([]any)
+		}
+	}
+	if len(reply) != 1 || fmt.Sprint(reply[0]) != fmt.Sprint(map[string]any{"type": "text", "text": "Hermes says: " + message}) {
+		t.Fatalf("the live reply is %v", reply)
 	}
 }
 

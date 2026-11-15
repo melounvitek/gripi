@@ -30,6 +30,9 @@ type Options struct {
 	// StateDir keeps how many replies of each session ended in the gateway, across restarts. Without it the adapter
 	// forgets.
 	StateDir string
+	// ReadFile reads at most limit bytes from the start of a regular file on the machine that Hermes runs on, which
+	// replies share, and answers them with the file's size. Without it, the adapter reads the gateway's own files.
+	ReadFile func(ctx context.Context, path string, limit int64) ([]byte, int64, error)
 }
 
 // Adapter runs Hermes sessions in one `hermes acp` process, which ACP lets serve many sessions.
@@ -37,6 +40,7 @@ type Adapter struct {
 	path        string
 	home        string
 	idleTimeout time.Duration
+	files       sharedFiles
 
 	mu   sync.Mutex
 	conn *connection
@@ -78,7 +82,7 @@ const (
 )
 
 func New(options Options) *Adapter {
-	adapter := &Adapter{path: options.Path, home: options.Home, idleTimeout: options.IdleTimeout, replies: make(map[string]int)}
+	adapter := &Adapter{path: options.Path, home: options.Home, idleTimeout: options.IdleTimeout, files: options.ReadFile, replies: make(map[string]int)}
 	if options.StateDir != "" {
 		adapter.repliesFile = state.NewFile(filepath.Join(options.StateDir, "hermes-replies.json"))
 		contents, found, err := adapter.repliesFile.Read()

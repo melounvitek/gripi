@@ -23,6 +23,7 @@ import (
 	"github.com/melounvitek/gripi/internal/agent/hermes"
 	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
+	"github.com/melounvitek/gripi/internal/hermesdashboard"
 	gateway "github.com/melounvitek/gripi/internal/server"
 	remote "github.com/melounvitek/gripi/internal/worker"
 	"github.com/melounvitek/gripi/internal/worker/view"
@@ -161,9 +162,14 @@ func newAdapter(cfg config.Config, piAdapter *pi.Adapter) agent.Adapter {
 	if cfg.HermesPath == "" {
 		return piAdapter
 	}
+	options := hermes.Options{Path: cfg.HermesPath, Home: cfg.HermesCWD, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)}
+	// The files that Hermes shares are on its machine, which its dashboard reads also when it isn't the gateway's.
+	if cfg.HermesDashboardURL != "" {
+		options.ReadFile = hermesdashboard.New(cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword).ReadFile
+	}
 	return agent.NewRouter(
 		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
-		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.HermesCWD, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)})},
+		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(options)},
 	)
 }
 
