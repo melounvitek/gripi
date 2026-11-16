@@ -7,19 +7,18 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
+	"time"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
-var sidebarRow = regexp.MustCompile(`<div class="session-row([^"]*)" data-session-tags="[^"]*" data-session-path="([^"]*)"`)
+// sidebarRow finds the rows of a sidebar, and where the fold of done sub-sessions starts and ends.
+var sidebarRow = regexp.MustCompile(`<div class="session-row([^"]*)" data-session-tags="[^"]*" data-session-path="([^"]*)"|<details class="worker-fold"[^>]*><summary>(\d+)|</details>`)
 
 func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 	cfg, alpha, beta, project := fakePiConfig(t)
@@ -31,7 +30,7 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 	parent, pinnedParent, done, older, continued, pinnedDone := path("parent"), path("pinned-parent"), path("done"), path("older"), path("continued"), path("pinned-done")
 	state := filepath.Dir(cfg.ReadStatePath)
 	for name, value := range map[string]any{
-		// Pi CLI ran these workers and is done; the continued one went on in Gripi.
+		// Pi CLI ran these sub-sessions; the continued one went on in Gripi.
 		"external-sessions.json": []string{done, older, pinnedDone},
 		"session-parents.json":   map[string]string{done: parent, older: parent, continued: parent, pinnedDone: pinnedParent, alpha: beta, beta: alpha},
 	} {
@@ -60,53 +59,57 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 		}
 		return response.Body.String()
 	}
-	// rows lists the rows in order, a worker as "  " and its ID.
+	// rows lists the rows in order: a sub-session indented under its parent, and the fold of its done sub-sessions with
+	// those it holds.
 	rows := func(html string) []string {
 		var result []string
+		indent := "  "
 		for _, match := range sidebarRow.FindAllStringSubmatch(html, -1) {
-			row := strings.TrimSuffix(filepath.Base(match[2]), ".jsonl")
-			if strings.Contains(match[1], "is-worker") {
-				row = "  " + row
+			id := strings.TrimSuffix(filepath.Base(match[2]), ".jsonl")
+			switch {
+			case match[3] != "":
+				result = append(result, "  ▸ "+match[3]+" done")
+				indent = "    "
+			case match[0] == "</details>":
+				indent = "  "
+			case strings.Contains(match[1], "is-worker"):
+				result = append(result, indent+id)
+			default:
+				result = append(result, id)
 			}
-			result = append(result, row)
 		}
 		return result
 	}
-	toggle := func(html string) string { return toggleMarkup.FindString(html) }
 
-	t.Run("finished workers are hidden until Pi CLI sessions show", func(t *testing.T) {
-		html := sidebar(t, url.Values{"no_session": {"1"}}, false)
-		if got, want := rows(html), []string{"pinned-parent", "parent", "  continued", "beta", "alpha"}; !reflect.DeepEqual(got, want) {
-			t.Fatalf("rows = %q, want %q", got, want)
-		}
-		if !strings.Contains(toggle(html), `title="Show 3 Pi CLI sessions"`) {
-			t.Errorf("the toggle does not count the finished workers: %s", toggle(html))
-		}
-		// Workers coming and going must not renumber the rows below them.
-		if !strings.Contains(html, `data-session-shortcut="3"`) || strings.Count(html, "data-session-shortcut=") != 4 {
-			t.Error("a worker took a shortcut")
+	t.Run("done sub-sessions fold under their parent, whoever ran them", func(t *testing.T) {
+		for _, shown := range []bool{false, true} {
+			html := sidebar(t, url.Values{"no_session": {"1"}}, shown)
+			want := []string{"pinned-parent", "  ▸ 1 done", "    pinned-done", "parent", "  ▸ 3 done", "    continued", "    done", "    older", "beta", "alpha"}
+			if got := rows(html); !reflect.DeepEqual(got, want) {
+				t.Fatalf("with Pi CLI sessions shown %t, rows = %q, want %q", shown, got, want)
+			}
+			// Sub-sessions coming and going must not renumber the rows below them.
+			if !strings.Contains(html, `data-session-shortcut="3"`) || strings.Count(html, "data-session-shortcut=") != 4 {
+				t.Error("a sub-session took a shortcut")
+			}
 		}
 	})
 
-	t.Run("shown under their parent with Pi CLI sessions", func(t *testing.T) {
-		html := sidebar(t, url.Values{"no_session": {"1"}}, true)
-		want := []string{"pinned-parent", "  pinned-done", "parent", "  continued", "  done", "  older", "beta", "alpha"}
-		if got := rows(html); !reflect.DeepEqual(got, want) {
-			t.Fatalf("rows = %q, want %q", got, want)
-		}
-		if !strings.Contains(toggle(html), `title="Hide 3 Pi CLI sessions"`) {
-			t.Errorf("toggle = %s", toggle(html))
-		}
-	})
-
-	t.Run("workers follow their parent out of a search", func(t *testing.T) {
-		if got, want := rows(sidebar(t, url.Values{"no_session": {"1"}, "session_search": {"done"}}, true)), []string{"pinned-parent", "  pinned-done"}; !reflect.DeepEqual(got, want) {
+	t.Run("sub-sessions follow their parent out of a search", func(t *testing.T) {
+		if got, want := rows(sidebar(t, url.Values{"no_session": {"1"}, "session_search": {"done"}}, false)), []string{"pinned-parent", "  ▸ 1 done", "    pinned-done"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("rows = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("an open hidden worker is the current session", func(t *testing.T) {
-		html := sidebar(t, url.Values{"session": {done}}, false)
+	t.Run("the open sub-session stays listed though it is done", func(t *testing.T) {
+		want := []string{"pinned-parent", "  ▸ 1 done", "    pinned-done", "parent", "  done", "  ▸ 2 done", "    continued", "    older", "beta", "alpha"}
+		if got := rows(sidebar(t, url.Values{"session": {done}}, false)); !reflect.DeepEqual(got, want) {
+			t.Fatalf("rows = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("an open sub-session whose parent is not listed is the current session", func(t *testing.T) {
+		html := sidebar(t, url.Values{"session": {done}, "session_search": {"done"}}, false)
 		_, current, _ := strings.Cut(html, `class="current-session-section"`)
 		current, _, _ = strings.Cut(current, `<div class="sessions-list">`)
 		if got := rows(current); len(got) != 1 || got[0] != "done" {
@@ -114,29 +117,23 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 		}
 	})
 
-	t.Run("a worker shows while Pi CLI runs it", func(t *testing.T) {
-		// Like the Pi CLI of a worker, the process does not descend from the gateway.
-		output, err := exec.Command("sh", "-c", `sh -c 'while :; do sleep 1; done' pi --session-id older </dev/null >/dev/null 2>&1 & echo $!`).Output()
-		if err != nil {
-			t.Fatal(err)
+	t.Run("running sub-sessions stay listed", func(t *testing.T) {
+		// It runs until someone answers its dialog.
+		if response := postPrompt(handler, browserHost, url.Values{"session": {continued}, "message": {"Ask me for release approval"}}); response.Code != http.StatusOK {
+			t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
 		}
-		pid, err := strconv.Atoi(strings.TrimSpace(string(output)))
-		if err != nil {
-			t.Fatal(err)
+		want := []string{"pinned-parent", "  ▸ 1 done", "    pinned-done", "parent", "  continued", "  ▸ 2 done", "    done", "    older", "beta", "alpha"}
+		var html string
+		for deadline := time.Now().Add(5 * time.Second); !reflect.DeepEqual(rows(html), want); time.Sleep(25 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("rows = %q, want %q", rows(html), want)
+			}
+			html = sidebar(t, url.Values{"no_session": {"1"}}, false)
 		}
-		t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) })
-
-		html := sidebar(t, url.Values{"no_session": {"1"}}, false)
-		if got, want := rows(html), []string{"pinned-parent", "parent", "  continued", "  older", "beta", "alpha"}; !reflect.DeepEqual(got, want) {
-			t.Fatalf("rows = %q, want %q", got, want)
-		}
-		_, row, _ := strings.Cut(html, `data-session-path="`+older+`"`)
-		row, _, _ = strings.Cut(row, `<div class="session-row`)
-		if !strings.Contains(row, `data-busy="true"`) || !strings.Contains(row, "session-running-indicator") {
-			t.Errorf("the running worker shows no activity: %s", row)
-		}
-		if !strings.Contains(toggle(html), `title="Show 2 Pi CLI sessions"`) {
-			t.Errorf("the toggle counts the running worker: %s", toggle(html))
+		_, row, _ := strings.Cut(html, `data-session-path="`+continued+`"`)
+		row, _, _ = strings.Cut(row, `<details`)
+		if !strings.Contains(row, "session-running-indicator") {
+			t.Errorf("the running sub-session shows no activity: %s", row)
 		}
 	})
 }

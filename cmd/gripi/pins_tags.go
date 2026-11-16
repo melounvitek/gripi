@@ -131,9 +131,9 @@ const linkHelp = `Usage:
 
 Links a session under a parent, such as a worker under the conversation that
 started it, then prints the session. The browser's sidebar shows the session
-below its parent while Pi CLI runs it; once Pi CLI is done, only when the
-sidebar shows Pi CLI sessions. Linking a linked session again moves it under
-the new parent.
+below its parent: listed while it runs, and folded into one line with the
+other done ones afterwards. Linking a linked session again moves it under the
+new parent.
 
 Arguments:
   session  Session ID, a unique prefix of it, or the session file path
