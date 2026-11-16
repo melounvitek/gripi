@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -105,6 +108,32 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 		current, _, _ = strings.Cut(current, `<div class="sessions-list">`)
 		if got := rows(current); len(got) != 1 || got[0] != "done" {
 			t.Fatalf("current session rows = %q", got)
+		}
+	})
+
+	t.Run("a worker shows while Pi CLI runs it", func(t *testing.T) {
+		// Like the Pi CLI of a worker, the process does not descend from the gateway.
+		output, err := exec.Command("sh", "-c", `sh -c 'while :; do sleep 1; done' pi --session-id older </dev/null >/dev/null 2>&1 & echo $!`).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(output)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) })
+
+		html := sidebar(t, url.Values{"no_session": {"1"}}, false)
+		if got, want := rows(html), []string{"pinned-parent", "parent", "  continued", "  older", "beta", "alpha"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("rows = %q, want %q", got, want)
+		}
+		_, row, _ := strings.Cut(html, `data-session-path="`+older+`"`)
+		row, _, _ = strings.Cut(row, `<div class="session-row`)
+		if !strings.Contains(row, `data-busy="true"`) || !strings.Contains(row, "session-running-indicator") {
+			t.Errorf("the running worker shows no activity: %s", row)
+		}
+		if !strings.Contains(toggle(html), `title="Show 2 Pi CLI sessions"`) {
+			t.Errorf("the toggle counts the running worker: %s", toggle(html))
 		}
 	})
 }

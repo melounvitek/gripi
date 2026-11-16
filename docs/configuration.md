@@ -551,7 +551,7 @@ Gripi stores its own data separately from Pi’s. Each location can be changed w
 | `~/.pi/gripi/restart-request` | Restart signal for `bin/start` (not read from the env file) | `GRIPI_RESTART_PATH` |
 | `~/.pi/gripi/gripi.sock` | Socket for the [`gripi` command](../README.md#command-line), which must run with the same value (not read from the env file) | `GRIPI_SOCKET_PATH` |
 
-Gripi’s state folder, the folder of `read-state.json`, also holds Gripi’s Pi extensions in `pi-extensions/` and, for [workers](#workers), SSH’s control sockets in `ssh/`, each worker’s `gripi` socket in `workers/`, main’s side of each session on a worker in `moves/`, and what returns kept aside in `returns/`.
+Gripi’s state folder, the folder of `read-state.json`, also holds the links of `gripi link` in `session-parents.json`, Gripi’s Pi extensions in `pi-extensions/` and, for [workers](#workers), SSH’s control sockets in `ssh/`, each worker’s `gripi` socket in `workers/`, main’s side of each session on a worker in `moves/`, and what returns kept aside in `returns/`.
 
 If a file is malformed, Gripi leaves it untouched instead of replacing it. Requests that depend on it fail, and the gateway log names the file. To recover, stop the gateway, back up the file, then fix it or move it aside. Moving a file aside resets only its own data, such as approvals or read markers. Pi’s session files are not affected.
 

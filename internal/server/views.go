@@ -322,7 +322,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
-	view.prepareSidebar()
+	view.prepareSidebar(app.cliRunning)
 	renderedSessions := make([]*agent.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
 	renderedSessions = append(renderedSessions, view.PinnedSessions...)
 	renderedSessions = append(renderedSessions, view.SidebarSessions...)
@@ -558,7 +558,17 @@ func (app *application) rememberSessionHashes(all []*agent.Session) {
 	app.sessionHashesMu.Unlock()
 }
 
-func (view *pageView) prepareSidebar() {
+// cliRunning tells whether a process of Pi CLI names the session, as a takeover checks.
+func (app *application) cliRunning(path string) bool {
+	detector, detects := app.guard.(agent.CLIDetector)
+	if !detects {
+		return false
+	}
+	processes, err := detector.CLIProcesses(path)
+	return err == nil && len(processes) > 0
+}
+
+func (view *pageView) prepareSidebar(cliRunning func(path string) bool) {
 	for _, session := range view.Sessions {
 		if view.Unread[session.Path] && (view.Selected == nil || view.Selected.Path != session.Path) {
 			view.UnreadCount++
@@ -624,11 +634,15 @@ func (view *pageView) prepareSidebar() {
 		if !parents[parent] || view.Pinned[session.Path] {
 			continue
 		}
-		// Like other Pi CLI sessions, a worker that Pi CLI is done with shows only on request.
-		if view.ExternalFollow[session.Path] && view.SelectedTag == "" {
-			view.CLISessionCount++
-			if !view.CLISessionsShown {
-				continue
+		if view.ExternalFollow[session.Path] {
+			if cliRunning(session.Path) {
+				view.SidebarActivity[session.Path] = sidebarActivity{Busy: true}
+			} else if view.SelectedTag == "" {
+				// Like other Pi CLI sessions, a worker that Pi CLI is done with shows only on request.
+				view.CLISessionCount++
+				if !view.CLISessionsShown {
+					continue
+				}
 			}
 		}
 		view.SidebarWorkers[parent] = append(view.SidebarWorkers[parent], session)
