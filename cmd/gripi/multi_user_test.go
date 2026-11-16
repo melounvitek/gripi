@@ -81,7 +81,7 @@ func TestCommandsOfAMultiUserGatewayActForTheUserOfTheirToken(t *testing.T) {
 
 func TestClaimGivesAUserASessionThatHasNoOwner(t *testing.T) {
 	alpha, _ := multiUserGateway(t)
-	// Like a session from Pi CLI, such as an orchestration worker.
+	// Like a session from Pi CLI.
 	worker := filepath.Join(filepath.Dir(alpha), "worker.jsonl")
 	appendSessionRecords(t, worker,
 		map[string]any{"type": "session", "version": 3, "id": "0a1-worker-full-id", "timestamp": "2026-01-03T00:00:00Z", "cwd": t.TempDir()},

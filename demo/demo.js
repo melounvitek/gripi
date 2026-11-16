@@ -9,7 +9,7 @@
       messages: [
         { role: "user", text: "What is Gripi?" },
         { role: "thinking", text: "I’ll summarize what Gripi adds while keeping Pi’s role clear." },
-        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated." }
+        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi does not patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated." }
       ]
     },
     {
@@ -34,7 +34,7 @@
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?" },
         { role: "thinking", text: "I’ll check the boundary between Gripi and the Pi runtime." },
-        { role: "assistant", text: "No. Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to the Pi coding-agent harness through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data." }
+        { role: "assistant", text: "No. Gripi does not patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to the Pi coding-agent harness through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data." }
       ]
     },
     {

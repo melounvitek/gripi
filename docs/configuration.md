@@ -449,7 +449,7 @@ What happens next is up to you:
 
 Losing a worker loses the running step and the background processes that the session started there, such as dev servers, which, unlike on main, stop with the connection. Continuing on main also leaves the files outside the copy behind on the worker. Stopping the gateway, such as for an update, also stops everything that sessions run on workers.
 
-The helper cannot stop what others run for Pi: Docker and Podman containers, which their daemons own, and anything started with `systemd-run --user`, such as the Pi sessions that the `gripi-orchestrate` skill starts. These keep running after a disconnect or a return, and what they change afterwards stays on the worker, so stop them yourself.
+The helper cannot stop what others run for Pi: Docker and Podman containers, which their daemons own, and anything started with `systemd-run --user`. These keep running after a disconnect or a return, and what they change afterwards stays on the worker, so stop them yourself.
 
 ### Forwarding ports
 

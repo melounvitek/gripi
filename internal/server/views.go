@@ -610,7 +610,7 @@ func (view *pageView) prepareSidebar() {
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
 			continue
 		}
-		// A tag filter lists its Pi CLI sessions too, so a group such as an orchestration run shows whole.
+		// A tag filter lists its Pi CLI sessions too, so a tagged group shows whole.
 		hideable := view.ExternalFollow[session.Path] && view.SelectedTag == ""
 		if hideable {
 			view.CLISessionCount++
