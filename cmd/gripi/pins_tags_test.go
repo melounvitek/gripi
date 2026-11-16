@@ -97,6 +97,48 @@ func TestRenameExplainsWhatItCannotRename(t *testing.T) {
 	}
 }
 
+func TestLinkPutsASessionUnderAnother(t *testing.T) {
+	alpha, beta := fakePiGateway(t)
+
+	code, stdout, stderr := runCLI("link", "0a1-a", "0a1-b", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID != "0a1-alpha" || session.Parent != beta {
+		t.Fatalf("gripi link = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if parent := listedSession(t, "0a1-alpha").Parent; parent != beta {
+		t.Fatalf("listed parent = %q", parent)
+	}
+	if parent := listedSession(t, "0a1-beta").Parent; parent != "" {
+		t.Fatalf("the parent got a parent: %q", parent)
+	}
+	// The sidebar nests neither of a loop, but the listing keeps both links.
+	if code, _, stderr := runCLI("link", "0a1-b", "0a1-a"); code != 0 || stderr != "" {
+		t.Fatalf("gripi link back = %d, stderr %q", code, stderr)
+	}
+	if alphaParent, betaParent := listedSession(t, "0a1-alpha").Parent, listedSession(t, "0a1-beta").Parent; alphaParent != beta || betaParent != alpha {
+		t.Fatalf("listed parents = %q, %q", alphaParent, betaParent)
+	}
+}
+
+func TestLinkExplainsWhatItCannotLink(t *testing.T) {
+	fakePiGateway(t)
+	for _, usage := range [][]string{{"link"}, {"link", "0a1-a"}, {"link", "", "0a1-b"}, {"link", "0a1-a", "0a1-b", "0a1-b"}, {"link", "0a1-a", "0a1-b", "--bogus"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help link") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	for _, unknown := range [][]string{{"link", "zzz", "0a1-b"}, {"link", "0a1-a", "zzz"}} {
+		if code, stdout, stderr := runCLI(unknown...); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", unknown, code, stdout, stderr)
+		}
+	}
+	if code, stdout, stderr := runCLI("link", "0a1-a", "0a1-alpha"); code != 1 || stdout != "" || !strings.Contains(stderr, "its own parent") {
+		t.Fatalf("gripi link to itself = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if parent := listedSession(t, "0a1-alpha").Parent; parent != "" {
+		t.Fatalf("refused commands left a parent behind: %q", parent)
+	}
+}
+
 func TestTagAndUntagChangeTheTagsOfASession(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 

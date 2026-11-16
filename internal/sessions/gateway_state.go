@@ -1,4 +1,4 @@
-// Package sessions keeps what the gateway owns about sessions: read state, pins, tags, completions, projects,
+// Package sessions keeps what the gateway owns about sessions: read state, pins, tags, parents, completions, projects,
 // attachments and path suggestions.
 package sessions
 
@@ -24,6 +24,7 @@ type GatewayState struct {
 	externalResponseCounts map[string]int
 	pinnedPath             string
 	tagsPath               string
+	parentsPath            string
 	tagChanges             map[string]uint64
 	tagRevision            uint64
 	keys                   SessionKeys
@@ -44,7 +45,7 @@ type SessionKeys interface {
 // NewGatewayState keeps state under the canonical keys from keys. Without keys, every key is its own session and none
 // is saved.
 func NewGatewayState(readPath, pinnedPath, tagsPath string, keys SessionKeys) *GatewayState {
-	return &GatewayState{readPath: readPath, completionsPath: filepath.Join(filepath.Dir(readPath), "completions.json"), projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), projectChanges: make(map[string]uint64), pinnedPath: pinnedPath, tagsPath: tagsPath, keys: keys, externalResponseCounts: make(map[string]int)}
+	return &GatewayState{readPath: readPath, completionsPath: filepath.Join(filepath.Dir(readPath), "completions.json"), projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), parentsPath: filepath.Join(filepath.Dir(readPath), "session-parents.json"), projectChanges: make(map[string]uint64), pinnedPath: pinnedPath, tagsPath: tagsPath, keys: keys, externalResponseCounts: make(map[string]int)}
 }
 
 func (state *GatewayState) ReadAndObserve(all []*agent.Session, selected *agent.Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {

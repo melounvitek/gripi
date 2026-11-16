@@ -39,6 +39,8 @@ const sessionFields = `Session fields:
   unread      true when a reply finished that nobody has opened in the browser
   pinned      true when the session is pinned in the browser's sidebar
   tags        Tags of the session
+  parent      Path of the session that 'gripi link' linked it under; JSON
+              leaves it out for a session without one
   updated_at  Time of the latest message that the user sent or that ended a
               reply; in JSON it is in UTC with milliseconds, such as
               2026-10-06T18:47:02.725Z

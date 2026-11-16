@@ -44,6 +44,8 @@ type sidebarSessionData struct {
 	View     *pageView
 	Session  *agent.Session
 	Shortcut int
+	// Worker shows the session under its parent.
+	Worker bool
 }
 type messageData struct {
 	View    *pageView
@@ -94,6 +96,8 @@ type pageView struct {
 	SearchQuery               string
 	SelectedTag               string
 	SessionTags               map[string][]string
+	SessionParents            map[string]string
+	SidebarWorkers            map[string][]*agent.Session
 	TagColors                 map[string]string
 	Unread                    map[string]bool
 	ExternalFollow            map[string]bool
@@ -302,13 +306,30 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			view.TagColors[name] = colors[name]
 		}
 	}
+	links, err := app.gatewayState.SessionParents()
+	if err != nil {
+		return nil, err
+	}
+	listed := make(map[string]bool, len(all))
+	for _, session := range all {
+		listed[session.Path] = true
+	}
+	view.SessionParents = make(map[string]string)
+	for path, parent := range links {
+		if listed[path] && listed[parent] {
+			view.SessionParents[path] = parent
+		}
+	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
-	view.prepareSidebar()
+	view.prepareSidebar(app.cliProcesses)
 	renderedSessions := make([]*agent.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
 	renderedSessions = append(renderedSessions, view.PinnedSessions...)
 	renderedSessions = append(renderedSessions, view.SidebarSessions...)
 	if view.SeparateCurrent != nil {
 		renderedSessions = append(renderedSessions, view.SeparateCurrent)
+	}
+	for _, workers := range view.SidebarWorkers {
+		renderedSessions = append(renderedSessions, workers...)
 	}
 	view.WorkerLocations = make(map[string]*WorkerLocation)
 	for _, session := range renderedSessions {
@@ -536,7 +557,25 @@ func (app *application) rememberSessionHashes(all []*agent.Session) {
 	app.sessionHashesMu.Unlock()
 }
 
-func (view *pageView) prepareSidebar() {
+// cliProcesses finds the processes of Pi CLI that name each session, as a takeover checks. A session that cannot be
+// checked has none.
+func (app *application) cliProcesses(paths []string) map[string][]int {
+	detector, detects := app.guard.(agent.CLIDetector)
+	if !detects || len(paths) == 0 {
+		return nil
+	}
+	found, _ := detector.CLIProcesses(paths...)
+	return found
+}
+
+func (view *pageView) prepareSidebar(cliProcesses func(paths []string) map[string][]int) {
+	// Links nest one level deep, so a session linked under itself or in a loop stays at the top.
+	nestedUnder := make(map[string]string)
+	for path, parent := range view.SessionParents {
+		if view.SessionParents[parent] == "" {
+			nestedUnder[path] = parent
+		}
+	}
 	for _, session := range view.Sessions {
 		if view.Unread[session.Path] && (view.Selected == nil || view.Selected.Path != session.Path) {
 			view.UnreadCount++
@@ -552,7 +591,8 @@ func (view *pageView) prepareSidebar() {
 	var pool []*agent.Session
 	query := strings.ToLower(view.SearchQuery)
 	for _, session := range view.Sessions {
-		if view.Pinned[session.Path] {
+		// A linked session shows under its parent instead.
+		if view.Pinned[session.Path] || nestedUnder[session.Path] != "" {
 			continue
 		}
 		if !view.ExternalFollow[session.Path] || view.CLISessionsShown {
@@ -591,12 +631,40 @@ func (view *pageView) prepareSidebar() {
 			view.SidebarSessions = append(view.SidebarSessions, session)
 		}
 	}
-	if view.Selected != nil && !view.Pinned[view.Selected.Path] {
-		found := false
-		for _, session := range view.SidebarSessions {
-			found = found || session.Path == view.Selected.Path
+	parents := make(map[string]bool)
+	for _, session := range append(slices.Clone(view.PinnedSessions), view.SidebarSessions...) {
+		parents[session.Path] = true
+	}
+	var workers []*agent.Session
+	var external []string
+	for _, session := range view.Sessions {
+		if parents[nestedUnder[session.Path]] && !view.Pinned[session.Path] {
+			workers = append(workers, session)
+			if view.ExternalFollow[session.Path] {
+				external = append(external, session.Path)
+			}
 		}
-		if !found {
+	}
+	running := cliProcesses(external)
+	view.SidebarWorkers = make(map[string][]*agent.Session)
+	for _, session := range workers {
+		parent := nestedUnder[session.Path]
+		if view.ExternalFollow[session.Path] {
+			if len(running[session.Path]) > 0 {
+				view.SidebarActivity[session.Path] = sidebarActivity{Busy: true}
+			} else if view.SelectedTag == "" {
+				// Like other Pi CLI sessions, a worker that Pi CLI is done with shows only on request.
+				view.CLISessionCount++
+				if !view.CLISessionsShown {
+					continue
+				}
+			}
+		}
+		view.SidebarWorkers[parent] = append(view.SidebarWorkers[parent], session)
+	}
+	if view.Selected != nil && !view.Pinned[view.Selected.Path] {
+		selected := func(session *agent.Session) bool { return session.Path == view.Selected.Path }
+		if !slices.ContainsFunc(view.SidebarSessions, selected) && !slices.ContainsFunc(view.SidebarWorkers[nestedUnder[view.Selected.Path]], selected) {
 			view.SeparateCurrent = view.Selected
 		}
 	}
@@ -690,7 +758,10 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		},
 		"sessionURL": sessionURL, "sessionClasses": sessionClasses, "unreadLabel": unreadLabel, "plural": plural,
 		"sessionData": func(view *pageView, session *agent.Session, shortcut int) sidebarSessionData {
-			return sidebarSessionData{view, session, shortcut}
+			return sidebarSessionData{View: view, Session: session, Shortcut: shortcut}
+		},
+		"workerData": func(view *pageView, session *agent.Session) sidebarSessionData {
+			return sidebarSessionData{View: view, Session: session, Worker: true}
 		},
 		"sessionParent": sessionParent, "sessionChildren": sessionChildren, "sessionRoot": sessionRoot,
 		"relationData": func(view *pageView, session, current *agent.Session) relationData {

@@ -34,6 +34,7 @@ Session commands (need a running gateway on this machine):
   tag       Add tags to a session
   untag     Remove tags from a session
   tags      List tags and how many sessions have each
+  link      Show a session under another in the sidebar
   delete    Delete a session
   claim     Make a session that has no owner yours
   sudo      Run a command as root once the user agrees in Gripi
@@ -72,6 +73,7 @@ var commands = []command{
 	{name: "tag", summary: "Add tags to a session", run: tagSession("tag", true), help: tagHelp},
 	{name: "untag", summary: "Remove tags from a session", run: tagSession("untag", false), help: untagHelp},
 	{name: "tags", summary: "List tags and how many sessions have each", run: listTags, help: tagsHelp},
+	{name: "link", summary: "Show a session under another in the sidebar", run: linkSession, help: linkHelp},
 	{name: "delete", summary: "Delete a session", run: deleteSession, help: deleteHelp},
 	{name: "claim", summary: "Make a session that has no owner yours", run: claimSession, help: claimHelp},
 	{name: "sudo", summary: "Run a command as root once the user agrees in Gripi", run: runAsRoot, help: sudoHelp},
