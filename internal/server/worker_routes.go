@@ -40,7 +40,7 @@ type workerKey struct{}
 func (handler *Handler) Worker(placement WorkerPlacement) http.Handler {
 	routes := http.NewServeMux()
 	for _, route := range workerRoutes {
-		routes.Handle(route, handler.commands)
+		routes.Handle(route, handler.app.commandRoutes)
 	}
 	routes.HandleFunc("/", func(response http.ResponseWriter, request *http.Request) {
 		name := placement.Name()

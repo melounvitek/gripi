@@ -82,6 +82,11 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 			clearErr = clearer.ClearQueue(request.Context())
 			if clearErr == nil {
 				snapshot = client.LiveSnapshot()
+				// No run settles for a parent's message that only waited, such as for a compaction to end, so a later
+				// turn must not report it.
+				if !client.AgentRunning() {
+					app.subSessionReports.forget(client)
+				}
 			}
 		}
 		// Clear must never close the client, even on a native timeout. Keep

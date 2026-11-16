@@ -6,6 +6,10 @@ type Lifecycle struct {
 	// Reply is the reply that ReplyEnded reports, or the last reply of the run that RunEnded reports. It is empty when
 	// the run has no reply.
 	Reply Reply
+	// Error is why the run that RunEnded reports failed, when it did.
+	Error string
+	// Aborted says that the run that RunSettled reports was stopped.
+	Aborted bool
 }
 
 type LifecycleStep int

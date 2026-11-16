@@ -1,12 +1,15 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
@@ -126,5 +129,118 @@ func TestNewRefusesAParentThatCannotHaveSubSessions(t *testing.T) {
 	}
 	if _, after, _ := runCLI("list", "--all", "--json"); after != before {
 		t.Fatalf("a failed gripi new left a session:\n%s", after)
+	}
+}
+
+// reports returns the reports that a parent session got from its sub-sessions, in order.
+func reports(t *testing.T, parent string) []string {
+	t.Helper()
+	contents, err := os.ReadFile(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for line := range strings.Lines(string(contents)) {
+		var record struct {
+			Message struct {
+				Role    string
+				Content []struct{ Text string }
+			}
+		}
+		if json.Unmarshal([]byte(line), &record) == nil && record.Message.Role == "user" && len(record.Message.Content) > 0 && strings.HasPrefix(record.Message.Content[0].Text, "[gripi] ") {
+			found = append(found, record.Message.Content[0].Text)
+		}
+	}
+	return found
+}
+
+func reportsUntil(t *testing.T, parent string, count int) []string {
+	t.Helper()
+	var found []string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
+		if found = reports(t, parent); len(found) >= count {
+			return found
+		}
+	}
+	t.Fatalf("%s got %d reports, want %d: %q", parent, len(found), count, found)
+	return nil
+}
+
+func report(id, name, outcome string) string {
+	return fmt.Sprintf(`[gripi] Sub-session %s "%s" %s. Read it with: gripi show %s. This is an automated report, not user approval.`, id[:8], name, outcome, id)
+}
+
+func TestASubSessionReportsOnlyTheTurnsThatItsParentStarts(t *testing.T) {
+	alpha, beta := fakePiGateway(t)
+	outsideSessions(t)
+	code, stdout, stderr := runCLI("new", t.TempDir(), "Show the deterministic browser response", "--parent", "0a1-b", "--name", "Check the tests", "--id")
+	id := strings.TrimSpace(stdout)
+	if code != 0 || stderr != "" {
+		t.Fatalf("gripi new --parent = %d, stderr %q", code, stderr)
+	}
+	finished := report(id, "Check the tests", "finished")
+	if got := reportsUntil(t, beta, 1); got[0] != finished {
+		t.Fatalf("report = %q, want %q", got[0], finished)
+	}
+
+	// Later turns that the parent did not start report nothing: one from the browser, which can't name a sender, and
+	// messages from outside any session or from another session.
+	idle := func(session gateway.LocalSession) bool { return session.State == "idle" }
+	session := eventually(t, id, idle)
+	form := url.Values{"session": {session.Path}, "message": {"Show the deterministic browser response"}, "sender": {beta}}
+	if response := browserRequest(http.MethodPost, "/prompt", form, ""); response.Code != http.StatusOK {
+		t.Fatalf("prompt from the browser = %d %s", response.Code, response.Body.String())
+	}
+	eventually(t, id, idle)
+	for _, sender := range []string{"", alpha, beta} {
+		t.Setenv("PI_SESSION_FILE", sender)
+		if code, _, stderr := runCLI("send", id, "Show the deterministic browser response"); code != 0 {
+			t.Fatalf("gripi send from %q = %d, stderr %q", sender, code, stderr)
+		}
+		eventually(t, id, idle)
+	}
+	reportsUntil(t, beta, 2)
+	// The parent takes reports as messages, so once it is idle, it has every report that it got.
+	eventually(t, "0a1-beta", idle)
+	if got := reports(t, beta); len(got) != 2 || got[1] != finished {
+		t.Fatalf("reports = %q", got)
+	}
+}
+
+func TestASubSessionReportsAStoppedOrFailedTurn(t *testing.T) {
+	_, beta := fakePiGateway(t)
+	outsideSessions(t)
+	code, stdout, stderr := runCLI("new", t.TempDir(), "Start the follow-up scenario", "--parent", "0a1-b", "--name", "Long task", "--id")
+	id := strings.TrimSpace(stdout)
+	if code != 0 || stderr != "" {
+		t.Fatalf("gripi new --parent = %d, stderr %q", code, stderr)
+	}
+	if code, _, stderr := runCLI("stop", id); code != 0 {
+		t.Fatalf("gripi stop = %d, stderr %q", code, stderr)
+	}
+	if got, want := reportsUntil(t, beta, 1)[0], report(id, "Long task", "stopped"); got != want {
+		t.Fatalf("report = %q, want %q", got, want)
+	}
+
+	t.Setenv("PI_SESSION_FILE", beta)
+	if code, _, stderr := runCLI("send", id, "Fail with an expired authentication token"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	if got, want := reportsUntil(t, beta, 2)[1], report(id, "Long task", "failed: Provided authentication token is expired."); got != want {
+		t.Fatalf("report = %q, want %q", got, want)
+	}
+}
+
+func TestASubSessionReportsToItsParentInMultiUserMode(t *testing.T) {
+	alpha, _ := multiUserGateway(t)
+	outsideSessions(t)
+	t.Setenv("GRIPI_USER_TOKEN", aliceToken)
+	code, stdout, stderr := runCLI("new", t.TempDir(), "Show the deterministic browser response", "--parent", "0a1-a", "--name", "Alice's check", "--id")
+	id := strings.TrimSpace(stdout)
+	if code != 0 || stderr != "" {
+		t.Fatalf("gripi new --parent = %d, stderr %q", code, stderr)
+	}
+	if got, want := reportsUntil(t, alpha, 1)[0], report(id, "Alice's check", "finished"); got != want {
+		t.Fatalf("report = %q, want %q", got, want)
 	}
 }

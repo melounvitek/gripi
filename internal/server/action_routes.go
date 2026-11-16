@@ -78,6 +78,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if !ok {
 		return
 	}
+	reportTo := app.reportingParent(request, path)
 	message := request.FormValue("message")
 	imageFiles, ok := uploadedPromptImages(response, request)
 	if !ok {
@@ -220,7 +221,12 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		}
 		switch command.Name {
 		case "":
+			// The run may settle before Prompt returns, so the report is due before Pi gets the prompt.
+			staged := reportTo != "" && app.subSessionReports.expect(client, reportTo)
 			result, err = client.Prompt(request.Context(), prompt)
+			if staged && (err != nil || result.Disposition == "handled") {
+				app.subSessionReports.forget(client)
+			}
 		case "name":
 			if command.Argument == "" {
 				var state agent.State
@@ -268,7 +274,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 					return nil
 				}
 				var deferErr error
+				staged := reportTo != "" && app.subSessionReports.expect(client, reportTo)
 				result, deferred, deferErr = deferrer.DeferPrompt(request.Context(), prompt)
+				if staged && (deferErr != nil || !deferred || result.Disposition == "handled") {
+					app.subSessionReports.forget(client)
+				}
 				if deferErr == nil && deferred {
 					deferErr = recordImages()
 				}

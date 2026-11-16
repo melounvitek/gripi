@@ -48,10 +48,7 @@ func runAsRoot(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) < 2 || arguments[0] != "--" {
 		return usageError(stderr, "sudo", "put the command after --, as in 'gripi sudo -- apt-get update'")
 	}
-	session := os.Getenv("PI_SESSION_FILE")
-	if id := os.Getenv("HERMES_SESSION_ID"); session == "" && id != "" {
-		session = "hermes:" + id
-	}
+	session := runningSession()
 	if session == "" {
 		return failure(stderr, "sudo", errors.New("run it from a Pi or Hermes session in Gripi; neither PI_SESSION_FILE nor HERMES_SESSION_ID is set"))
 	}
@@ -81,6 +78,15 @@ func runAsRoot(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gripi sudo: the command printed more than 16 MiB to an output, and Gripi dropped the rest")
 	}
 	return result.ExitCode
+}
+
+// runningSession names the Pi or Hermes session that runs gripi, or is empty outside one.
+func runningSession() string {
+	session := os.Getenv("PI_SESSION_FILE")
+	if id := os.Getenv("HERMES_SESSION_ID"); session == "" && id != "" {
+		session = "hermes:" + id
+	}
+	return session
 }
 
 // answerSudoPrompt is gripi as the askpass program of a sudo that the gateway runs. It prints the user's password

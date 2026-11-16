@@ -51,6 +51,28 @@ func TestCompletedAssistantReplyAcceptsOnlyFinalTextFromCompletedAssistantMessag
 	}
 }
 
+func TestLifecycleTellsAFailedOrStoppedRunFromAFinishedOne(t *testing.T) {
+	failed := map[string]any{"role": "assistant", "stopReason": "error", "errorMessage": "Provided authentication token is expired.", "content": []any{}}
+	finished := map[string]any{"role": "assistant", "stopReason": "stop", "content": []any{map[string]any{"type": "text", "text": "Done"}}}
+	for _, test := range []struct {
+		name  string
+		event map[string]any
+		want  agent.Lifecycle
+	}{
+		{"failed run", map[string]any{"type": "agent_end", "messages": []any{failed}}, agent.Lifecycle{Step: agent.RunEnded, Reply: agent.Reply{}, Error: "Provided authentication token is expired."}},
+		// A retry that succeeds ends the run without the error of the attempt before.
+		{"finished run", map[string]any{"type": "agent_end", "messages": []any{failed, finished}}, agent.Lifecycle{Step: agent.RunEnded, Reply: reply(nil, finished)}},
+		{"stopped run", map[string]any{"type": "agent_settled", "aborted": true}, agent.Lifecycle{Step: agent.RunSettled, Aborted: true}},
+		{"settled run", map[string]any{"type": "agent_settled", "aborted": false}, agent.Lifecycle{Step: agent.RunSettled}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got, _ := Lifecycle(test.event); got != test.want {
+				t.Fatalf("Lifecycle() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestCompletedReplyIDIsStableWithoutNativeMessageIDs(t *testing.T) {
 	event := map[string]any{"type": "message_end", "message": map[string]any{
 		"role": "assistant", "timestamp": float64(1_750_000_000_000), "content": []any{"same reply"},

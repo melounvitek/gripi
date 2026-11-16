@@ -433,9 +433,13 @@ only to use it.
 
 With --parent, the new session is a sub-session of the parent. Gripi links it
 under the parent, as 'gripi link' does, and starts it with the parent's model
-and thinking level. A sub-session can't start sub-sessions of its own. Nor can
-a session on a remote machine (see 'gripi worker'), because gripi there can't
-start sessions.
+and thinking level. When a turn that the parent started is over, Gripi sends
+the parent a report as a message, as 'gripi send' would: that the turn
+finished, stopped or failed, and how to read it. The parent starts a turn with
+the first message, or with 'gripi send' run in the parent's session. Turns
+started in the browser don't report. A sub-session can't start sub-sessions
+of its own. Nor can a session on a remote machine (see 'gripi worker'),
+because gripi there can't start sessions.
 
 When the message cannot be sent, or the session cannot get its name, model or
 parent, the new session is deleted again and the command fails.
@@ -499,12 +503,15 @@ func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) i
 		return failure(stderr, "new", err)
 	}
 	form := url.Values{"cwd": {directory}, "name": {*name}}
+	// The parent gets a report once the run of the first message is over.
+	sender := ""
 	if *parentReference != "" {
 		parent, err := client.session(*parentReference)
 		if err != nil {
 			return failure(stderr, "new", err)
 		}
 		form.Set("parent", parent.Path)
+		sender = parent.Path
 	}
 	var started struct {
 		Session string `json:"session"`
@@ -521,7 +528,7 @@ func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) i
 	}
 	session := sessions[0]
 	if message != "" {
-		if session, err = client.deliver(session, message, false, "new", stderr); err != nil {
+		if session, err = client.deliver(session, message, false, sender, "new", stderr); err != nil {
 			// A session without its first message would only keep a Pi process running.
 			if deleteErr := client.post("/sessions/delete", url.Values{"session": {session.Path}}, &struct{}{}); deleteErr != nil {
 				return failure(stderr, "new", fmt.Errorf("%w; the session %s stays without a message, because deleting it failed too: %v", err, session.ID, deleteErr))
@@ -565,6 +572,11 @@ Pi still expands its skills, prompt templates and extension commands, such as
 A session in state external or conflict accepts no messages until it is
 taken over, in the browser or with 'gripi takeover'.
 
+Run in a session's parent (see 'gripi new --parent'), such as by Pi's bash
+tool there, gripi send gets the parent a report once the turn is over. It
+finds the session that it runs in by PI_SESSION_FILE, which Pi's bash tool
+sets, or by HERMES_SESSION_ID, which Hermes's terminal sets.
+
 ` + sessionFields + `
 Examples:
   gripi send 01a107aa "Run the tests and fix what fails"
@@ -600,7 +612,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if err != nil {
 		return failure(stderr, "send", err)
 	}
-	if session, err = client.deliver(session, message, *steer, "send", stderr); err != nil {
+	if session, err = client.deliver(session, message, *steer, runningSession(), "send", stderr); err != nil {
 		if session.State == "external" || session.State == "conflict" {
 			err = fmt.Errorf("%w. Once nobody uses the session in Pi CLI, 'gripi takeover %s' hands it to the gateway", err, session.ID)
 		}
@@ -636,8 +648,9 @@ func readMessage(argument string, stdin io.Reader) (message, problem string, err
 	return message, "", nil
 }
 
-// deliver sends a message to a session as a prompt and returns the session once Pi has taken it.
-func (client *gatewayClient) deliver(session gateway.LocalSession, message string, steer bool, name string, stderr io.Writer) (gateway.LocalSession, error) {
+// deliver sends a message to a session as a prompt and returns the session once Pi has taken it. The sender is the
+// session that the message comes from, which gets a report once the run is over if it is the session's parent.
+func (client *gatewayClient) deliver(session gateway.LocalSession, message string, steer bool, sender, name string, stderr io.Writer) (gateway.LocalSession, error) {
 	behavior := "follow_up"
 	if steer {
 		behavior = "steer"
@@ -647,7 +660,7 @@ func (client *gatewayClient) deliver(session gateway.LocalSession, message strin
 		Disposition string `json:"disposition"`
 	}
 	// bash_mode keeps a leading "!" from being run as a shell command.
-	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
+	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}, "sender": {sender}}
 	var err error
 	for deadline := time.Now().Add(retryWindow); ; time.Sleep(100 * time.Millisecond) {
 		err = client.post("/prompt", form, &accepted)
