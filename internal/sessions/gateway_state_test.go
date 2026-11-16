@@ -255,6 +255,26 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 	}
 }
 
+func TestGatewayStateForgetsTheLinksOfADeletedSession(t *testing.T) {
+	root := t.TempDir()
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(root, "tags.json"), nil)
+	links := map[string]string{"/child.jsonl": "/parent.jsonl", "/other-child.jsonl": "/parent.jsonl", "/sub.jsonl": "/other-parent.jsonl"}
+	for path, parent := range links {
+		if err := state.SetSessionParent(path, parent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A deleted parent leaves no sub-session linked under it, and a deleted sub-session no link of its own.
+	for _, deleted := range []string{"/parent.jsonl", "/sub.jsonl"} {
+		if err := state.Forget(deleted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if parents, err := state.SessionParents(); err != nil || len(parents) != 0 {
+		t.Fatalf("links after the deletions = %v, %v", parents, err)
+	}
+}
+
 func TestGatewayStateTracksForgottenSessionWhenCleanupStateIsMalformed(t *testing.T) {
 	root := t.TempDir()
 	readPath := filepath.Join(root, "read.json")

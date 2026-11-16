@@ -61,21 +61,10 @@ func (app *application) liveSessionStatus(response http.ResponseWriter, request 
 		http.NotFound(response, request)
 		return
 	}
-	live := app.readLiveStatus(request.Context(), path)
-	var status agent.Status
-	// The saved status fills in what the agent doesn't report.
-	if live == nil || live.Provider == "" || live.ModelID == "" || live.ThinkingLevel == "" || live.Context == nil {
-		if app.sessionStore.Exists(path) {
-			persisted, err := app.sessionStore.Status(path)
-			if err != nil {
-				http.NotFound(response, request)
-				return
-			}
-			status = persisted
-		}
-	}
-	if live != nil {
-		applyLiveStatus(&status, live)
+	status, err := app.sessionStatus(request.Context(), path)
+	if err != nil {
+		http.NotFound(response, request)
+		return
 	}
 	contextUsage, model := "", ""
 	for _, item := range statusItems(status) {
@@ -144,6 +133,25 @@ type commandGroup struct {
 type commandView struct{ Name, Description string }
 
 func (command commandView) Text() string { return "/" + command.Name + " " + command.Description }
+
+// sessionStatus is what the session's agent reports, with the saved status filling in the rest. It starts no client.
+func (app *application) sessionStatus(ctx context.Context, path string) (agent.Status, error) {
+	live := app.readLiveStatus(ctx, path)
+	var status agent.Status
+	if live == nil || live.Provider == "" || live.ModelID == "" || live.ThinkingLevel == "" || live.Context == nil {
+		if app.sessionStore.Exists(path) {
+			persisted, err := app.sessionStore.Status(path)
+			if err != nil {
+				return status, err
+			}
+			status = persisted
+		}
+	}
+	if live != nil {
+		applyLiveStatus(&status, live)
+	}
+	return status, nil
+}
 
 // readLiveStatus returns nil when no client runs the session.
 func (app *application) readLiveStatus(ctx context.Context, path string) *agent.LiveStatus {
@@ -479,7 +487,24 @@ func (app *application) migratePendingSessionState(from, to string, migrateTags 
 			return nil, err
 		}
 	}
+	// A link follows the sub-session, and the sub-sessions follow their parent.
+	var linkRollback func() error
+	if migrateTags && app.gatewayState != nil {
+		linkRollback, err = app.gatewayState.MigrateSessionParents(from, to)
+		if err != nil {
+			for _, rollback := range []func() error{completionRollback, tagRollback, pinRollback, attachmentRollback} {
+				if rollback != nil {
+					err = errors.Join(err, rollback())
+				}
+			}
+			return nil, err
+		}
+	}
 	return func() error {
+		var linkErr error
+		if linkRollback != nil {
+			linkErr = linkRollback()
+		}
 		var completionErr error
 		if completionRollback != nil {
 			completionErr = completionRollback()
@@ -496,7 +521,7 @@ func (app *application) migratePendingSessionState(from, to string, migrateTags 
 		if tagRollback != nil {
 			tagErr = tagRollback()
 		}
-		return errors.Join(attachmentErr, pinErr, tagErr, completionErr)
+		return errors.Join(attachmentErr, pinErr, tagErr, completionErr, linkErr)
 	}, nil
 }
 

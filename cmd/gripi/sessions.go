@@ -39,8 +39,8 @@ const sessionFields = `Session fields:
   unread      true when a reply finished that nobody has opened in the browser
   pinned      true when the session is pinned in the browser's sidebar
   tags        Tags of the session
-  parent      Path of the session that 'gripi link' linked it under; JSON
-              leaves it out for a session without one
+  parent      Path of the session that 'gripi new --parent' or 'gripi link'
+              put it under; JSON leaves it out for a session without one
   updated_at  Time of the latest message that the user sent or that ended a
               reply; in JSON it is in UTC with milliseconds, such as
               2026-10-06T18:47:02.725Z
@@ -422,7 +422,8 @@ func age(elapsed time.Duration) string {
 }
 
 const newHelp = `Usage:
-  gripi new <directory> [message] [--id | --json]
+  gripi new <directory> [message] [--parent <session>] [--name <name>]
+            [--id | --json]
 
 Starts a session in a project directory, then prints it. With a message, it
 also sends that as the first prompt, as 'gripi send' does, and returns once Pi
@@ -430,8 +431,14 @@ has taken it. Without one, the session is empty until 'gripi send' gives it a
 first message, and it keeps a Pi process running until then, so start one
 only to use it.
 
-When the message cannot be sent, the new session is deleted again and the
-command fails.
+With --parent, the new session is a sub-session of the parent. Gripi links it
+under the parent, as 'gripi link' does, and starts it with the parent's model
+and thinking level. A sub-session can't start sub-sessions of its own. Nor can
+a session on a remote machine (see 'gripi worker'), because gripi there can't
+start sessions.
+
+When the message cannot be sent, or the session cannot get its name, model or
+parent, the new session is deleted again and the command fails.
 
 Arguments:
   directory  Project directory for the session; it must exist
@@ -439,13 +446,20 @@ Arguments:
              message that starts with a dash.
 
 Flags:
-  --id    Print only the session's ID
-  --json  Print the session as a JSON object instead of a table
+  --parent <session>  Start a sub-session of this session: its ID, a unique
+                      prefix of it, or its file path, such as
+                      "$PI_SESSION_FILE" for the session that runs the command
+  --name <name>       Name the new session
+  --id                Print only the session's ID
+  --json              Print the session as a JSON object instead of a table
 
 ` + sessionFields + `
 Examples:
   session=$(gripi new ~/Work/project "Run the tests" --id) && gripi wait "$session"
   git diff | gripi new ~/Work/project - --id
+  gripi new ~/Work/project --parent "$PI_SESSION_FILE" --name "Fix the tests" - <<'EOF'
+  <brief>
+  EOF
 
 Exit codes:
 ` + sessionExitCodes
@@ -454,6 +468,8 @@ func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) i
 	flags := flag.NewFlagSet("new", flag.ContinueOnError)
 	asJSON := flags.Bool("json", false, "")
 	onlyID := flags.Bool("id", false, "")
+	parentReference := flags.String("parent", "", "")
+	name := flags.String("name", "", "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "new", err.Error())
@@ -482,10 +498,18 @@ func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) i
 	if err != nil {
 		return failure(stderr, "new", err)
 	}
+	form := url.Values{"cwd": {directory}, "name": {*name}}
+	if *parentReference != "" {
+		parent, err := client.session(*parentReference)
+		if err != nil {
+			return failure(stderr, "new", err)
+		}
+		form.Set("parent", parent.Path)
+	}
 	var started struct {
 		Session string `json:"session"`
 	}
-	if err := client.post("/sessions/new_at_cwd", url.Values{"cwd": {directory}}, &started); err != nil {
+	if err := client.post("/sessions/new_at_cwd", form, &started); err != nil {
 		return failure(stderr, "new", err)
 	}
 	sessions, err := client.sessions(started.Session)

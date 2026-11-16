@@ -3,6 +3,8 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -125,6 +127,11 @@ func TestMovingToAnotherFolderLeavesOnlyPisCopyThere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The session is a sub-session, and a parent of another.
+	lead, sub := filepath.Join(sessionsRoot, "lead.jsonl"), filepath.Join(sessionsRoot, "sub.jsonl")
+	if err := os.WriteFile(filepath.Join(root, "session-parents.json"), []byte(fmt.Sprintf(`{%q: %q, %q: %q}`, source, lead, sub, source)), 0600); err != nil {
+		t.Fatal(err)
+	}
 	_, file, _, _ := runtime.Caller(0)
 	fakeLog := filepath.Join(root, "fake-pi.log")
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
@@ -197,6 +204,10 @@ func TestMovingToAnotherFolderLeavesOnlyPisCopyThere(t *testing.T) {
 	decodeActionJSON(t, serveAction(handler, getActionRequest("/sessions/tags?session="+url.QueryEscape(payload.Session))), &tags)
 	if len(tags.Tags) != 1 || tags.Tags[0] != "work" {
 		t.Fatalf("forked session tags = %v", tags.Tags)
+	}
+	var links map[string]string
+	if data, err := os.ReadFile(filepath.Join(root, "session-parents.json")); err != nil || json.Unmarshal(data, &links) != nil || !maps.Equal(links, map[string]string{payload.Session: lead, sub: payload.Session}) {
+		t.Fatalf("links after the move = %v (%v)", links, err)
 	}
 }
 

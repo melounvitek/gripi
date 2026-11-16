@@ -174,4 +174,7 @@ func TestTheNewLocalRoutesKeepToTheUsersOwnSessions(t *testing.T) {
 			t.Fatalf("Alice's link %v = %d: %s", link, status, body)
 		}
 	}
+	if status, body := request(http.MethodPost, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "parent": {beta}}); status != http.StatusNotFound {
+		t.Fatalf("Alice's sub-session of Bob's session = %d: %s", status, body)
+	}
 }
