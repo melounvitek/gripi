@@ -59,7 +59,7 @@ export class SessionActionsController {
 
     if (event.target.closest?.("[data-open-pinned-sessions]")) {
       this.closeMenu();
-      this.openSessionWindows(Array.from(this.document.querySelectorAll(".pinned-sessions-list .session-row"), (row) => row.dataset.sessionPath));
+      this.openSessionWindows(Array.from(this.document.querySelectorAll(".pinned-sessions-list .session-row:not(.is-worker)"), (row) => row.dataset.sessionPath));
       return;
     }
 
