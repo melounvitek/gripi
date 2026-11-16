@@ -485,7 +485,7 @@ The timeout is a whole number of seconds; `0` disables it. The sweep interval se
 
 Turn notifications on with the bell icon in the sidebar header, which is orange when they are on and crossed out when they are off or blocked. On iPhone and iPad, this requires iOS/iPadOS 16.4 or newer and Gripi added to the Home Screen.
 
-Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A client that disconnects stops counting as focused after about 30 seconds.
+Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, never notifies and never shows as unread.
 
 Web Push requires HTTPS, such as [Tailscale Serve](examples.md#https-through-tailscale-serve). The gateway also needs outbound HTTPS access to the browser’s push service. Delivery is best-effort.
 

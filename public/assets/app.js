@@ -964,7 +964,7 @@ function finalAssistantReplyKey(sessionPath, message) {
 }
 
 function notifyFinalAssistantReply(message) {
-  if (liveOutput?.dataset.sessionSyncMode === "external_follow" || webPushController.enabled()) return;
+  if (liveOutput?.dataset.sessionSyncMode === "external_follow" || liveOutput?.dataset.subSession === "true" || webPushController.enabled()) return;
   if (!message || (typeof message.stopReason === "string" && !["", "stop", "length"].includes(message.stopReason))) return;
   if (!liveMessageParser.finalAssistantReplySegments(message).length) return;
 

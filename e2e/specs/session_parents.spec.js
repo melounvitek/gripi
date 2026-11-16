@@ -67,3 +67,32 @@ for (const touch of [false, true]) {
     });
   });
 }
+
+test("an open sub-session does not notify of its replies", async ({ page, linked }) => {
+  await page.addInitScript(() => {
+    window.replyNotifications = [];
+    document.hasFocus = () => false;
+    localStorage.removeItem("gripi:notifications-disabled");
+    window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
+  });
+  let pending = null;
+  let seq = 0;
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    const payload = pending || { events: [], last_seq: seq, missed: false };
+    pending = null;
+    return route.fulfill({ json: payload });
+  });
+  const notified = [];
+  for (const session of [linked.worker, linked.parent]) {
+    await page.goto(`/?session=${encodeURIComponent(session.file)}`);
+    await expect(page.locator("#live-output")).toBeAttached();
+    const reply = { role: "assistant", id: `reply-${seq}`, content: [{ type: "text", text: `Reply in ${session.title}` }], stopReason: "stop" };
+    const title = `Notification poll ${++seq}`;
+    pending = { events: [{ type: "message_end", message: reply }, { type: "agent_end", messages: [reply] }, { type: "agent_settled" }, { type: "extension_ui_request", method: "setTitle", title }], last_seq: seq, missed: false };
+    await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+    await expect(page).toHaveTitle(title);
+    // The reply is settled before the title changes, so its notification has been shown by now.
+    notified.push(...await page.evaluate(() => window.replyNotifications.map((notification) => notification.body)));
+  }
+  expect(notified).toEqual([`Reply in ${linked.parent.title}`]);
+});

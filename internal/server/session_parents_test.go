@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
 var sidebarRow = regexp.MustCompile(`<div class="session-row([^"]*)" data-session-tags="[^"]*" data-session-path="([^"]*)"`)
@@ -136,4 +139,75 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 			t.Errorf("the toggle counts the running worker: %s", toggle(html))
 		}
 	})
+}
+
+func TestSubSessionsNeverShowAsUnread(t *testing.T) {
+	cfg, alpha, beta, project := fakePiConfig(t)
+	parent := filepath.Join(cfg.SessionsRoot, "parent.jsonl")
+	writeLocalSession(t, parent, "parent", project, "2026-01-03T00:00:0")
+	handler := startGateway(t, cfg)
+	local := localHandler(t, handler)
+	link := func(path string) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "http://"+socketHost+"/sessions/parent", strings.NewReader(url.Values{"session": {path}, "parent": {parent}}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if response := serveAction(local, request); response.Code != http.StatusOK {
+			t.Fatalf("link = %d %s", response.Code, response.Body.String())
+		}
+	}
+	prompt := func(path string) {
+		t.Helper()
+		if response := postPrompt(handler, browserHost, url.Values{"session": {path}, "message": {"Hello"}}); response.Code != http.StatusOK {
+			t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
+		}
+	}
+	// unread lists the unread sessions as each place that shows them does.
+	unread := func(t *testing.T, want ...string) {
+		t.Helper()
+		var listed, palette []string
+		for _, session := range localSessions(t, local, "") {
+			if session.Unread {
+				listed = append(listed, session.Path)
+			}
+		}
+		response := serveAction(handler, getActionRequest("/sessions/palette"))
+		var payload struct {
+			Sessions []struct {
+				Path   string
+				Unread bool
+			}
+		}
+		decodeActionJSON(t, response, &payload)
+		for _, session := range payload.Sessions {
+			if session.Unread {
+				palette = append(palette, session.Path)
+			}
+		}
+		sidebar := serveAction(handler, getActionRequest("/sidebar?no_session=1")).Body.String()
+		count := fmt.Sprintf(`data-unread-session-count="%d"`, len(want))
+		if !reflect.DeepEqual(listed, want) || !reflect.DeepEqual(palette, want) || !strings.Contains(sidebar, count) {
+			t.Fatalf("unread: listed %q, palette %q, sidebar has %s: %t; want %q", listed, palette, count, strings.Contains(sidebar, count), want)
+		}
+	}
+
+	link(alpha)
+	cursor := fakePiEventCursor(t, handler, alpha)
+	prompt(alpha)
+	waitForFakePiSettled(t, handler, alpha, cursor)
+	prompt(beta)
+	waitForLocalSession(t, local, beta, func(session gateway.LocalSession) bool { return session.State == "idle" && session.Unread })
+	unread(t, beta)
+	sidebar := serveAction(handler, getActionRequest("/sidebar?no_session=1")).Body.String()
+	for path, want := range map[string]bool{alpha: false, beta: true} {
+		_, row, _ := strings.Cut(sidebar, `data-session-path="`+path+`"`)
+		row, _, _ = strings.Cut(row, `<div class="session-row`)
+		// The sidebar notifies of a finished reply when this changes.
+		if got := !strings.Contains(row, `data-completed-reply-id=""`); got != want {
+			t.Errorf("%s has a finished reply to notify of: %t, want %t", filepath.Base(path), got, want)
+		}
+	}
+
+	// Linked once its reply waits to be read, as gripi link may do, the session no longer counts.
+	link(beta)
+	unread(t)
 }

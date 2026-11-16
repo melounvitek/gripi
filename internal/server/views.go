@@ -134,6 +134,8 @@ type pageView struct {
 	HermesPanel   bool
 	// VoiceEnabled offers Hermes sessions a voice conversation.
 	VoiceEnabled bool
+	// SubSession tells that the selected session is linked under another, so its page does not notify.
+	SubSession bool
 }
 
 // voicePrefix starts the messages of a voice conversation, as VOICE_PREFIX in public/assets/formatting.js.
@@ -279,6 +281,14 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
+	links, err := app.gatewayState.SessionParents()
+	if err != nil {
+		return nil, err
+	}
+	// Sub-sessions never show as unread, so nothing counts them.
+	for path := range links {
+		delete(unread, path)
+	}
 	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil}
 	view.ExternalFollow = externalFollow
 	if notifier := app.completionNotifications; notifier != nil {
@@ -305,10 +315,6 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		for _, name := range assignments[session.Path] {
 			view.TagColors[name] = colors[name]
 		}
-	}
-	links, err := app.gatewayState.SessionParents()
-	if err != nil {
-		return nil, err
 	}
 	listed := make(map[string]bool, len(all))
 	for _, session := range all {
@@ -349,6 +355,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	if includeConversation && selected != nil {
+		view.SubSession = links[selected.Path] != ""
 		view.HideThinkingBlock = app.adapter.DisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
 		view.SessionSyncMode = agent.SyncAvailable
