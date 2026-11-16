@@ -15,6 +15,7 @@ const jitiRoot = path.dirname(createRequire(path.join(piPackageRoot, "package.js
 const { createJiti } = await import(pathToFileURL(path.join(jitiRoot, "lib/jiti.mjs")));
 const piIndex = path.join(piPackageRoot, "dist/index.js");
 const extensionPath = path.resolve("pi_extensions/gripi-tree.ts");
+const skillPath = path.resolve("pi_skills/gripi/SKILL.md");
 
 async function resolvePiPackageRoot(executable) {
   const root = await packageRootAbove(executable) || await packageRootAbove(scriptBehindLauncher(executable));
@@ -112,6 +113,39 @@ test("reload bridge refreshes native Pi resources in RPC mode", { timeout: 20_00
   } finally {
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// Pi keeps the first skill of a name, and the skills it finds come before those passed with --skill.
+test("Pi loads Gripi's skill unless the user has a skill of that name", { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-skill-"));
+  const agent = path.join(directory, "agent");
+  const gripiSkill = async () => {
+    const child = spawn(piExecutable, ["--mode", "rpc", "--no-session", "--skill", skillPath], {
+      cwd: directory,
+      env: { ...process.env, PI_CODING_AGENT_DIR: agent, PI_SKIP_VERSION_CHECK: "1" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const records = rpcRecords(child);
+    try {
+      child.stdin.write(`${JSON.stringify({ id: "commands", type: "get_commands" })}\n`);
+      const { data } = await records.next((record) => record.id === "commands");
+      return data.commands.find((command) => command.name === "skill:gripi");
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+  };
+
+  try {
+    assert.match((await gripiSkill())?.description, /^Works with Gripi sessions through the gripi command\./);
+
+    const own = path.join(agent, "skills", "gripi");
+    await mkdir(own, { recursive: true });
+    await writeFile(path.join(own, "SKILL.md"), "---\nname: gripi\ndescription: My own notes on Gripi.\n---\n");
+    assert.equal((await gripiSkill())?.description, "My own notes on Gripi.");
+  } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });

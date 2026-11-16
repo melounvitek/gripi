@@ -17,6 +17,7 @@ Boolean settings accept `1`, `true`, `yes`, or `on` for true and `0`, `false`, `
 | `GRIPI_MULTI_USER_MODE` | off | [Multi-user mode](#multi-user-mode) |
 | `GRIPI_AUTO_APPROVE_PROJECTS` | on | [Project resource approval](#project-resource-approval) |
 | `GRIPI_NODE`, `GRIPI_PI` | `pi` from `PATH` | [Custom Pi runtime](#custom-pi-runtime) |
+| `GRIPI_SKILL` | on | [Built-in skill](#built-in-skill) |
 | `GRIPI_HERMES` | off | [Hermes Agent (experimental)](#hermes-agent-experimental) |
 | `GRIPI_HERMES_CWD` | home folder | [Hermes on another machine](#hermes-on-another-machine) |
 | `GRIPI_HERMES_DASHBOARD_URL`, `GRIPI_HERMES_DASHBOARD_USERNAME`, `GRIPI_HERMES_DASHBOARD_PASSWORD` | none | [Voice conversations](#voice-conversations) |
@@ -168,7 +169,7 @@ Agents in Gripi can’t use `sudo` when it asks for a password, because nothing 
 
 Gripi leaves plain `sudo` as it is, so it still fails there. `gripi sudo` is Gripi’s own: Pi CLI in a terminal shows no prompt for it.
 
-Agents don’t know about it until you tell them. For Pi, add a line to `~/.pi/agent/AGENTS.md`:
+Pi in Gripi learns about it from the [built-in skill](#built-in-skill). With the skill off, or for Hermes, tell the agent. For Pi, add a line to `~/.pi/agent/AGENTS.md`:
 
 ```md
 - To run a command as root, use `gripi sudo -- <command>`, not `sudo`; I enter the password in Gripi. See `gripi help sudo`.
@@ -245,6 +246,16 @@ GRIPI_PI=/path/to/pi
 ```
 
 The selected runtime must already work, authenticated and configured, for the gateway’s OS user.
+
+## Built-in skill
+
+Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root) or to start sub-sessions when you ask. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
+
+A skill of your own named `gripi`, such as `~/.pi/agent/skills/gripi/SKILL.md`, replaces it, because Pi keeps the first skill of a name and the skills it finds come before those passed with `--skill`. To leave the skill out:
+
+```sh
+GRIPI_SKILL=0
+```
 
 ## Hermes Agent (experimental)
 

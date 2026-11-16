@@ -7,7 +7,7 @@
 
 **Gripi is a desktop and web interface for [Pi](https://pi.dev/), served by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then use Pi from the desktop app or a web browser, on the same machine or over an encrypted private network.
 
-**Pi stays Pi.** Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It works with the Pi setup you already have. The only addition is a small Gripi extension, loaded into each Pi process with `--extension`, that gives the browser access to Pi’s session tree. Sessions on a [worker](#workers) load a second one.
+**Pi stays Pi.** Gripi does not patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It works with the Pi setup you already have. The only additions to each Pi process are a small Gripi extension, loaded with `--extension`, that gives the browser access to Pi’s session tree, and a short built-in `gripi` skill, loaded with `--skill`, which adds its name and description to the system prompt so the model knows about the [`gripi` command](#command-line). Sessions on a [worker](#workers) load a second extension. [`GRIPI_SKILL=0`](docs/configuration.md#built-in-skill) turns the skill off, and a skill of your own named `gripi` replaces it.
 
 <p align="center">
   <strong><a href="https://gripi.w10.cz/">Try the live interactive demo →</a></strong><br>
@@ -114,7 +114,7 @@ gripi show 01a107aa                       # print the reply
 
 `gripi wait` also takes several sessions, and with `--any` returns once one of them stops. `gripi show --tail 5` prints what a session did last, and `--full` its whole conversation. Other commands start a session (`new`, which can also name it, send its first message, or start it as a sub-session of another, which gets a report when a turn that it started there is over), stop what one is working on (`stop`), continue one in Pi CLI (`open`), take one back from Pi CLI once nobody uses it there (`takeover`), name one (`rename`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), show one under another in the sidebar, such as a worker under the conversation that started it (`link`), delete one (`delete`), write the images in one to files, such as its screenshots (`images`), and claim one that has no owner (`claim`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running. In [multi-user mode](docs/configuration.md#multi-user-mode), the commands act for the user named by `GRIPI_USER_TOKEN`.
 
-An agent in a Gripi session can also [run a command as root](docs/configuration.md#running-commands-as-root) with `gripi sudo -- <command>`, once you enter your password in Gripi.
+An agent in a Gripi session can also [run a command as root](docs/configuration.md#running-commands-as-root) with `gripi sudo -- <command>`, once you enter your password in Gripi. Pi in Gripi learns about these commands from the [built-in `gripi` skill](docs/configuration.md#built-in-skill).
 
 [`gripi worker`](#workers) adds workers and moves sessions to them.
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -558,6 +559,51 @@ func TestNewSendsTheFirstMessage(t *testing.T) {
 	code, stdout, stderr = runCLIWithInput("Show the deterministic browser response\n", "new", directory, "-", "--json")
 	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID == id || session.State != "working" {
 		t.Fatalf("gripi new with a message on stdin = %d, stderr %q, session %+v", code, stderr, session)
+	}
+}
+
+// Every Pi that the gateway starts loads Gripi's skill, unless GRIPI_SKILL is off. The skill is in the folder of the
+// extensions, which workers get a copy of.
+func TestPiGetsGripisSkillUnlessItIsOff(t *testing.T) {
+	want, err := os.ReadFile(filepath.Join("..", "..", "pi_skills", "gripi", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, enabled := range map[string]bool{"on": true, "off": false} {
+		t.Run(name, func(t *testing.T) {
+			arguments := filepath.Join(t.TempDir(), "pi-arguments")
+			fakePiGateway(t, func(cfg *config.Config) {
+				cfg.SkillEnabled = enabled
+				// The shell records the arguments the gateway gives Pi, then runs the fake Pi with them.
+				cfg.PiCommand = append([]string{"sh", "-c", `printf '%s\n' "$@" > "$0"; exec "$@"`, arguments}, cfg.PiCommand...)
+			})
+			// A saved session and a new one start Pi each in its own way.
+			for _, start := range [][]string{{"send", "0a1-a", "Show the deterministic browser response"}, {"new", t.TempDir()}} {
+				if code, _, stderr := runCLI(start...); code != 0 {
+					t.Fatalf("gripi %q = %d, stderr %q", start, code, stderr)
+				}
+				recorded, err := os.ReadFile(arguments)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fields := strings.Split(string(recorded), "\n")
+				skill := slices.Index(fields, "--skill")
+				if !enabled {
+					if skill >= 0 {
+						t.Fatalf("Pi got a skill with GRIPI_SKILL off: %q", recorded)
+					}
+					continue
+				}
+				extension := slices.Index(fields, "--extension")
+				if skill < 0 || extension < 0 {
+					t.Fatalf("gripi %q started Pi with %q", start, recorded)
+				}
+				path := fields[skill+1]
+				if got, err := os.ReadFile(path); err != nil || string(got) != string(want) || !strings.HasPrefix(path, filepath.Dir(fields[extension+1])+string(filepath.Separator)) {
+					t.Fatalf("gripi %q started Pi with the skill %s (%v), next to the extension %s:\n%s", start, path, err, fields[extension+1], got)
+				}
+			}
+		})
 	}
 }
 

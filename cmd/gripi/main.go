@@ -183,9 +183,15 @@ func newPiAdapter(cfg config.Config, launcher agent.Launcher) (*pi.Adapter, erro
 	if err != nil {
 		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
 	}
+	var skill []byte
+	if cfg.SkillEnabled {
+		if skill, err = fs.ReadFile(gripi.WebFiles, "pi_skills/gripi/SKILL.md"); err != nil {
+			return nil, fmt.Errorf("read embedded Pi skill: %w", err)
+		}
+	}
 	return pi.New(pi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
-		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg), Launcher: launcher,
+		WorkerExtension: workerExtension, Skill: skill, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg), Launcher: launcher,
 	}), nil
 }
 

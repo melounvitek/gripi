@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
@@ -24,6 +25,8 @@ type Options struct {
 	Extension []byte
 	// WorkerExtension is the extension that only Pi on a worker loads, which holds results until main has the changes.
 	WorkerExtension []byte
+	// Skill is Gripi's skill, which every Pi loads with --skill when it is set.
+	Skill []byte
 	// SessionsRoot is where Pi saves sessions, and Home the folder that session paths are shown relative to.
 	SessionsRoot string
 	Home         string
@@ -38,6 +41,7 @@ type Adapter struct {
 	launcher        agent.Launcher
 	extension       []byte
 	workerExtension []byte
+	skill           []byte
 	settings        settings.SettingsResolver
 	extensionMu     sync.Mutex
 	extensionRoot   string
@@ -61,6 +65,7 @@ func New(options Options) *Adapter {
 		launcher:        options.Launcher,
 		extension:       options.Extension,
 		workerExtension: options.WorkerExtension,
+		skill:           options.Skill,
 		settings:        settings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
 		stateDir:        options.StateDir,
 		store:           sessionStore{sessionfile.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
@@ -86,23 +91,38 @@ func (adapter *Adapter) Guard(clients *agent.Registry) (agent.Guard, error) {
 }
 
 func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Client, error) {
-	extensionPath, _, err := adapter.ExtensionFiles()
+	command, extensionPath, err := adapter.piCommand()
 	if err != nil {
 		return nil, err
 	}
 	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
-		return rpc.Start(key, options.CWD, adapter.command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
+		return rpc.Start(key, options.CWD, command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})
 }
 
 func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOptions) (agent.Client, error) {
-	extensionPath, _, err := adapter.ExtensionFiles()
+	command, extensionPath, err := adapter.piCommand()
 	if err != nil {
 		return nil, err
 	}
 	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
-		return rpc.StartInCWD(cwd, forkFrom, adapter.command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
+		return rpc.StartInCWD(cwd, forkFrom, command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})
+}
+
+// piCommand returns the command that runs Pi, which loads Gripi's skill when the adapter has one, and the gateway's
+// extension.
+func (adapter *Adapter) piCommand() (command []string, extension string, err error) {
+	extension, _, err = adapter.ExtensionFiles()
+	if err != nil || adapter.skill == nil {
+		return adapter.command, extension, err
+	}
+	return append(slices.Clone(adapter.command), "--skill", skillFile(filepath.Dir(extension))), extension, nil
+}
+
+// skillFile is where Gripi's skill is in the folder of the extensions, which workers get a copy of.
+func skillFile(root string) string {
+	return filepath.Join(root, "gripi", "SKILL.md")
 }
 
 func (adapter *Adapter) Composer(string) agent.Composer {
@@ -143,8 +163,8 @@ func (adapter *Adapter) Check(ctx context.Context) error {
 }
 
 // ExtensionFiles returns the extracted extensions: the gateway's, which every Pi loads, and the worker extension,
-// which a session's Pi on a worker loads with a second --extension. They share a folder, which a worker gets a copy
-// of at the same path, so with a state folder it is the same folder in it after every restart.
+// which a session's Pi on a worker loads with a second --extension. They share a folder with Gripi's skill, which a
+// worker gets a copy of at the same path, so with a state folder it is the same folder in it after every restart.
 func (adapter *Adapter) ExtensionFiles() (tree, worker string, err error) {
 	adapter.extensionMu.Lock()
 	defer adapter.extensionMu.Unlock()
@@ -162,6 +182,17 @@ func (adapter *Adapter) ExtensionFiles() (tree, worker string, err error) {
 			if err := os.WriteFile(filepath.Join(root, name), contents, 0600); err != nil {
 				_ = os.RemoveAll(root)
 				return "", "", fmt.Errorf("write Pi extension: %w", err)
+			}
+		}
+		if adapter.skill != nil {
+			skill := skillFile(root)
+			err := os.MkdirAll(filepath.Dir(skill), 0700)
+			if err == nil {
+				err = os.WriteFile(skill, adapter.skill, 0600)
+			}
+			if err != nil {
+				_ = os.RemoveAll(root)
+				return "", "", fmt.Errorf("write Pi skill: %w", err)
 			}
 		}
 		adapter.extensionRoot = root
