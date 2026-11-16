@@ -441,8 +441,16 @@
     .session-row.is-worker { min-height: 1.8rem; margin: 0 0 0 0.95rem; padding: 0 0.5rem 0 0.7rem; }
     .session-row.is-worker :is(.session-project, .session-tags, .session-external-indicator) { display: none; }
     .session-row.is-worker .session-title { color: var(--muted); font-family: var(--mono); font-size: 0.78rem; }
-    .session-row.is-worker > a.session::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 0.45rem; border-left: 1px solid var(--border-strong); background: linear-gradient(var(--border-strong), var(--border-strong)) 0 50% / 100% 1px no-repeat; }
-    .session-row.is-worker:not(:has(+ .is-worker)) > a.session::before { bottom: 50%; background-position: 0 100%; }
+    .session-row.is-worker > a.session::before, .worker-fold > summary::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 0.45rem; border-left: 1px solid var(--border-strong); background: linear-gradient(var(--border-strong), var(--border-strong)) 0 50% / 100% 1px no-repeat; }
+    .session-row.is-worker:not(:has(+ .is-worker, + .worker-fold)) > a.session::before, .worker-fold:not([open]) > summary::before { bottom: 50%; background-position: 0 100%; }
+    /* Done sub-sessions fold into one quiet line on the same guide. */
+    .worker-fold > summary { position: relative; display: flex; align-items: center; gap: 0.4rem; min-height: 1.8rem; margin: 0 0 0 0.95rem; padding: 0 0.5rem 0 0.7rem; border-radius: 0.25rem; color: var(--muted-soft); font-family: var(--mono); font-size: 0.72rem; list-style: none; cursor: pointer; }
+    .worker-fold > summary::-webkit-details-marker { display: none; }
+    .worker-fold > summary::after { content: "▸"; order: -1; }
+    .worker-fold[open] > summary::after { content: "▾"; }
+    .worker-fold > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+    .worker-fold .session-title { color: var(--muted-soft); }
+    .worker-fold .session-meta { visibility: hidden; }
     /* The time slot fits "13h" and shows the activity dot while Pi works. */
     .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
     a.session { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }
@@ -451,7 +459,8 @@
     a.session:focus-visible { outline: none; }
     a.session:focus-visible::after { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
     @media (hover: hover) and (pointer: fine) {
-      .session-row:hover { background: #ffffff08; }
+      .session-row:hover, .worker-fold > summary:hover { background: #ffffff08; }
+      .worker-fold > summary:hover { color: var(--muted); }
     }
     @media (min-width: 761px) and (hover: hover) and (pointer: fine) {
       .session-row:is(:hover, :has(:focus-visible)) .session-meta { visibility: hidden; }
@@ -1060,6 +1069,7 @@
       .session-row.is-worker { min-height: 2.5rem; padding: 0 2.9rem 0 0.7rem; }
       .session-row.is-worker .session-title { font-size: 0.85rem; }
       .session-row.is-worker .session-actions-toggle { height: 2.5rem; }
+      .worker-fold > summary { min-height: 2.5rem; font-size: 0.78rem; }
       .session-pin-toggle { display: none; }
       .session-actions-toggle { top: 0; right: 0.15rem; width: 2.75rem; height: 2.75rem; opacity: 0.7; transform: none; }
       .session-shortcut { right: calc(0.15rem + (2.75rem - 1.35rem) / 2); }
@@ -1327,7 +1337,7 @@
         <section id="history-output">
           <article class="message message--user" data-role="user"><header class="message-header"><div class="role">user</div><div class="message-meta"></div></header><pre class="message-body">What is Gripi?</pre></article>
           <article class="message message--assistant message--thinking" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div></header><div class="message-body message-body--markdown message-body--thinking"><p>I’ll summarize what Gripi adds while keeping Pi’s role clear.</p></div></article>
-          <article class="message message--assistant" data-role="assistant" data-final-assistant-response="true"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.</p><p>Pi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated.</p></div></article>
+          <article class="message message--assistant" data-role="assistant" data-final-assistant-response="true"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.</p><p>Pi stays Pi: Gripi does not patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated.</p></div></article>
         </section>
         <section id="live-output"></section>
       </section>

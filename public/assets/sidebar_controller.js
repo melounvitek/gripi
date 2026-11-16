@@ -22,6 +22,8 @@ export class SidebarController {
     this.temporarySessionsLimit = null;
     this.filterOperationActive = false;
     this.notifiedFinalReplyKeys = new Set();
+    // The parents whose done sub-sessions are unfolded, which every redraw of the sidebar keeps.
+    this.openWorkerFolds = new Set();
     this.listenersBound = false;
   }
 
@@ -37,6 +39,7 @@ export class SidebarController {
     if (!this.element) return null;
 
     this.projectSelectController.initialize(this.element);
+    this.element.querySelectorAll("details[data-worker-fold]").forEach((fold) => { fold.open = this.openWorkerFolds.has(fold.dataset.workerFold); });
     if (this.document.body.classList.contains("session-pin-operation-active")) {
       this.element.querySelectorAll("[data-session-pin-toggle]").forEach((control) => { control.disabled = true; });
     }
@@ -245,11 +248,16 @@ export class SidebarController {
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
     const focusedControl = oldElement.contains(this.document.activeElement) ? this.document.activeElement : null;
     const focusedControlSelector = ["a.session", "[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]", "[data-sidebar-cli-toggle]"].find((selector) => focusedControl?.matches(selector));
+    const focusedFold = focusedControl?.matches("[data-worker-fold] > summary") ? focusedControl.parentElement.dataset.workerFold : null;
     const focusedSessionPath = focusedControl?.closest(".session-row")?.dataset.sessionPath;
     const focusedTag = focusedControl?.dataset.tagFilter;
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
     const visibilityToggleFocused = !!focusedVisibilityToggle && oldElement.contains(focusedVisibilityToggle);
     this.projectSelectController.destroy(oldElement);
+    oldElement.querySelectorAll("details[data-worker-fold]").forEach((fold) => {
+      if (fold.open) this.openWorkerFolds.add(fold.dataset.workerFold);
+      else this.openWorkerFolds.delete(fold.dataset.workerFold);
+    });
     if (previousSearchInput !== this.document.activeElement || !this.replaceAround(previousSearchInput, html)) oldElement.outerHTML = html;
     this.bind(this.document.querySelector(".session-sidebar"));
     if (!this.element) return null;
@@ -262,7 +270,9 @@ export class SidebarController {
     if (notificationToggle) this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);
     if (resourceUsage) this.element.querySelector("[data-resource-usage]")?.replaceWith(resourceUsage);
     if (blockedWindows) this.element.querySelector("[data-blocked-windows]")?.replaceWith(blockedWindows);
-    if (focusedControlSelector) {
+    if (focusedFold) {
+      [...this.element.querySelectorAll("details[data-worker-fold]")].find((fold) => fold.dataset.workerFold === focusedFold)?.querySelector("summary").focus({ preventScroll: true });
+    } else if (focusedControlSelector) {
       const focusedRow = [...this.element.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === focusedSessionPath);
       const root = focusedSessionPath ? focusedRow : this.element;
       const replacement = [...(root?.querySelectorAll(focusedControlSelector) || [])].find((control) => focusedTag === undefined || control.dataset.tagFilter === focusedTag);

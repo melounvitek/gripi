@@ -150,6 +150,13 @@ func readUnsavedChoices(ctx context.Context, client Client) (unsavedChoices, err
 	return unsavedChoices{status: status, name: state.Name}, err
 }
 
+// ChooseForNewSession gives a session that the agent has not saved yet the model and thinking level in status, and the
+// name, before its first prompt, as a restart of such a session does with what was chosen in it.
+func ChooseForNewSession(ctx context.Context, client Client, status LiveStatus, name string) error {
+	_, err := unsavedChoices{status: status, name: name}.apply(ctx, client)
+	return err
+}
+
 // apply gives the choices to a new client of the session, and returns the session's ID there.
 func (choices unsavedChoices) apply(ctx context.Context, client Client) (string, error) {
 	if models, ok := client.(ModelSelector); ok && choices.status.Provider != "" && choices.status.ModelID != "" {

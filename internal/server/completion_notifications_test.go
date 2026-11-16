@@ -458,6 +458,62 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	}
 }
 
+func TestSubSessionsNeitherNotifyNorShowAsUnread(t *testing.T) {
+	// The parent need not be listed.
+	parent := filepath.Join(t.TempDir(), "parent.jsonl")
+
+	t.Run("settled", func(t *testing.T) {
+		app, notifier, client, path := settledNotificationFixture(t)
+		turn := func(id, parentID string) {
+			t.Helper()
+			final := notificationMessage(id, "Reply "+id, "stop")
+			notifier.observePi(client, map[string]any{"type": "agent_start"})
+			appendExternalSessionReply(t, path, id, parentID)
+			notifier.observePi(client, notificationAgentEnd(final))
+			notifier.observePi(client, map[string]any{"type": "agent_settled"})
+		}
+		turn("before", "")
+		assertSettledUnread(t, app, path, true)
+		if len(notifier.queue) != 1 {
+			t.Fatal("the reply was not queued")
+		}
+		<-notifier.queue
+
+		// A reply that finished before the link no longer waits to be read.
+		if err := app.gatewayState.SetSessionParent(path, parent); err != nil {
+			t.Fatal(err)
+		}
+		assertSettledUnread(t, app, path, false)
+		turn("after", "before")
+		assertSettledUnread(t, app, path, false)
+		completions, err := app.gatewayState.Completions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(notifier.queue) != 0 || completions[path].ID != piReplyID(notificationMessage("before", "Reply before", "stop")) {
+			t.Fatalf("a sub-session's reply was queued or published: %d queued, %+v", len(notifier.queue), completions[path])
+		}
+	})
+
+	t.Run("linked while the notification waits", func(t *testing.T) {
+		root := t.TempDir()
+		path := writeNotificationSession(t, root, "Sub-session")
+		fake := &recordingPushNotifier{}
+		app := notificationTestApplication(t, root, false, true, fake)
+		notifier := newCompletionNotifier(app)
+		reply := completedReply{path: path, text: "done", id: "reply"}
+		if err := notifier.deliver(context.Background(), reply); err != nil || len(fake.owners) != 1 {
+			t.Fatalf("deliveries before the link = %d, %v", len(fake.owners), err)
+		}
+		if err := app.gatewayState.SetSessionParent(path, parent); err != nil {
+			t.Fatal(err)
+		}
+		if err := notifier.deliver(context.Background(), reply); err != nil || len(fake.owners) != 1 {
+			t.Fatalf("deliveries after the link = %d, %v", len(fake.owners), err)
+		}
+	})
+}
+
 func TestCompletionNotifierCloseCancelsRepliesWaitingForTheGracePeriod(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := writeNotificationSession(t, root, "Canceled session")

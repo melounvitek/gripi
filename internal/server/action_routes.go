@@ -78,6 +78,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if !ok {
 		return
 	}
+	reportTo := app.reportingParent(request, path)
 	message := request.FormValue("message")
 	imageFiles, ok := uploadedPromptImages(response, request)
 	if !ok {
@@ -220,7 +221,12 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		}
 		switch command.Name {
 		case "":
+			// The run may settle before Prompt returns, so the report is due before Pi gets the prompt.
+			staged := reportTo != "" && app.subSessionReports.expect(client, reportTo)
 			result, err = client.Prompt(request.Context(), prompt)
+			if staged && (err != nil || result.Disposition == "handled") {
+				app.subSessionReports.forget(client)
+			}
 		case "name":
 			if command.Argument == "" {
 				var state agent.State
@@ -268,7 +274,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 					return nil
 				}
 				var deferErr error
+				staged := reportTo != "" && app.subSessionReports.expect(client, reportTo)
 				result, deferred, deferErr = deferrer.DeferPrompt(request.Context(), prompt)
+				if staged && (deferErr != nil || !deferred || result.Disposition == "handled") {
+					app.subSessionReports.forget(client)
+				}
 				if deferErr == nil && deferred {
 					deferErr = recordImages()
 				}
@@ -655,6 +665,18 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		}
 		return
 	}
+	name := strings.TrimSpace(request.FormValue("name"))
+	if len(name) > sessionNameBytes {
+		writeText(response, http.StatusBadRequest, "Session name is too long")
+		return
+	}
+	parent, status := "", agent.Status{}
+	if raw := request.FormValue("parent"); raw != "" {
+		var ok bool
+		if parent, status, ok = app.subSessionParent(response, request, raw); !ok {
+			return
+		}
+	}
 	forkFrom := ""
 	if raw := request.FormValue("fork_from"); raw != "" {
 		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so the session moves as Pi's fork
@@ -687,6 +709,23 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		app.writeActionRPCError(response, err)
 		return
 	}
+	if parent != "" || name != "" {
+		// Pi saves a new session only once it replies, so its client takes the name and model before the first prompt.
+		chosen := agent.LiveStatus{Provider: status.Provider, ModelID: status.ModelID, ThinkingLevel: status.ThinkingLevel}
+		err = app.withSynchronizedClient(request, newPath, func(client agent.Client) error {
+			return agent.ChooseForNewSession(request.Context(), client, chosen, name)
+		})
+		if err == nil && parent != "" {
+			err = app.gatewayState.SetSessionParent(newPath, parent)
+		}
+		if err != nil {
+			if _, deleteErr := app.deleteSessionData(request, newPath); deleteErr != nil {
+				logInternalError("delete a new session that could not be set up", deleteErr)
+			}
+			app.writeSettingError(response, err)
+			return
+		}
+	}
 	if forkFrom != "" {
 		if _, err := app.deleteSessionData(request, forkFrom); err != nil {
 			logInternalError("delete moved session", err)
@@ -695,6 +734,34 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		}
 	}
 	app.redirectToNewSession(response, request, newPath, "")
+}
+
+// subSessionParent finds the session that a new sub-session goes under, and the model and thinking level it passes on.
+// It refuses a sub-session, whose own sub-sessions would nest deeper than the sidebar shows.
+func (app *application) subSessionParent(response http.ResponseWriter, request *http.Request, raw string) (string, agent.Status, bool) {
+	parent, ok := app.requireOwnedSession(response, request, raw)
+	if !ok {
+		return "", agent.Status{}, false
+	}
+	if parent, ok = app.gatewayStateSessionPath(parent); !ok {
+		http.NotFound(response, request)
+		return "", agent.Status{}, false
+	}
+	links, err := app.gatewayState.SessionParents()
+	if err != nil {
+		writeInternalError(response, "read session parents", err)
+		return "", agent.Status{}, false
+	}
+	if links[parent] != "" {
+		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": parent + " is a sub-session of " + links[parent] + ", and a sub-session can't start sub-sessions of its own"})
+		return "", agent.Status{}, false
+	}
+	status, err := app.sessionStatus(request.Context(), parent)
+	if err != nil {
+		writeInternalError(response, "read the model of a sub-session's parent", err)
+		return "", agent.Status{}, false
+	}
+	return parent, status, true
 }
 
 func (app *application) renameSession(response http.ResponseWriter, request *http.Request) {

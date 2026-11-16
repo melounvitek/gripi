@@ -81,7 +81,7 @@ func TestCommandsOfAMultiUserGatewayActForTheUserOfTheirToken(t *testing.T) {
 
 func TestClaimGivesAUserASessionThatHasNoOwner(t *testing.T) {
 	alpha, _ := multiUserGateway(t)
-	// Like a session from Pi CLI, such as an orchestration worker.
+	// Like a session from Pi CLI.
 	worker := filepath.Join(filepath.Dir(alpha), "worker.jsonl")
 	appendSessionRecords(t, worker,
 		map[string]any{"type": "session", "version": 3, "id": "0a1-worker-full-id", "timestamp": "2026-01-03T00:00:00Z", "cwd": t.TempDir()},
@@ -173,5 +173,8 @@ func TestTheNewLocalRoutesKeepToTheUsersOwnSessions(t *testing.T) {
 		if status, body := request(http.MethodPost, "/sessions/parent", link); status != http.StatusNotFound {
 			t.Fatalf("Alice's link %v = %d: %s", link, status, body)
 		}
+	}
+	if status, body := request(http.MethodPost, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "parent": {beta}}); status != http.StatusNotFound {
+		t.Fatalf("Alice's sub-session of Bob's session = %d: %s", status, body)
 	}
 }

@@ -17,6 +17,7 @@ Boolean settings accept `1`, `true`, `yes`, or `on` for true and `0`, `false`, `
 | `GRIPI_MULTI_USER_MODE` | off | [Multi-user mode](#multi-user-mode) |
 | `GRIPI_AUTO_APPROVE_PROJECTS` | on | [Project resource approval](#project-resource-approval) |
 | `GRIPI_NODE`, `GRIPI_PI` | `pi` from `PATH` | [Custom Pi runtime](#custom-pi-runtime) |
+| `GRIPI_SKILL` | on | [Built-in skill](#built-in-skill) |
 | `GRIPI_HERMES` | off | [Hermes Agent (experimental)](#hermes-agent-experimental) |
 | `GRIPI_HERMES_CWD` | home folder | [Hermes on another machine](#hermes-on-another-machine) |
 | `GRIPI_HERMES_DASHBOARD_URL`, `GRIPI_HERMES_DASHBOARD_USERNAME`, `GRIPI_HERMES_DASHBOARD_PASSWORD` | none | [Voice conversations](#voice-conversations) |
@@ -168,7 +169,7 @@ Agents in Gripi can’t use `sudo` when it asks for a password, because nothing 
 
 Gripi leaves plain `sudo` as it is, so it still fails there. `gripi sudo` is Gripi’s own: Pi CLI in a terminal shows no prompt for it.
 
-Agents don’t know about it until you tell them. For Pi, add a line to `~/.pi/agent/AGENTS.md`:
+Pi in Gripi learns about it from the [built-in skill](#built-in-skill). With the skill off, or for Hermes, tell the agent. For Pi, add a line to `~/.pi/agent/AGENTS.md`:
 
 ```md
 - To run a command as root, use `gripi sudo -- <command>`, not `sudo`; I enter the password in Gripi. See `gripi help sudo`.
@@ -245,6 +246,16 @@ GRIPI_PI=/path/to/pi
 ```
 
 The selected runtime must already work, authenticated and configured, for the gateway’s OS user.
+
+## Built-in skill
+
+Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root) or to start sub-sessions when you ask. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
+
+A skill of your own named `gripi`, such as `~/.pi/agent/skills/gripi/SKILL.md`, replaces it, because Pi keeps the first skill of a name and the skills it finds come before those passed with `--skill`. To leave the skill out:
+
+```sh
+GRIPI_SKILL=0
+```
 
 ## Hermes Agent (experimental)
 
@@ -438,7 +449,7 @@ What happens next is up to you:
 
 Losing a worker loses the running step and the background processes that the session started there, such as dev servers, which, unlike on main, stop with the connection. Continuing on main also leaves the files outside the copy behind on the worker. Stopping the gateway, such as for an update, also stops everything that sessions run on workers.
 
-The helper cannot stop what others run for Pi: Docker and Podman containers, which their daemons own, and anything started with `systemd-run --user`, such as the Pi sessions that the `gripi-orchestrate` skill starts. These keep running after a disconnect or a return, and what they change afterwards stays on the worker, so stop them yourself.
+The helper cannot stop what others run for Pi: Docker and Podman containers, which their daemons own, and anything started with `systemd-run --user`. These keep running after a disconnect or a return, and what they change afterwards stays on the worker, so stop them yourself.
 
 ### Forwarding ports
 
@@ -485,7 +496,7 @@ The timeout is a whole number of seconds; `0` disables it. The sweep interval se
 
 Turn notifications on with the bell icon in the sidebar header, which is orange when they are on and crossed out when they are off or blocked. On iPhone and iPad, this requires iOS/iPadOS 16.4 or newer and Gripi added to the Home Screen.
 
-Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A client that disconnects stops counting as focused after about 30 seconds.
+Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, never notifies and never shows as unread.
 
 Web Push requires HTTPS, such as [Tailscale Serve](examples.md#https-through-tailscale-serve). The gateway also needs outbound HTTPS access to the browser’s push service. Delivery is best-effort.
 
@@ -551,7 +562,7 @@ Gripi stores its own data separately from Pi’s. Each location can be changed w
 | `~/.pi/gripi/restart-request` | Restart signal for `bin/start` (not read from the env file) | `GRIPI_RESTART_PATH` |
 | `~/.pi/gripi/gripi.sock` | Socket for the [`gripi` command](../README.md#command-line), which must run with the same value (not read from the env file) | `GRIPI_SOCKET_PATH` |
 
-Gripi’s state folder, the folder of `read-state.json`, also holds the links of `gripi link` in `session-parents.json`, Gripi’s Pi extensions in `pi-extensions/` and, for [workers](#workers), SSH’s control sockets in `ssh/`, each worker’s `gripi` socket in `workers/`, main’s side of each session on a worker in `moves/`, and what returns kept aside in `returns/`.
+Gripi’s state folder, the folder of `read-state.json`, also holds the links of sub-sessions and `gripi link` in `session-parents.json`, Gripi’s Pi extensions in `pi-extensions/` and, for [workers](#workers), SSH’s control sockets in `ssh/`, each worker’s `gripi` socket in `workers/`, main’s side of each session on a worker in `moves/`, and what returns kept aside in `returns/`.
 
 If a file is malformed, Gripi leaves it untouched instead of replacing it. Requests that depend on it fail, and the gateway log names the file. To recover, stop the gateway, back up the file, then fix it or move it aside. Moving a file aside resets only its own data, such as approvals or read markers. Pi’s session files are not affected.
 

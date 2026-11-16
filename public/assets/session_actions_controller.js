@@ -120,7 +120,8 @@ export class SessionActionsController {
   }
 
   mark(row, range) {
-    const rows = Array.from(this.document.querySelectorAll(".session-sidebar .session-row"));
+    // A range leaves out the sub-sessions folded out of sight.
+    const rows = Array.from(this.document.querySelectorAll(".session-sidebar .session-row")).filter((candidate) => !candidate.closest("details:not([open])"));
     const index = rows.indexOf(row);
     const anchor = rows.findIndex((candidate) => candidate.dataset.sessionPath === this.markAnchor);
     const path = row.dataset.sessionPath;

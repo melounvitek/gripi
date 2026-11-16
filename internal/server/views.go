@@ -98,6 +98,7 @@ type pageView struct {
 	SessionTags               map[string][]string
 	SessionParents            map[string]string
 	SidebarWorkers            map[string][]*agent.Session
+	FoldedWorkers             map[string][]*agent.Session
 	TagColors                 map[string]string
 	Unread                    map[string]bool
 	ExternalFollow            map[string]bool
@@ -134,6 +135,8 @@ type pageView struct {
 	HermesPanel   bool
 	// VoiceEnabled offers Hermes sessions a voice conversation.
 	VoiceEnabled bool
+	// SubSession tells that the selected session is linked under another, so its page does not notify.
+	SubSession bool
 }
 
 // voicePrefix starts the messages of a voice conversation, as VOICE_PREFIX in public/assets/formatting.js.
@@ -279,6 +282,14 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
+	links, err := app.gatewayState.SessionParents()
+	if err != nil {
+		return nil, err
+	}
+	// Sub-sessions never show as unread, so nothing counts them.
+	for path := range links {
+		delete(unread, path)
+	}
 	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil}
 	view.ExternalFollow = externalFollow
 	if notifier := app.completionNotifications; notifier != nil {
@@ -306,10 +317,6 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			view.TagColors[name] = colors[name]
 		}
 	}
-	links, err := app.gatewayState.SessionParents()
-	if err != nil {
-		return nil, err
-	}
 	listed := make(map[string]bool, len(all))
 	for _, session := range all {
 		listed[session.Path] = true
@@ -321,7 +328,14 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
-	view.prepareSidebar(app.cliProcesses)
+	// The sidebar tells by their activity which sub-sessions are done.
+	for _, session := range all {
+		activity := sidebarActivity{Busy: app.rpcClients.Busy(session.Path), Compacting: app.rpcClients.Compacting(session.Path)}
+		if activity.Busy || activity.Compacting {
+			view.SidebarActivity[session.Path] = activity
+		}
+	}
+	view.prepareSidebar()
 	renderedSessions := make([]*agent.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
 	renderedSessions = append(renderedSessions, view.PinnedSessions...)
 	renderedSessions = append(renderedSessions, view.SidebarSessions...)
@@ -331,12 +345,11 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	for _, workers := range view.SidebarWorkers {
 		renderedSessions = append(renderedSessions, workers...)
 	}
+	for _, workers := range view.FoldedWorkers {
+		renderedSessions = append(renderedSessions, workers...)
+	}
 	view.WorkerLocations = make(map[string]*WorkerLocation)
 	for _, session := range renderedSessions {
-		activity := sidebarActivity{Busy: app.rpcClients.Busy(session.Path), Compacting: app.rpcClients.Compacting(session.Path)}
-		if activity.Busy || activity.Compacting {
-			view.SidebarActivity[session.Path] = activity
-		}
 		if app.workers != nil && session.Agent != "hermes" {
 			if location, found := app.workers.Location(session.Path); found {
 				view.WorkerLocations[session.Path] = &location
@@ -349,6 +362,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	if includeConversation && selected != nil {
+		view.SubSession = links[selected.Path] != ""
 		view.HideThinkingBlock = app.adapter.DisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
 		view.SessionSyncMode = agent.SyncAvailable
@@ -557,18 +571,7 @@ func (app *application) rememberSessionHashes(all []*agent.Session) {
 	app.sessionHashesMu.Unlock()
 }
 
-// cliProcesses finds the processes of Pi CLI that name each session, as a takeover checks. A session that cannot be
-// checked has none.
-func (app *application) cliProcesses(paths []string) map[string][]int {
-	detector, detects := app.guard.(agent.CLIDetector)
-	if !detects || len(paths) == 0 {
-		return nil
-	}
-	found, _ := detector.CLIProcesses(paths...)
-	return found
-}
-
-func (view *pageView) prepareSidebar(cliProcesses func(paths []string) map[string][]int) {
+func (view *pageView) prepareSidebar() {
 	// Links nest one level deep, so a session linked under itself or in a loop stays at the top.
 	nestedUnder := make(map[string]string)
 	for path, parent := range view.SessionParents {
@@ -607,7 +610,7 @@ func (view *pageView) prepareSidebar(cliProcesses func(paths []string) map[strin
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
 			continue
 		}
-		// A tag filter lists its Pi CLI sessions too, so a group such as an orchestration run shows whole.
+		// A tag filter lists its Pi CLI sessions too, so a tagged group shows whole.
 		hideable := view.ExternalFollow[session.Path] && view.SelectedTag == ""
 		if hideable {
 			view.CLISessionCount++
@@ -635,32 +638,20 @@ func (view *pageView) prepareSidebar(cliProcesses func(paths []string) map[strin
 	for _, session := range append(slices.Clone(view.PinnedSessions), view.SidebarSessions...) {
 		parents[session.Path] = true
 	}
-	var workers []*agent.Session
-	var external []string
-	for _, session := range view.Sessions {
-		if parents[nestedUnder[session.Path]] && !view.Pinned[session.Path] {
-			workers = append(workers, session)
-			if view.ExternalFollow[session.Path] {
-				external = append(external, session.Path)
-			}
-		}
-	}
-	running := cliProcesses(external)
+	// Running sub-sessions and the open one show under their parent, and the others fold into one line.
 	view.SidebarWorkers = make(map[string][]*agent.Session)
-	for _, session := range workers {
+	view.FoldedWorkers = make(map[string][]*agent.Session)
+	for _, session := range view.Sessions {
 		parent := nestedUnder[session.Path]
-		if view.ExternalFollow[session.Path] {
-			if len(running[session.Path]) > 0 {
-				view.SidebarActivity[session.Path] = sidebarActivity{Busy: true}
-			} else if view.SelectedTag == "" {
-				// Like other Pi CLI sessions, a worker that Pi CLI is done with shows only on request.
-				view.CLISessionCount++
-				if !view.CLISessionsShown {
-					continue
-				}
-			}
+		if !parents[parent] || view.Pinned[session.Path] {
+			continue
 		}
-		view.SidebarWorkers[parent] = append(view.SidebarWorkers[parent], session)
+		activity := view.SidebarActivity[session.Path]
+		if activity.Busy || activity.Compacting || view.Selected != nil && view.Selected.Path == session.Path {
+			view.SidebarWorkers[parent] = append(view.SidebarWorkers[parent], session)
+		} else {
+			view.FoldedWorkers[parent] = append(view.FoldedWorkers[parent], session)
+		}
 	}
 	if view.Selected != nil && !view.Pinned[view.Selected.Path] {
 		selected := func(session *agent.Session) bool { return session.Path == view.Selected.Path }

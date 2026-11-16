@@ -326,7 +326,9 @@ func (state *GatewayState) Forget(path string) error {
 		state.pinnedChanges = make(map[string]uint64)
 	}
 	state.pinnedChanges[path] = state.pinnedRevision
-	return nil
+	// The sub-sessions of a deleted parent are linked under nothing.
+	_, err = state.relinkLocked(path, "")
+	return err
 }
 
 func (state *GatewayState) ReadCount(path string) (int, error) {

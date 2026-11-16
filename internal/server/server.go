@@ -73,6 +73,7 @@ type application struct {
 	guard                   agent.Guard
 	rpcMaintenance          *agent.Maintenance
 	completionNotifications *completionNotifier
+	subSessionReports       subSessionReports
 	resourceMonitor         resourceMonitor
 	updateCoordinator       updateCoordinator
 	ownsSession             func(*http.Request, string) bool
@@ -90,6 +91,8 @@ type application struct {
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
 	voice  *hermesdashboard.Client
 	hermes hermesConversation
+	// commandRoutes serve gripi commands, as Local does, and the reports to parent sessions.
+	commandRoutes http.Handler
 }
 
 var errSessionFolderMissing = &agent.SyncBlockedError{Mode: agent.SyncFolderMissing, Message: "This session’s folder no longer exists. Move it to another folder to keep working."}
@@ -111,7 +114,6 @@ func writeInternalError(response http.ResponseWriter, operation string, err erro
 type Handler struct {
 	next            http.Handler
 	local           http.Handler
-	commands        http.Handler // the routes of Local, which Worker serves in part
 	app             *application
 	closeMu         sync.Mutex
 	closed          bool
@@ -253,6 +255,11 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	diagnostics := &agent.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)
+	app.subSessionReports.app = app
+	observe := func(client agent.Client, lifecycle agent.Lifecycle) {
+		app.completionNotifications.Observe(client, lifecycle)
+		app.subSessionReports.Observe(client, lifecycle)
+	}
 	app.rpcClients = agent.NewRegistry(func(sessionPath string) (agent.Client, error) {
 		// Pi exits at once when a session's folder is gone, so such a session stays read-only.
 		if app.sessionFolderMissing(sessionPath) {
@@ -270,7 +277,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 			return nil, err
 		}
 		cwd, _ := app.pendingSessions.CWD(sessionPath)
-		return adapter.Start(sessionPath, agent.StartOptions{CWD: cwd, Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
+		return adapter.Start(sessionPath, agent.StartOptions{CWD: cwd, Env: variables, Diagnostics: diagnostics, Observe: observe})
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
 	app.newRPCClient = func(cwd, userID, forkFrom, agentName string) (agent.Client, error) {
@@ -278,7 +285,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		if err != nil {
 			return nil, err
 		}
-		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Agent: agentName, Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
+		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Agent: agentName, Env: variables, Diagnostics: diagnostics, Observe: observe})
 	}
 	if app.guard, err = adapter.Guard(app.rpcClients); err != nil {
 		return nil, err
@@ -356,7 +363,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	socket.HandleFunc("POST /sudo/askpass", app.sudoAskpass)
 	socket.Handle("/", commands)
 	gateway.local = app.limitRequestBody(socket)
-	gateway.commands = commands
+	app.commandRoutes = commands
 	return gateway, nil
 }
 

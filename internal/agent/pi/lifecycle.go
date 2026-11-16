@@ -25,12 +25,19 @@ func Lifecycle(event map[string]any) (agent.Lifecycle, bool) {
 		messages, _ := event["messages"].([]any)
 		for index := len(messages) - 1; index >= 0; index-- {
 			if message, _ := messages[index].(map[string]any); message["role"] == "assistant" {
-				return agent.Lifecycle{Step: agent.RunEnded, Reply: reply(nil, message)}, true
+				ended := agent.Lifecycle{Step: agent.RunEnded, Reply: reply(nil, message)}
+				if message["stopReason"] == "error" {
+					ended.Error, _ = message["errorMessage"].(string)
+					if ended.Error == "" {
+						ended.Error = "unknown error"
+					}
+				}
+				return ended, true
 			}
 		}
 		return agent.Lifecycle{Step: agent.RunEnded}, true
 	case "agent_settled":
-		return agent.Lifecycle{Step: agent.RunSettled}, true
+		return agent.Lifecycle{Step: agent.RunSettled, Aborted: event["aborted"] == true}, true
 	}
 	return agent.Lifecycle{}, false
 }

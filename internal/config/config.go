@@ -47,6 +47,7 @@ type Config struct {
 	PermittedHosts            []string
 	ResourceMonitoringEnabled bool
 	RPCDiagnosticsEnabled     bool
+	SkillEnabled              bool
 	RPCIdleTimeout            time.Duration
 	RPCIdleSweep              time.Duration
 	PiCommand                 []string
@@ -134,6 +135,10 @@ func Load(environ []string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	skillEnabled, err := boolean(values, "GRIPI_SKILL", true)
+	if err != nil {
+		return Config{}, err
+	}
 	if autoApprove {
 		piCommand = append(piCommand, "--approve")
 	}
@@ -210,6 +215,7 @@ func Load(environ []string) (Config, error) {
 		PermittedHosts:            splitCommaSeparated(values["GRIPI_PERMITTED_HOSTS"]),
 		ResourceMonitoringEnabled: resourceMonitoringEnabled,
 		RPCDiagnosticsEnabled:     rpcDiagnosticsEnabled,
+		SkillEnabled:              skillEnabled,
 		RPCIdleTimeout:            time.Duration(idleTimeout) * time.Second,
 		RPCIdleSweep:              idleSweep,
 		PiCommand:                 piCommand,

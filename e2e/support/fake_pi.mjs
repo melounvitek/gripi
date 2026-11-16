@@ -652,7 +652,7 @@ function acceptAbort(command) {
   pendingExtensionRequest = null;
   emit({ type: "agent_end", messages: [], willRetry: false });
   persistDeferredBashMessages();
-  emit({ type: "agent_settled" });
+  emit({ type: "agent_settled", aborted: true });
   respond(command, true);
 }
 

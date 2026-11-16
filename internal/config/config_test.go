@@ -288,6 +288,7 @@ func TestLoadAppliesEveryBooleanSettingAndDefault(t *testing.T) {
 		{"GRIPI_TRUST_PROXY_HEADERS", false, func(cfg config.Config) bool { return cfg.TrustProxyHeaders }},
 		{"GRIPI_RESOURCE_MONITORING", false, func(cfg config.Config) bool { return cfg.ResourceMonitoringEnabled }},
 		{"GRIPI_RPC_DIAGNOSTICS", false, func(cfg config.Config) bool { return cfg.RPCDiagnosticsEnabled }},
+		{"GRIPI_SKILL", true, func(cfg config.Config) bool { return cfg.SkillEnabled }},
 	}
 	for _, test := range tests {
 		t.Run(test.key, func(t *testing.T) {
@@ -331,6 +332,7 @@ func TestLoadRejectsMalformedBooleanValues(t *testing.T) {
 		"GRIPI_TRUST_PROXY_HEADERS",
 		"GRIPI_RESOURCE_MONITORING",
 		"GRIPI_RPC_DIAGNOSTICS",
+		"GRIPI_SKILL",
 	} {
 		t.Run(key, func(t *testing.T) {
 			if _, err := config.Load(append(base, key+"=sometimes")); err == nil || !strings.Contains(err.Error(), key) {
