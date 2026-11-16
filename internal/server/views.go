@@ -94,6 +94,7 @@ type pageView struct {
 	SearchQuery               string
 	SelectedTag               string
 	SessionTags               map[string][]string
+	SessionParents            map[string]string
 	TagColors                 map[string]string
 	Unread                    map[string]bool
 	ExternalFollow            map[string]bool
@@ -300,6 +301,21 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.SessionTags[session.Path] = assignments[session.Path]
 		for _, name := range assignments[session.Path] {
 			view.TagColors[name] = colors[name]
+		}
+	}
+	links, err := app.gatewayState.SessionParents()
+	if err != nil {
+		return nil, err
+	}
+	listed := make(map[string]bool, len(all))
+	for _, session := range all {
+		listed[session.Path] = true
+	}
+	view.SessionParents = make(map[string]string)
+	for path, parent := range links {
+		// Links nest one level deep, so a session linked under itself or in a loop stays at the top.
+		if listed[path] && listed[parent] && !listed[links[parent]] {
+			view.SessionParents[path] = parent
 		}
 	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))

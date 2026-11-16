@@ -34,6 +34,7 @@ type LocalSession struct {
 	Unread    bool      `json:"unread"`
 	Pinned    bool      `json:"pinned"`
 	Tags      []string  `json:"tags"`
+	Parent    string    `json:"parent,omitempty"`
 	UpdatedAt Timestamp `json:"updated_at"`
 	// ActivityAt is when the session file last changed, which tool calls do too, and never before UpdatedAt.
 	ActivityAt Timestamp `json:"activity_at"`
@@ -128,6 +129,7 @@ func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sessions/tags", app.sessionTags)
 	mux.HandleFunc("POST /sessions/delete", app.deleteSession)
 	mux.HandleFunc("POST /sessions/claim", app.localClaim)
+	mux.HandleFunc("POST /sessions/parent", app.linkSession)
 	mux.HandleFunc("GET /tags", app.tags)
 	mux.HandleFunc("POST /sudo", app.sudo)
 	mux.HandleFunc("POST /workers/move", app.moveToWorker)
@@ -181,6 +183,35 @@ func (app *application) localClaim(response http.ResponseWriter, request *http.R
 	writeJSON(response, map[string]string{"session": session.Path})
 }
 
+// linkSession links a session under a parent, as gripi link does for the workers that a conversation starts.
+func (app *application) linkSession(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	parent, ok := app.requireOwnedSession(response, request, request.FormValue("parent"))
+	if !ok {
+		return
+	}
+	if parent, ok = app.gatewayStateSessionPath(parent); !ok {
+		http.NotFound(response, request)
+		return
+	}
+	path, unlock, ok := app.lockGatewayStateSession(response, request, request.FormValue("session"))
+	if !ok {
+		return
+	}
+	defer unlock()
+	if path == parent {
+		writeText(response, http.StatusBadRequest, "a session cannot be its own parent")
+		return
+	}
+	if err := app.gatewayState.SetSessionParent(path, parent); err != nil {
+		writeInternalError(response, "link a session under a parent", err)
+		return
+	}
+	writeJSON(response, map[string]string{"parent": parent})
+}
+
 func (app *application) localSessions(response http.ResponseWriter, request *http.Request) {
 	if !acquireRequestSlot(response, request, app.heavyRequests) {
 		return
@@ -212,7 +243,7 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 		result = append(result, LocalSession{
 			ID: session.ID, Path: session.Path, Name: session.DisplayName, CWD: session.CWD,
 			State: app.localSessionState(session.Path), Unread: view.Unread[session.Path], Pinned: view.Pinned[session.Path],
-			Tags: tags, UpdatedAt: Timestamp{session.ConversationActivityAt}, ActivityAt: Timestamp{activity}, LastReply: session.LatestAssistantResponsePreview,
+			Tags: tags, Parent: view.SessionParents[session.Path], UpdatedAt: Timestamp{session.ConversationActivityAt}, ActivityAt: Timestamp{activity}, LastReply: session.LatestAssistantResponsePreview,
 			Agent: session.Agent,
 		})
 	}

@@ -126,6 +126,57 @@ func renameSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) in
 	return printSession(stdout, stderr, "rename", session, *asJSON)
 }
 
+const linkHelp = `Usage:
+  gripi link <session> <parent> [--json]
+
+Links a session under a parent, such as a worker under the conversation that
+started it, then prints the session. The browser's sidebar shows the session
+below its parent while Pi CLI runs it; once Pi CLI is done, only when the
+sidebar shows Pi CLI sessions. Linking a linked session again moves it under
+the new parent.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+  parent   The session to show it under, named the same way
+
+Flags:
+  --json  Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  gripi link 7c3e91d0 "$PI_SESSION_FILE"
+
+Exit codes:
+` + sessionExitCodes
+
+func linkSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("link", flag.ContinueOnError)
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "link", err.Error())
+	}
+	if len(positional) != 2 || positional[0] == "" || positional[1] == "" {
+		return usageError(stderr, "link", "takes a session and its parent")
+	}
+	client, session, err := connect(positional[0])
+	if err != nil {
+		return failure(stderr, "link", err)
+	}
+	parent, err := client.session(positional[1])
+	if err != nil {
+		return failure(stderr, "link", err)
+	}
+	var answer struct {
+		Parent string `json:"parent"`
+	}
+	if err := client.post("/sessions/parent", url.Values{"session": {session.Path}, "parent": {parent.Path}}, &answer); err != nil {
+		return failure(stderr, "link", err)
+	}
+	session.Parent = answer.Parent
+	return printSession(stdout, stderr, "link", session, *asJSON)
+}
+
 const claimHelp = `Usage:
   gripi claim <session> [--json]
 

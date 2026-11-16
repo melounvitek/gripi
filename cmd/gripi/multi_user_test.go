@@ -127,7 +127,7 @@ func TestClaimOnASingleUserGatewayOnlyFindsTheSession(t *testing.T) {
 }
 
 func TestTheNewLocalRoutesKeepToTheUsersOwnSessions(t *testing.T) {
-	_, beta := multiUserGateway(t)
+	alpha, beta := multiUserGateway(t)
 	appendSessionRecords(t, beta, sessionMessage("user-2", "assistant-1", "1", map[string]any{"role": "user", "content": []any{
 		textPart("Bob's secret plan"), map[string]any{"type": "image", "mimeType": "image/png", "data": "aW1hZ2U="},
 	}}))
@@ -168,5 +168,10 @@ func TestTheNewLocalRoutesKeepToTheUsersOwnSessions(t *testing.T) {
 	}
 	if after, err := os.ReadFile(beta); err != nil || string(after) != string(before) {
 		t.Fatalf("Bob's session changed (%v)", err)
+	}
+	for _, link := range []url.Values{{"session": {beta}, "parent": {alpha}}, {"session": {alpha}, "parent": {beta}}} {
+		if status, body := request(http.MethodPost, "/sessions/parent", link); status != http.StatusNotFound {
+			t.Fatalf("Alice's link %v = %d: %s", link, status, body)
+		}
 	}
 }
