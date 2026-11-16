@@ -60,10 +60,10 @@ type SearchMatch struct {
 	Timestamp time.Time
 }
 
-// CLIDetector is a guard that can tell which processes of the agent's own CLI name a session, which taking it over
+// CLIDetector is a guard that can tell which processes of the agent's own CLI name each session, which taking one over
 // would then leave to two writers.
 type CLIDetector interface {
-	CLIProcesses(key string) ([]int, error)
+	CLIProcesses(keys ...string) (map[string][]int, error)
 }
 
 type Cloner interface {

@@ -316,13 +316,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	view.SessionParents = make(map[string]string)
 	for path, parent := range links {
-		// Links nest one level deep, so a session linked under itself or in a loop stays at the top.
-		if listed[path] && listed[parent] && !listed[links[parent]] {
+		if listed[path] && listed[parent] {
 			view.SessionParents[path] = parent
 		}
 	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
-	view.prepareSidebar(app.cliRunning)
+	view.prepareSidebar(app.cliProcesses)
 	renderedSessions := make([]*agent.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
 	renderedSessions = append(renderedSessions, view.PinnedSessions...)
 	renderedSessions = append(renderedSessions, view.SidebarSessions...)
@@ -558,17 +557,25 @@ func (app *application) rememberSessionHashes(all []*agent.Session) {
 	app.sessionHashesMu.Unlock()
 }
 
-// cliRunning tells whether a process of Pi CLI names the session, as a takeover checks.
-func (app *application) cliRunning(path string) bool {
+// cliProcesses finds the processes of Pi CLI that name each session, as a takeover checks. A session that cannot be
+// checked has none.
+func (app *application) cliProcesses(paths []string) map[string][]int {
 	detector, detects := app.guard.(agent.CLIDetector)
-	if !detects {
-		return false
+	if !detects || len(paths) == 0 {
+		return nil
 	}
-	processes, err := detector.CLIProcesses(path)
-	return err == nil && len(processes) > 0
+	found, _ := detector.CLIProcesses(paths...)
+	return found
 }
 
-func (view *pageView) prepareSidebar(cliRunning func(path string) bool) {
+func (view *pageView) prepareSidebar(cliProcesses func(paths []string) map[string][]int) {
+	// Links nest one level deep, so a session linked under itself or in a loop stays at the top.
+	nestedUnder := make(map[string]string)
+	for path, parent := range view.SessionParents {
+		if view.SessionParents[parent] == "" {
+			nestedUnder[path] = parent
+		}
+	}
 	for _, session := range view.Sessions {
 		if view.Unread[session.Path] && (view.Selected == nil || view.Selected.Path != session.Path) {
 			view.UnreadCount++
@@ -585,7 +592,7 @@ func (view *pageView) prepareSidebar(cliRunning func(path string) bool) {
 	query := strings.ToLower(view.SearchQuery)
 	for _, session := range view.Sessions {
 		// A linked session shows under its parent instead.
-		if view.Pinned[session.Path] || view.SessionParents[session.Path] != "" {
+		if view.Pinned[session.Path] || nestedUnder[session.Path] != "" {
 			continue
 		}
 		if !view.ExternalFollow[session.Path] || view.CLISessionsShown {
@@ -628,14 +635,22 @@ func (view *pageView) prepareSidebar(cliRunning func(path string) bool) {
 	for _, session := range append(slices.Clone(view.PinnedSessions), view.SidebarSessions...) {
 		parents[session.Path] = true
 	}
-	view.SidebarWorkers = make(map[string][]*agent.Session)
+	var workers []*agent.Session
+	var external []string
 	for _, session := range view.Sessions {
-		parent := view.SessionParents[session.Path]
-		if !parents[parent] || view.Pinned[session.Path] {
-			continue
+		if parents[nestedUnder[session.Path]] && !view.Pinned[session.Path] {
+			workers = append(workers, session)
+			if view.ExternalFollow[session.Path] {
+				external = append(external, session.Path)
+			}
 		}
+	}
+	running := cliProcesses(external)
+	view.SidebarWorkers = make(map[string][]*agent.Session)
+	for _, session := range workers {
+		parent := nestedUnder[session.Path]
 		if view.ExternalFollow[session.Path] {
-			if cliRunning(session.Path) {
+			if len(running[session.Path]) > 0 {
 				view.SidebarActivity[session.Path] = sidebarActivity{Busy: true}
 			} else if view.SelectedTag == "" {
 				// Like other Pi CLI sessions, a worker that Pi CLI is done with shows only on request.
@@ -649,7 +664,7 @@ func (view *pageView) prepareSidebar(cliRunning func(path string) bool) {
 	}
 	if view.Selected != nil && !view.Pinned[view.Selected.Path] {
 		selected := func(session *agent.Session) bool { return session.Path == view.Selected.Path }
-		if !slices.ContainsFunc(view.SidebarSessions, selected) && !slices.ContainsFunc(view.SidebarWorkers[view.SessionParents[view.Selected.Path]], selected) {
+		if !slices.ContainsFunc(view.SidebarSessions, selected) && !slices.ContainsFunc(view.SidebarWorkers[nestedUnder[view.Selected.Path]], selected) {
 			view.SeparateCurrent = view.Selected
 		}
 	}

@@ -413,12 +413,12 @@ func (app *application) localTakeOver(response http.ResponseWriter, request *htt
 	path := request.FormValue("session")
 	detector, detects := app.guard.(agent.CLIDetector)
 	if detects && request.FormValue("force") != "true" && app.validOwnedSessionPath(request, path) {
-		processes, err := detector.CLIProcesses(path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		found, err := detector.CLIProcesses(path)
+		if err != nil {
 			writeInternalError(response, "look for Pi CLI before a takeover", err)
 			return
 		}
-		if len(processes) > 0 {
+		if processes := found[path]; len(processes) > 0 {
 			ids := make([]string, len(processes))
 			for index, process := range processes {
 				ids[index] = strconv.Itoa(process)

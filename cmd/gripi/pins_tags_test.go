@@ -98,7 +98,7 @@ func TestRenameExplainsWhatItCannotRename(t *testing.T) {
 }
 
 func TestLinkPutsASessionUnderAnother(t *testing.T) {
-	_, beta := fakePiGateway(t)
+	alpha, beta := fakePiGateway(t)
 
 	code, stdout, stderr := runCLI("link", "0a1-a", "0a1-b", "--json")
 	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID != "0a1-alpha" || session.Parent != beta {
@@ -109,6 +109,13 @@ func TestLinkPutsASessionUnderAnother(t *testing.T) {
 	}
 	if parent := listedSession(t, "0a1-beta").Parent; parent != "" {
 		t.Fatalf("the parent got a parent: %q", parent)
+	}
+	// The sidebar nests neither of a loop, but the listing keeps both links.
+	if code, _, stderr := runCLI("link", "0a1-b", "0a1-a"); code != 0 || stderr != "" {
+		t.Fatalf("gripi link back = %d, stderr %q", code, stderr)
+	}
+	if alphaParent, betaParent := listedSession(t, "0a1-alpha").Parent, listedSession(t, "0a1-beta").Parent; alphaParent != beta || betaParent != alpha {
+		t.Fatalf("listed parents = %q, %q", alphaParent, betaParent)
 	}
 }
 

@@ -12,14 +12,22 @@ import (
 	"strings"
 )
 
-// CLIProcesses finds the processes, other than the gateway's own, whose arguments name the session as Pi CLI takes
-// one: --session with its path or the start of its ID, or --session-id with its ID. Pi CLI keeps no session file open
-// between its writes, so its arguments are all that tell. It misses Pi CLI started with --continue or --resume, and
-// processes that /proc doesn't show, such as other users'.
-func (synchronizer *Synchronizer) CLIProcesses(path string) ([]int, error) {
-	id, err := sessionID(path)
-	if err != nil {
-		return nil, err
+// CLIProcesses finds, for each session, the processes other than the gateway's own whose arguments name it as Pi CLI
+// takes one: --session with its path or the start of its ID, or --session-id with its ID. Pi CLI keeps no session
+// file open between its writes, so its arguments are all that tell. It misses Pi CLI started with --continue or
+// --resume, and processes that /proc doesn't show, such as other users'. It reads /proc once for all the sessions.
+func (synchronizer *Synchronizer) CLIProcesses(paths ...string) (map[string][]int, error) {
+	ids := make(map[string]string, len(paths))
+	for _, path := range paths {
+		id, err := sessionID(path)
+		// Without a file, a session has no ID for Pi CLI to name.
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		ids[path] = id
 	}
 	processes, err := os.ReadDir("/proc")
 	// Without /proc, as on macOS, nothing can tell.
@@ -29,7 +37,7 @@ func (synchronizer *Synchronizer) CLIProcesses(path string) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	var found []int
+	found := make(map[string][]int)
 	for _, process := range processes {
 		pid, err := strconv.Atoi(process.Name())
 		if err != nil {
@@ -37,10 +45,15 @@ func (synchronizer *Synchronizer) CLIProcesses(path string) ([]int, error) {
 		}
 		// A process that ended meanwhile or that /proc doesn't show has no arguments to read.
 		commandLine, err := os.ReadFile(filepath.Join("/proc", process.Name(), "cmdline"))
-		if err != nil || !namesSession(strings.Split(string(commandLine), "\x00"), pid, path, id) || descendsFrom(pid, os.Getpid()) {
+		if err != nil {
 			continue
 		}
-		found = append(found, pid)
+		arguments := strings.Split(string(commandLine), "\x00")
+		for path, id := range ids {
+			if namesSession(arguments, pid, path, id) && !descendsFrom(pid, os.Getpid()) {
+				found[path] = append(found[path], pid)
+			}
+		}
 	}
 	return found, nil
 }

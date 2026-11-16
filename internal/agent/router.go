@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"sort"
 )
 
@@ -288,12 +289,27 @@ func (guard routerGuard) TakeOver(ctx context.Context, key string, beforeManaged
 }
 
 // Message explains a blocked result, which only the first agent's guard reports.
-// CLIProcesses finds none for an agent whose guard cannot tell.
-func (guard routerGuard) CLIProcesses(key string) ([]int, error) {
-	if detector, ok := guard.of(key).(CLIDetector); ok {
-		return detector.CLIProcesses(key)
+// CLIProcesses asks each agent's guard about its own sessions at once, and finds none for an agent whose guard cannot
+// tell.
+func (guard routerGuard) CLIProcesses(keys ...string) (map[string][]int, error) {
+	byAgent := make(map[int][]string)
+	for _, key := range keys {
+		index := max(guard.router.owner(key), 0)
+		byAgent[index] = append(byAgent[index], key)
 	}
-	return nil, nil
+	found := make(map[string][]int)
+	for index, keys := range byAgent {
+		detector, ok := guard.router.guards[index].(CLIDetector)
+		if !ok {
+			continue
+		}
+		processes, err := detector.CLIProcesses(keys...)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(found, processes)
+	}
+	return found, nil
 }
 
 func (guard routerGuard) Message(result SyncResult) string {
