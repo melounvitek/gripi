@@ -2551,14 +2551,9 @@ async function submitAbort(event) {
   }
 }
 
-// Puts messages that Pi did not run back in the composer, before the draft, with their images.
+// Puts messages that Pi did not run back in the composer, before the draft, with their images. The text waits for the
+// images, so that it cannot be sent without them.
 async function handBackToComposer(text, images = []) {
-  if (!promptTextarea) return;
-  if (text) {
-    promptTextarea.value = [text, promptTextarea.value].filter((part) => part.trim()).join("\n\n");
-    promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-  if (images.length === 0) return;
   const session = currentSessionPath();
   const files = await Promise.all(images.map(async (image) => {
     const response = await fetch(image.src).catch(() => null);
@@ -2566,7 +2561,12 @@ async function handBackToComposer(text, images = []) {
     // The gateway's file name means nothing to the user, so the tray numbers it instead.
     return new File([await response.blob()], "", { type: image.mimeType });
   }));
-  if (session === currentSessionPath()) addImageFiles(files.filter(Boolean), { restore: true });
+  if (!promptTextarea || session !== currentSessionPath()) return;
+  if (text) {
+    promptTextarea.value = [text, promptTextarea.value].filter((part) => part.trim()).join("\n\n");
+    promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  addImageFiles(files.filter(Boolean), { restore: true });
 }
 
 function confirmOrStopRunningTask(event) {

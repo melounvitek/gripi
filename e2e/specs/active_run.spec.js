@@ -222,8 +222,17 @@ test("a message that Pi refuses after a compaction comes back to the composer wi
   await expect(page.locator(".attachment-tray img")).toHaveCount(0);
   // As with Stop, the message comes back before what was typed meanwhile.
   await composer.fill("Keep this draft");
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  await page.route("**/attachments/**", async (route) => {
+    await released;
+    await route.continue();
+  });
 
   await expect(liveMessage(page, "error", `Failed to send queued message: ${refusal}`)).toBeVisible();
+  // The text waits for its image, so that it cannot be sent without it.
+  await expect(composer).toHaveValue("Keep this draft");
+  release();
   await expect(composer).toHaveValue(`${prompts.refused}\n\nKeep this draft`);
   await expect(page.locator(".pending-message")).toHaveCount(0);
   const restored = page.locator(".attachment-tray img");
