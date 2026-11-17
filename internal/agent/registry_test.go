@@ -576,21 +576,52 @@ func TestRegistryClosesSettledClientWithOnlyObservers(t *testing.T) {
 	}
 }
 
-func TestCloseClientIfStartedBeforeKeepsAClientDeferringCompactionPrompts(t *testing.T) {
+func TestIdleChecksKeepAClientDeferringCompactionPrompts(t *testing.T) {
 	now := time.Unix(1_000, 0)
+	checks := map[string]func(*Registry) (bool, error){
+		"close if idle":            func(registry *Registry) (bool, error) { return registry.CloseClientIfIdle("/session") },
+		"close without operations": func(registry *Registry) (bool, error) { return registry.CloseClientWithoutOperations("/session") },
+		"close if expired": func(registry *Registry) (bool, error) {
+			return registry.CloseClientIfExpired("/session", time.Minute, now.Add(time.Hour), nil)
+		},
+		"close idle clients": func(registry *Registry) (bool, error) {
+			closed, err := registry.CloseIdleClients(time.Minute, now.Add(time.Hour), nil, nil)
+			return len(closed) > 0, err
+		},
+		"close if started before": func(registry *Registry) (bool, error) { return registry.CloseClientIfStartedBefore("/session", now) },
+		"drain":                   func(registry *Registry) (bool, error) { return registry.DrainIfIdle(), nil },
+	}
+	for name, check := range checks {
+		t.Run(name, func(t *testing.T) {
+			client := newRegistryClient()
+			client.deferring = true
+			registry := NewRegistry(nil, func() time.Time { return now })
+			if err := registry.Register("/session", client); err != nil {
+				t.Fatal(err)
+			}
+
+			if done, err := check(registry); err != nil || done || client.closed() {
+				t.Fatalf("deferring client: done=%v closed=%v err=%v", done, client.closed(), err)
+			}
+			client.deferring = false
+			if done, err := check(registry); err != nil || !done {
+				t.Fatalf("settled client: done=%v err=%v", done, err)
+			}
+		})
+	}
+}
+
+func TestIdleChecksKeepAClientThatStartsRunningAsItsDeferredPromptsGo(t *testing.T) {
 	client := newRegistryClient()
 	client.deferring = true
-	registry := NewRegistry(nil, func() time.Time { return now })
+	client.runsOnBusy = true
+	registry := NewRegistry(nil, nil)
 	if err := registry.Register("/session", client); err != nil {
 		t.Fatal(err)
 	}
 
-	if closed, err := registry.CloseClientIfStartedBefore("/session", now); err != nil || closed || client.closed() {
-		t.Fatalf("deferring client: retired=%v closed=%v err=%v", closed, client.closed(), err)
-	}
-	client.deferring = false
-	if closed, err := registry.CloseClientIfStartedBefore("/session", now); err != nil || !closed || !client.closed() {
-		t.Fatalf("settled client: retired=%v closed=%v err=%v", closed, client.closed(), err)
+	if closed, err := registry.CloseClientIfIdle("/session"); err != nil || closed || client.closed() {
+		t.Fatalf("retired=%v closed=%v err=%v", closed, client.closed(), err)
 	}
 }
 
@@ -598,6 +629,7 @@ type registryClient struct {
 	mu           sync.Mutex
 	isBusy       bool
 	deferring    bool
+	runsOnBusy   bool // Once Busy answers, the client starts running and stops deferring.
 	settled      *time.Time
 	isClosed     bool
 	closeErr     error
@@ -634,7 +666,11 @@ func (client *registryClient) setSettled(value *time.Time) {
 func (client *registryClient) Busy() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	return client.isBusy
+	busy := client.isBusy
+	if client.runsOnBusy {
+		client.isBusy, client.deferring = true, false
+	}
+	return busy
 }
 func (client *registryClient) BusySince() *time.Time { return nil }
 func (client *registryClient) SettledAt() *time.Time {
