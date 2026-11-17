@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
@@ -200,6 +202,122 @@ func TestDeletePendingSessionRejectsPrevalidatedPrompt(t *testing.T) {
 		t.Fatalf("deleted session resurrected: response=%d %s, factory=%d", prompt.Code, prompt.Body.String(), fixture.created.Load())
 	}
 	fixture.replacement.assertCalls(t, "", 0)
+}
+
+func TestADeletionThatWaitsOnPiHoldsUpNoOtherSession(t *testing.T) {
+	root := t.TempDir()
+	deleting, competing, other := filepath.Join(root, "deleting.jsonl"), filepath.Join(root, "competing.jsonl"), filepath.Join(root, "other.jsonl")
+	registry := agent.NewRegistry(nil, nil)
+	pending := agent.NewPendingSessionRegistry(nil)
+	states := 0
+	asked, answer := make(chan struct{}), make(chan struct{})
+	client := &lifecycleStateClient{remapClient: &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": deleting}}}}
+	// The first state is the request's own; the second is the deletion's check, which Pi takes long to answer.
+	client.onState = func() {
+		if states++; states == 2 {
+			close(asked)
+			<-answer
+		}
+	}
+	for path, client := range map[string]agent.Client{deleting: client, competing: &remapClient{}, other: &remapClient{}} {
+		if err := registry.Register(path, client); err != nil {
+			t.Fatal(err)
+		}
+		pending.Remember(path, root, "")
+	}
+	app := &application{
+		config:       config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")},
+		sessionStore: NewPiStore(root, root), rpcClients: registry, pendingSessions: pending, guard: sessionfile.NewSynchronizer(registry),
+		gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), NewPiStore(root, "")),
+	}
+	requestDeletion := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/sessions/delete", strings.NewReader(url.Values{"session": {deleting}}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		app.deleteSession(response, request)
+		return response
+	}
+	within := func(name string, call func() error) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- call() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s waited for the deletion", name)
+		}
+	}
+	deleted := make(chan *httptest.ResponseRecorder, 1)
+	go func() { deleted <- requestDeletion() }()
+	<-asked
+	defer close(answer)
+
+	remapped := make(chan error, 1)
+	go func() {
+		remapped <- app.movePendingRPCClient(httptest.NewRequest(http.MethodGet, "/", nil), competing, deleting)
+	}()
+	within("a second deletion of the session", func() error {
+		if response := requestDeletion(); response.Code != http.StatusConflict {
+			return fmt.Errorf("answered %d %s", response.Code, response.Body.String())
+		}
+		return nil
+	})
+	within("a remap of another session", func() error {
+		return app.movePendingRPCClient(httptest.NewRequest(http.MethodGet, "/", nil), other, filepath.Join(root, "saved.jsonl"))
+	})
+
+	answer <- struct{}{}
+	if response := <-deleted; response.Code != http.StatusOK {
+		t.Fatalf("deletion = %d %s", response.Code, response.Body.String())
+	}
+	if err := <-remapped; !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remap to the deleted session = %v", err)
+	}
+}
+
+func TestABranchDoesNotMoveFromOrToADeletedSession(t *testing.T) {
+	for _, deletion := range []string{"source", "destination", "finished"} {
+		t.Run(deletion, func(t *testing.T) {
+			root := t.TempDir()
+			child := writeNotificationSession(t, root, "child")
+			parent := filepath.Join(root, "pending.jsonl")
+			app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
+			app.config.AttachmentsRoot = filepath.Join(root, "attachments")
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
+			client := &projectCreationClient{remapClient: &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": child}}}}
+			if err := app.rpcClients.Register(parent, client); err != nil {
+				t.Fatal(err)
+			}
+			app.pendingSessions.Remember(parent, root, "")
+			if deletion == "finished" {
+				// A deletion of the source that finished while the move had its client, so it didn't close it.
+				if err := app.gatewayState.Forget(parent); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				// As a deletion of the session does until it has finished.
+				_, release, err := app.promptAdmissions.navigate(func() (string, error) {
+					return map[string]string{"source": parent, "destination": child}[deletion], nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			}
+
+			response := httptest.NewRecorder()
+			app.replaceSessionFromAction(response, tagLifecycleRequest("/sessions/clone"), parent, "clone", "")
+			if response.Code == http.StatusOK || app.rpcClients.Registered(child) {
+				t.Fatalf("clone = %d %s; client moved to the clone: %v", response.Code, response.Body.String(), app.rpcClients.Registered(child))
+			}
+			if remapped, ok := app.pendingSessions.Resolve(parent); ok {
+				t.Fatalf("pending session remapped to %s", remapped)
+			}
+		})
+	}
 }
 
 func newPendingDeleteFixture(t *testing.T) *idleRetirementFixture {

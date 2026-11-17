@@ -561,6 +561,134 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 	}
 }
 
+func TestDeletingASessionDoesNotWaitForACloneThatWaitsOnADialog(t *testing.T) {
+	handler, sessionPath, waitForDialog := startConfirmCloneGateway(t)
+	created := serveAction(handler, formActionRequest("/sessions/new", map[string]string{"session": sessionPath}, true))
+	if created.Code != http.StatusOK {
+		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
+	}
+	var newSession struct{ Session string }
+	decodeActionJSON(t, created, &newSession)
+	go serveAction(handler, formActionRequest("/sessions/clone", map[string]string{"session": sessionPath}, true))
+	waitForDialog()
+
+	deleted := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		deleted <- serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": newSession.Session}, true))
+	}()
+	select {
+	case response := <-deleted:
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"deleted":true`) {
+			t.Fatalf("delete = %d %s", response.Code, response.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("deleting another session waited for the clone")
+	}
+}
+
+func TestAnsweringADialogLetsTheCloneThatWaitsOnItFinish(t *testing.T) {
+	handler, sessionPath, waitForDialog := startConfirmCloneGateway(t)
+	cloned := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		cloned <- serveAction(handler, formActionRequest("/sessions/clone", map[string]string{"session": sessionPath}, true))
+	}()
+	waitForDialog()
+
+	answered := serveAction(handler, formActionRequest("/extension_ui_response", map[string]string{"session": sessionPath, "id": "e2e-confirm-clone", "confirmed": "true"}, true))
+	if answered.Code != http.StatusOK {
+		t.Fatalf("answer = %d %s", answered.Code, answered.Body.String())
+	}
+	select {
+	case response := <-cloned:
+		var clone struct{ Session string }
+		decodeActionJSON(t, response, &clone)
+		if response.Code != http.StatusOK || clone.Session == "" || clone.Session == sessionPath {
+			t.Fatalf("clone = %d %+v", response.Code, clone)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the clone did not finish after the answer")
+	}
+}
+
+func TestLeavingACloneThatWaitsOnADialogFreesTheSession(t *testing.T) {
+	handler, sessionPath, waitForDialog := startConfirmCloneGateway(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	left := make(chan struct{})
+	go func() {
+		serveAction(handler, formActionRequest("/sessions/clone", map[string]string{"session": sessionPath}, true).WithContext(ctx))
+		close(left)
+	}()
+	waitForDialog()
+
+	cancel()
+	select {
+	case <-left:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the clone outlived its request")
+	}
+	prompted := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Still there?"}, true))
+	if prompted.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", prompted.Code, prompted.Body.String())
+	}
+}
+
+// startConfirmCloneGateway serves a saved session through the fake Pi, which asks before it clones a session, as an
+// extension can. waitForDialog returns once the gateway has the question.
+func startConfirmCloneGateway(t *testing.T) (handler http.Handler, sessionPath string, waitForDialog func()) {
+	t.Helper()
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	sessionsRoot := filepath.Join(home, ".pi", "agent", "sessions")
+	project := filepath.Join(root, "project")
+	for _, directory := range []string{sessionsRoot, project} {
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionPath = filepath.Join(sessionsRoot, "fixture.jsonl")
+	writeActionSession(t, sessionPath, project)
+	_, file, _, _ := runtime.Caller(0)
+	fakeLog := filepath.Join(root, "fake-pi.log")
+	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
+	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", fakeLog)
+	t.Setenv("GRIPI_E2E_CONFIRM_CLONE", "1")
+	cfg := config.Config{
+		Address: "127.0.0.1:4567", Environment: "test", Home: home,
+		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(home, ".pi", "gripi", "attachments"),
+		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
+		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
+		PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")}, RPCIdleTimeout: time.Hour,
+	}
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
+			_ = closer.Close(context.Background())
+		}
+	})
+	return handler, sessionPath, func() {
+		t.Helper()
+		// Polls for events only once the clone has the session, as one that checks the session file just when the
+		// clone starts makes the clone fail as busy.
+		dialogShown := func() bool {
+			log, _ := os.ReadFile(fakeLog)
+			if !strings.Contains(string(log), `"type":"clone"`) {
+				return false
+			}
+			response := serveAction(handler, getActionRequest("/events?session="+url.QueryEscape(sessionPath)))
+			return response.Code == http.StatusOK && strings.Contains(response.Body.String(), `"id":"e2e-confirm-clone"`)
+		}
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
+			if dialogShown() {
+				return
+			}
+		}
+		t.Fatal("fake Pi did not ask before the clone")
+	}
+}
+
 func waitForDeferredSidebar(t *testing.T, handler http.Handler) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

@@ -772,6 +772,13 @@ func (client *Client) request(ctx context.Context, command, id string, payload m
 		timer = timeoutTimer.C
 		defer timeoutTimer.Stop()
 	}
+	// A switch to another session returns once its caller leaves, as the caller then closes the client, which it does
+	// after any failed switch. Other commands wait for Pi's response, so that the client and its caller follow what Pi
+	// did.
+	var left <-chan struct{}
+	if command == "new_session" || command == "fork" || command == "clone" {
+		left = ctx.Done()
+	}
 	select {
 	case result := <-pending:
 		client.diagnostics.Log("response_received", map[string]any{"command": command, "rpc_id": id})
@@ -787,6 +794,10 @@ func (client *Client) request(ctx context.Context, command, id string, payload m
 		}
 		client.diagnostics.Log("command_timed_out", map[string]any{"command": command, "rpc_id": id, "stage": "response"})
 		return nil, &agent.RequestTimeoutError{Command: command, Accepted: true}
+	case <-left:
+		// storeResponse drops Pi's late response.
+		client.removePending(id)
+		return nil, ctx.Err()
 	case <-client.readerDone:
 		select {
 		case result := <-pending:

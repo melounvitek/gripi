@@ -1338,6 +1338,52 @@ func TestClientReconcilesAcceptedCommandAfterCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestClientLeavesASwitchWhoseCallerLeftAndDropsItsLateResponse(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	commands := json.NewDecoder(stdinReader)
+	ctx, cancel := context.WithCancel(context.Background())
+	left := make(chan error, 1)
+	go func() {
+		_, err := client.NewSession(ctx, "")
+		left <- err
+	}()
+	var abandoned map[string]any
+	if err := commands.Decode(&abandoned); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case err := <-left:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("left switch = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the switch outlived its caller")
+	}
+
+	state := make(chan map[string]any, 1)
+	go func() {
+		response, _ := client.GetState(context.Background())
+		state <- response
+	}()
+	var next map[string]any
+	if err := commands.Decode(&next); err != nil {
+		t.Fatal(err)
+	}
+	// A switch that Pi made after all closes the client, so this one was cancelled.
+	writeRecord(t, stdoutWriter, map[string]any{"id": abandoned["id"], "type": "response", "command": "new_session", "success": true, "data": map[string]any{"cancelled": true}})
+	writeRecord(t, stdoutWriter, map[string]any{"id": next["id"], "type": "response", "command": "get_state", "success": true, "data": map[string]any{"sessionFile": "/next.jsonl"}})
+	if response := <-state; response["command"] != "get_state" || response["data"].(map[string]any)["sessionFile"] != "/next.jsonl" {
+		t.Fatalf("next response = %#v", response)
+	}
+	if events := client.EventsAfter(0).Events; len(events) != 0 {
+		t.Fatalf("late response became an event: %#v", events)
+	}
+}
+
 func TestClientTimesOutBlockedPipeWritesWithoutLeakingRequest(t *testing.T) {
 	stdinReader, stdinWriter, err := os.Pipe()
 	if err != nil {

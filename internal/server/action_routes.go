@@ -849,18 +849,21 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 		return
 	}
 	app.pendingRemapMu.Lock()
-	defer app.pendingRemapMu.Unlock()
 	path, ok = app.resolveActionPendingPath(response, request, path)
 	if !ok {
+		app.pendingRemapMu.Unlock()
 		return
 	}
-	unlock := app.sessionMutationLocks.Lock(path)
-	defer unlock()
 	_, releaseDeletion, err := app.promptAdmissions.navigate(func() (string, error) { return path, nil })
+	// From here the lease keeps remaps and moves from and to the session away, so the others need not wait for Pi or
+	// the trash.
+	app.pendingRemapMu.Unlock()
 	if app.writeRPCError(response, err) {
 		return
 	}
 	defer releaseDeletion()
+	unlock := app.sessionMutationLocks.Lock(path)
+	defer unlock()
 	if !app.knownOrPendingSession(request, path) {
 		http.NotFound(response, request)
 		return
@@ -1382,7 +1385,8 @@ func (app *application) extensionUIResponse(response http.ResponseWriter, reques
 	if !ok {
 		return
 	}
-	err := app.rpcClients.WithExistingClient(request.Context(), path, true, func(client agent.Client) error {
+	// Without the operation lane, which the operation that waits on the dialog, such as a fork, holds.
+	err := app.rpcClients.WithObservingClient(request.Context(), path, true, func(client agent.Client) error {
 		responder, err := capability[agent.Responder](client)
 		if err != nil {
 			return err
@@ -1456,8 +1460,6 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 			return
 		}
 	}
-	app.pendingRemapMu.Lock()
-	defer app.pendingRemapMu.Unlock()
 	previous = resolved
 	cwd := app.currentSessionCWD(previous)
 	_, wasPending := app.pendingSessions.CWD(previous)
@@ -1465,6 +1467,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	if app.sessionStore.Exists(previous) {
 		mover = app.guard
 	}
+	unlockRemaps := func() {}
 	newPath, branch, err := agent.BranchSession(request.Context(), previous, cwd, mover, app.sessionStore, app.pendingSessions, func(client agent.Client) (agent.Branch, error) {
 		switch operation {
 		case "new":
@@ -1483,7 +1486,25 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 			return forker.Fork(request.Context(), entryID)
 		}
 	}, func(from, to string) (func() error, error) {
-		if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
+		// Held until the move commits or rolls back, but not while Pi branches, which can take minutes.
+		app.pendingRemapMu.Lock()
+		unlockRemaps = app.pendingRemapMu.Unlock
+		// As in a remap, the leases keep deletions of either session away meanwhile.
+		releaseSource, err := app.promptAdmissions.tryPrompt(from)
+		if err != nil {
+			return nil, err
+		}
+		releaseDestination, err := app.promptAdmissions.tryPrompt(to)
+		if err != nil {
+			releaseSource()
+			return nil, err
+		}
+		unlockRemaps = func() {
+			releaseDestination()
+			releaseSource()
+			app.pendingRemapMu.Unlock()
+		}
+		if app.gatewayState != nil && (app.gatewayState.SessionForgotten(from) || app.gatewayState.SessionForgotten(to)) {
 			return nil, os.ErrNotExist
 		}
 		if app.ownsSession != nil && !app.ownsSession(request, from) {
@@ -1546,6 +1567,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		}
 		return rollback, nil
 	})
+	unlockRemaps()
 	if refused := refusal(err); refused != nil {
 		app.writeRPCFailure(response, request, refused.Message, true)
 		return
