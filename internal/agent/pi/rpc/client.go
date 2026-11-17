@@ -467,12 +467,23 @@ func (client *Client) Prompt(ctx context.Context, message string, images []agent
 	if remaining <= 0 {
 		return nil, &agent.RequestTimeoutError{Command: "prompt"}
 	}
-	return client.request(ctx, "prompt", client.nextID("prompt"), payload, remaining, nil)
+	return softTimeout(client.request(ctx, "prompt", client.nextID("prompt"), payload, remaining, nil))
 }
 func (client *Client) PromptWithBehavior(ctx context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, error) {
 	payload := promptPayload(message, images)
 	payload["streamingBehavior"] = behavior
-	return client.request(ctx, "prompt", client.nextID("prompt"), payload, client.requestTimeout, nil)
+	return softTimeout(client.request(ctx, "prompt", client.nextID("prompt"), payload, client.requestTimeout, nil))
+}
+
+// softTimeout turns the timeout of a command that Pi took into a failed answer, which leaves Pi running. Pi answers a
+// prompt only once an extension's command or a compaction before it is over, and /compact, new, fork and clone once
+// they are done, which may wait on the user to answer a dialog.
+func softTimeout(response map[string]any, err error) (map[string]any, error) {
+	var timeout *agent.RequestTimeoutError
+	if errors.As(err, &timeout) && timeout.Accepted {
+		return map[string]any{"success": false, "error": err.Error()}, nil
+	}
+	return response, err
 }
 func (client *Client) Steer(ctx context.Context, message string, images []agent.PromptImage) (map[string]any, error) {
 	payload := map[string]any{"message": message}
@@ -586,7 +597,7 @@ func (client *Client) NewSession(ctx context.Context, parent string) (map[string
 	if parent != "" {
 		payload["parentSession"] = parent
 	}
-	response, err := client.request(ctx, "new_session", client.nextID("new_session"), payload, LongRequestTimeout, nil)
+	response, err := softTimeout(client.request(ctx, "new_session", client.nextID("new_session"), payload, LongRequestTimeout, nil))
 	client.resetReplacedSessionState(response, err)
 	return response, err
 }
@@ -598,7 +609,7 @@ func (client *Client) Compact(ctx context.Context, instructions string) (map[str
 	if instructions != "" {
 		payload["customInstructions"] = instructions
 	}
-	return client.request(ctx, "compact", client.nextID("compact"), payload, LongRequestTimeout, nil)
+	return softTimeout(client.request(ctx, "compact", client.nextID("compact"), payload, LongRequestTimeout, nil))
 }
 func (client *Client) GetForkMessages(ctx context.Context) (map[string]any, error) {
 	return client.request(ctx, "get_fork_messages", client.nextID("get_fork_messages"), nil, client.requestTimeout, nil)
@@ -607,7 +618,7 @@ func (client *Client) Fork(ctx context.Context, entryID string) (map[string]any,
 	if err := client.waitForCompactionFlush(ctx, client.now().Add(LongRequestTimeout)); err != nil {
 		return nil, err
 	}
-	response, err := client.request(ctx, "fork", client.nextID("fork"), map[string]any{"entryId": entryID}, LongRequestTimeout, nil)
+	response, err := softTimeout(client.request(ctx, "fork", client.nextID("fork"), map[string]any{"entryId": entryID}, LongRequestTimeout, nil))
 	client.resetReplacedSessionState(response, err)
 	return response, err
 }
@@ -615,7 +626,7 @@ func (client *Client) CloneSession(ctx context.Context) (map[string]any, error) 
 	if err := client.waitForCompactionFlush(ctx, client.now().Add(LongRequestTimeout)); err != nil {
 		return nil, err
 	}
-	response, err := client.request(ctx, "clone", client.nextID("clone"), nil, LongRequestTimeout, nil)
+	response, err := softTimeout(client.request(ctx, "clone", client.nextID("clone"), nil, LongRequestTimeout, nil))
 	client.resetReplacedSessionState(response, err)
 	return response, err
 }
@@ -767,6 +778,13 @@ func (client *Client) request(ctx context.Context, command, id string, payload m
 		return result.value, nil
 	case <-timer:
 		client.removePending(id)
+		// A response that came as the time ran out is in pending, and a later one is discarded.
+		select {
+		case result := <-pending:
+			client.diagnostics.Log("response_received", map[string]any{"command": command, "rpc_id": id})
+			return result.value, nil
+		default:
+		}
 		client.diagnostics.Log("command_timed_out", map[string]any{"command": command, "rpc_id": id, "stage": "response"})
 		return nil, &agent.RequestTimeoutError{Command: command, Accepted: true}
 	case <-client.readerDone:
@@ -1135,6 +1153,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 
 	var flushQueuedPrompts bool
 	var compactionWillRetry bool
+	var replacedLate bool
 	var observed map[string]any
 	client.mu.Lock()
 	storeAsEvent := false
@@ -1150,7 +1169,12 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		delete(client.pending, id)
 		target <- responseResult{value: response}
 	} else if typeName == "response" && stringValue(response["id"]) != "" {
-		// A response whose request timed out is intentionally discarded.
+		// A response whose request timed out is intentionally discarded. Pi that replaced its session since serves
+		// another session than the gateway expects it to, so it is closed.
+		switch response["command"] {
+		case "new_session", "fork", "clone":
+			replacedLate = response["success"] == true && !responseCancelled(response)
+		}
 	} else if typeName == "bash_execution_update" {
 		// Output chunks of a shell command repeat its ID, and can come before the command counts as started. Like an
 		// active tool's snapshot, only the end of the output is kept, copied so that a large chunk is not kept with it.
@@ -1219,6 +1243,9 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 	}
 	if flushQueuedPrompts {
 		go client.flushCompactionPrompts(compactionWillRetry)
+	}
+	if replacedLate {
+		go client.Close()
 	}
 }
 
