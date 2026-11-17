@@ -106,6 +106,10 @@ func (app *application) submitWorkspaceKey(response http.ResponseWriter, request
 		http.NotFound(response, request)
 		return
 	}
+	if !app.accessLimiter.Allow(clientIP(request.RemoteAddr)) {
+		writeText(response, http.StatusTooManyRequests, "Too many access requests")
+		return
+	}
 	if !parseForm(response, request) {
 		return
 	}
@@ -167,10 +171,6 @@ func (app *application) submitWorkspaceKey(response http.ResponseWriter, request
 }
 
 func (app *application) requestWorkspaceAccess(response http.ResponseWriter, request *http.Request, workspaceID string) (access.WorkspaceRequest, error) {
-	if !app.accessLimiter.Allow(clientIP(request.RemoteAddr)) {
-		writeText(response, http.StatusTooManyRequests, "Too many access requests")
-		return access.WorkspaceRequest{}, errors.New("rate limited")
-	}
 	token, err := app.browserToken(response, request)
 	if err == nil {
 		var full *access.WorkspacePendingRequestsFullError
