@@ -330,12 +330,12 @@ func TestMain(m *testing.M) {
 // fakeSudoScript stands in for sudo-rs, or with the words that start with classic, for classic sudo. Named sudo, it is
 // a parent that gripi's askpass program accepts. It asks askpass once for each word of FAKE_SUDO_ASKPASS, with the
 // prompts that sudo-rs or classic sudo would use, and records only a hash of each answer. Then it records the
-// command's arguments, environment and input, and runs the command as the user.
+// command's arguments, environment and input, and runs the command as the user. Like classic sudo 1.9.5p2 to 1.9.12,
+// it passes SIGTERM on to the command, but drops one from its own process group, such as from its parent, gripi.
 const fakeSudoScript = `#!/bin/sh
 [ "$1 $2 $3 $5" = "-A -k -p --" ] || { echo "fake sudo: unexpected arguments $*" >&2; exit 99; }
 marker=$4
 shift 5
-echo $$ > "$FAKE_SUDO_RECORD/pid"
 for call in $FAKE_SUDO_ASKPASS; do
 	case $call in
 	password) "$SUDO_ASKPASS" "[sudo: $marker] Password: " ;;
@@ -350,7 +350,18 @@ done
 printf '%s\n' "$@" > "$FAKE_SUDO_RECORD/argv"
 env > "$FAKE_SUDO_RECORD/env"
 cat > "$FAKE_SUDO_RECORD/stdin"
-exec "$@"
+trap '[ $(ps -o pgid= -p $PPID) = $(ps -o pgid= -p $$) ] || kill -TERM $command' TERM
+"$@" &
+command=$!
+echo $command > "$FAKE_SUDO_RECORD/pid"
+# wait returns early when the trap runs.
+wait $command
+status=$?
+while kill -0 $command 2>/dev/null; do
+	wait $command
+	status=$?
+done
+exit $status
 `
 
 // fakeSudo makes the gateway run fakeSudoScript, which calls askpass as askpassCalls lists and records into the
@@ -621,24 +632,24 @@ func TestSudoStopsTheCommandWhenGripiSudoEnds(t *testing.T) {
 	if code := answerSudo(id, "secret", ""); code != http.StatusOK {
 		t.Fatalf("answer = %d", code)
 	}
+	var pid int
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if _, err := os.Stat(filepath.Join(record, "stdin")); err == nil {
+		contents, _ := os.ReadFile(filepath.Join(record, "pid"))
+		if parsed, err := strconv.Atoi(strings.TrimSpace(string(contents))); err == nil {
+			pid = parsed
 			break
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("the command never started")
 		}
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(recorded(t, record, "pid")))
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	cancel()
 	<-done
 	for deadline := time.Now().Add(5 * time.Second); syscall.Kill(pid, 0) == nil; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
-			t.Fatal("sudo still runs")
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatal("the command still runs")
 		}
 	}
 }

@@ -108,6 +108,8 @@ func Sudo(runtimeDir string, input io.Reader, stdout, stderr io.Writer) (int, er
 	command.Env = append(os.Environ(), "SUDO_ASKPASS="+executable, "GRIPI_SUDO_TOKEN="+run.Token, "GRIPI_SOCKET_PATH="+filepath.Join(runtimeDir, askpassSocket))
 	// Through pipes, which WaitDelay stops reading, so that what the command leaves running can't keep main waiting.
 	command.Stdout, command.Stderr = struct{ io.Writer }{stdout}, struct{ io.Writer }{stderr}
+	// Classic sudo 1.9.5p2 to 1.9.12 drops a SIGTERM from its own process group, so sudo gets a group of its own.
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
 	command.WaitDelay = 10 * time.Second
 	if err := startInCgroup(command, run.Cgroup); err != nil {
