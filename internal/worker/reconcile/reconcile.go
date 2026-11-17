@@ -269,6 +269,14 @@ func (r *reconciler) makePlan() error {
 			continue
 		}
 		w := back[i]
+		// Without its .git, as after the mirror lost track of its folder, what the worker's copy lacks may not be deleted.
+		if _, err := os.Lstat(r.shadow.path(filepath.Join(w.Root, ".git"))); err != nil {
+			if err := r.keepWorktree(w, "the worker's copy has no .git, so main keeps its own"); err != nil {
+				return err
+			}
+			back = slices.Delete(back, i, i+1) // so that its files stay as they are
+			continue
+		}
 		if inProgress(r.shadow.path(w.GitDir)) {
 			if err := r.keepCheckout(w, "the worker was in the middle of a merge, rebase, cherry-pick or revert there, which doesn't come back, so main keeps its own HEAD and index"); err != nil {
 				return err
