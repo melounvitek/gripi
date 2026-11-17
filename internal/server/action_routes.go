@@ -1504,7 +1504,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 			releaseSource()
 			app.pendingRemapMu.Unlock()
 		}
-		if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
+		if app.gatewayState != nil && (app.gatewayState.SessionForgotten(from) || app.gatewayState.SessionForgotten(to)) {
 			return nil, os.ErrNotExist
 		}
 		if app.ownsSession != nil && !app.ownsSession(request, from) {

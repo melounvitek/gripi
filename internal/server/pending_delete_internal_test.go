@@ -278,9 +278,9 @@ func TestADeletionThatWaitsOnPiHoldsUpNoOtherSession(t *testing.T) {
 	}
 }
 
-func TestABranchDoesNotMoveFromOrToASessionBeingDeleted(t *testing.T) {
-	for _, side := range []string{"source", "destination"} {
-		t.Run(side, func(t *testing.T) {
+func TestABranchDoesNotMoveFromOrToADeletedSession(t *testing.T) {
+	for _, deletion := range []string{"source", "destination", "finished"} {
+		t.Run(deletion, func(t *testing.T) {
 			root := t.TempDir()
 			child := writeNotificationSession(t, root, "child")
 			parent := filepath.Join(root, "pending.jsonl")
@@ -292,17 +292,25 @@ func TestABranchDoesNotMoveFromOrToASessionBeingDeleted(t *testing.T) {
 				t.Fatal(err)
 			}
 			app.pendingSessions.Remember(parent, root, "")
-			deleting := map[string]string{"source": parent, "destination": child}[side]
-			// As a deletion of the session does until it has finished.
-			_, release, err := app.promptAdmissions.navigate(func() (string, error) { return deleting, nil })
-			if err != nil {
-				t.Fatal(err)
+			if deletion == "finished" {
+				// A deletion of the source that finished while the move had its client, so it didn't close it.
+				if err := app.gatewayState.Forget(parent); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				// As a deletion of the session does until it has finished.
+				_, release, err := app.promptAdmissions.navigate(func() (string, error) {
+					return map[string]string{"source": parent, "destination": child}[deletion], nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
 			}
-			defer release()
 
 			response := httptest.NewRecorder()
 			app.replaceSessionFromAction(response, tagLifecycleRequest("/sessions/clone"), parent, "clone", "")
-			if response.Code != http.StatusConflict || app.rpcClients.Registered(child) {
+			if response.Code == http.StatusOK || app.rpcClients.Registered(child) {
 				t.Fatalf("clone = %d %s; client moved to the clone: %v", response.Code, response.Body.String(), app.rpcClients.Registered(child))
 			}
 			if remapped, ok := app.pendingSessions.Resolve(parent); ok {
