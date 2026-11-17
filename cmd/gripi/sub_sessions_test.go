@@ -53,8 +53,10 @@ func TestNewStartsANamedSubSessionWithItsParentsModel(t *testing.T) {
 	if session.Parent != beta || !startsWithModel(t, session.Path, "contract-model", "high") {
 		t.Fatalf("sub-session %+v did not start with its parent's model", session)
 	}
-	// The saved session has the model, so the parent's Pi had no reason to start.
-	if log := fakePiLog(t); strings.Contains(log, `"sessionPath":"`+beta+`"`) {
+	// The saved session has the model, so the parent's Pi had no reason to start before the sub-session ran. The report
+	// of its turn starts it after.
+	log := fakePiLog(t)
+	if parent := strings.Index(log, `"sessionPath":"`+beta+`"`); parent >= 0 && parent < strings.Index(log, `"message":"Show the deterministic browser response"`) {
 		t.Fatalf("the parent's Pi started:\n%s", log)
 	}
 
