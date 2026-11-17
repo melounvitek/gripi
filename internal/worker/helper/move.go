@@ -99,6 +99,12 @@ func within(path, folder string) bool { return path == folder || strings.HasPref
 
 func (s *server) copyFolder(id string) string { return filepath.Join(s.options.DataDir, "copies", id) }
 
+// OutsideArchive is where the helper whose data folder is dataDir keeps the archive of what the copy of a released move
+// held outside the move's folders, which the session made there, for main to take (mirror.ReadOutside).
+func OutsideArchive(dataDir, id string) string {
+	return filepath.Join(dataDir, "copies", id+".outside.tar")
+}
+
 // cacheOf holds the ignored folders that deleted copies of the move's repository left.
 func (s *server) cacheOf(m *move) string {
 	sum := sha256.Sum256([]byte(m.Repository))
@@ -339,7 +345,7 @@ func (s *server) deleteMove(id string) error {
 	s.mu.Lock()
 	delete(s.moves, id)
 	s.mu.Unlock()
-	return errors.Join(os.RemoveAll(copy), os.RemoveAll(s.seeds(id)))
+	return errors.Join(os.RemoveAll(copy), os.RemoveAll(s.seeds(id)), os.RemoveAll(OutsideArchive(s.options.DataDir, id)))
 }
 
 func (s *server) seeds(id string) string { return filepath.Join(s.options.DataDir, "seeds", id) }
@@ -429,7 +435,8 @@ func (s *server) host(m *move) (*hostProcess, error) {
 		return nil, errors.New("moves need a cgroup that systemd delegated to the helper (systemd-run --user -p Delegate=yes)")
 	}
 	config := hostConfig{
-		Move: m.id, Instance: s.instance, RuntimeDir: s.options.RuntimeDir, Home: s.options.Home, Copy: s.copyFolder(m.id), Seeds: s.seeds(m.id),
+		Move: m.id, Instance: s.instance, RuntimeDir: s.options.RuntimeDir, Home: s.options.Home, Copy: s.copyFolder(m.id),
+		Seeds: s.seeds(m.id), Outside: OutsideArchive(s.options.DataDir, m.id),
 		Unit:   mirror.Unit{Main: m.Roots[0], Worktrees: m.Roots[1:], GitDir: m.Repository, Within: m.Private},
 		Docker: dockerproxy.Options{Listen: s.dockerSocket(m), Upstream: s.options.DockerUpstream, Worker: s.options.Name, User: currentUser()},
 	}

@@ -537,3 +537,53 @@ func TestAMovesCopyReusesTheIgnoredFoldersOfEarlierCopies(t *testing.T) {
 		t.Fatal("the third copy lacks what the deleted copies left")
 	}
 }
+
+// A release archives for main what the session made in the folders that show the copy, outside the repository's
+// worktrees, which the mirrors never send, and the copy's deletion deletes the archive.
+func TestAReleaseArchivesWhatTheSessionMadeOutsideTheRepository(t *testing.T) {
+	rig := startMoveHelper(t, helper.DefaultLease)
+	private := rig.privateRoot()
+	shadow, repository := rig.shadow(private, "first\n")
+	rig.move("m1", private, shadow, repository)
+	pi := rig.session("s1", "m1", repository)
+	file := filepath.Join(t.TempDir(), "sessions", "s1.jsonl")
+	repositoryDestination, sessionDestination := rig.destinations(shadow, t.TempDir(), file)
+	served := []<-chan error{rig.mirror("m1", "", repositoryDestination), rig.mirror("m1", file, sessionDestination)}
+	pi(`echo notes > ../NOTES.md; mkdir ../api && echo api > ../api/main.go; echo inside > inside.txt`)
+
+	if response := rig.request(map[string]any{"type": "move.release", "move": "m1"}); !response.OK {
+		t.Fatalf("move.release = %+v", response)
+	}
+	for _, done := range served {
+		if err := <-done; err != nil {
+			t.Fatalf("a mirror ended with %v", err)
+		}
+	}
+	archive, err := os.Open(helper.OutsideArchive(rig.data, "m1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archive.Close()
+	main := t.TempDir()
+	if err := mirror.ReadOutside(archive, main); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		main + filepath.Join(private, "NOTES.md"): "notes\n", main + filepath.Join(private, "api", "main.go"): "api\n",
+		shadow + filepath.Join(repository, "inside.txt"): "inside\n",
+	} {
+		if got := read(path); got != want {
+			t.Errorf("%s = %q, want %q", path, got, want)
+		}
+	}
+	if _, err := os.Stat(main + repository); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the archive has the repository: %v", err)
+	}
+
+	if response := rig.request(map[string]any{"type": "move.delete", "move": "m1"}); !response.OK {
+		t.Fatalf("move.delete = %+v", response)
+	}
+	if _, err := os.Stat(helper.OutsideArchive(rig.data, "m1")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the archive after move.delete: %v", err)
+	}
+}

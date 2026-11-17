@@ -243,6 +243,22 @@ func (link *fakeLink) ReleaseMove(_ context.Context, id string) (helper.Barriers
 	return helper.Barriers{Repository: barriers[0], Session: barriers[1]}, nil
 }
 
+// TakeOutside writes the rig's outside files into folder, as if the worker's copy had them outside the move's folders.
+func (link *fakeLink) TakeOutside(_ context.Context, id, folder string) error {
+	if err := link.call("take outside %s", id); err != nil {
+		return err
+	}
+	for path, contents := range link.rig.outside {
+		if err := os.MkdirAll(filepath.Dir(folder+path), 0700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(folder+path, []byte(contents), 0600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (link *fakeLink) DeleteMove(_ context.Context, id string) error {
 	return link.call("delete %s", id)
 }
@@ -271,6 +287,8 @@ type moveRig struct {
 	links    []*fakeLink
 	prepared []Move
 	created  []Session
+	// The files, by main's paths, that the worker's copies hold outside their moves' folders.
+	outside map[string]string
 }
 
 func newMoveRig(t *testing.T) *moveRig {
@@ -624,6 +642,38 @@ func TestAReturnBringsTheSessionsChangesAndKeepsAsideWhatMainChangedToo(t *testi
 	}
 	if refs := git(t, rig.repository, "for-each-ref", "refs/gripi"); refs != "" {
 		t.Fatalf("refs after the returns: %s", refs)
+	}
+}
+
+// What the session made on the worker outside the repository's worktrees comes to main once the worker has released
+// the move, also when the return runs again, and the return keeps it aside.
+func TestAReturnKeepsAsideWhatTheSessionMadeOutsideTheRepository(t *testing.T) {
+	rig := newMoveRig(t)
+	placement := rig.move()
+	notes := filepath.Join(rig.home, "Work", "NOTES.md")
+	rig.outside = map[string]string{notes: "notes\n"}
+	rig.fail("take outside", errors.New("connection lost"))
+	if err := rig.manager.Return(context.Background(), rig.key, rig.prepare); err == nil || !strings.Contains(err.Error(), "connection lost") {
+		t.Fatalf("Return = %v", err)
+	}
+	rig.fail("take outside", nil)
+	rig.took()
+
+	if err := rig.manager.Return(context.Background(), rig.key, rig.prepare); err != nil {
+		t.Fatal(err)
+	}
+	if events := rig.took(); !slices.Contains(events, "take outside "+placement.Move) {
+		t.Fatalf("the return did %q", events)
+	}
+	notices := rig.manager.Notices(rig.key)
+	if len(notices) != 1 || len(notices[0].Result.Aside) != 1 || notices[0].Result.Aside[0].Path != notes {
+		t.Fatalf("notices = %+v", notices)
+	}
+	if got := readFile(t, filepath.Join(notices[0].Recovery, "worker")+notes); got != "notes\n" {
+		t.Errorf("the worker's NOTES.md kept aside = %q", got)
+	}
+	if _, err := os.Stat(notes); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("main's NOTES.md: %v", err)
 	}
 }
 

@@ -30,6 +30,7 @@ type hostConfig struct {
 	Seeds      string              `json:"seeds"` // a folder on the copy's file system for seeding it
 	Unit       mirror.Unit         `json:"unit"`  // the copy's folders, at main's paths
 	Docker     dockerproxy.Options `json:"docker"`
+	Outside    string              `json:"outside"` // where a release archives what the copy holds outside Unit
 }
 
 // socket is where the host takes the helper's requests and main's mirror channels, which start with a Message.
@@ -251,7 +252,27 @@ func (host *hostServer) release() (*Barriers, error) {
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
+	if err := host.archiveOutside(); err != nil {
+		return nil, fmt.Errorf("archive what the session made outside the repository's worktrees: %w", err)
+	}
 	return &Barriers{Repository: barriers[0], Session: barriers[1]}, nil
+}
+
+// archiveOutside archives for main what the copy holds outside the unit's folders, which the session made there and
+// the mirror never sent.
+func (host *hostServer) archiveOutside() error {
+	file, err := os.OpenFile(host.config.Outside, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	err = mirror.WriteOutside(host.config.Unit, file)
+	if err == nil {
+		err = file.Sync()
+	}
+	if closed := file.Close(); err == nil {
+		err = closed
+	}
+	return err
 }
 
 // at returns where a folder like the copy has path, one of main's.
