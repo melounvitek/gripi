@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -37,12 +38,21 @@ type plan struct {
 	Worktrees []worktree   `json:"worktrees,omitempty"` // made on the worker
 	Checkouts []checkout   `json:"checkouts,omitempty"`
 	Aside     []Item       `json:"aside,omitempty"`
+	Reflogs   []reflog     `json:"reflogs,omitempty"`
 }
 
 type refUpdate struct {
 	Name string `json:"name"`
 	Old  string `json:"old,omitempty"`
 	New  string `json:"new,omitempty"` // empty deletes
+}
+
+// reflog is what the worker added to the reflog of a ref, or of HEAD in the worktree at Root.
+type reflog struct {
+	Root    string `json:"root,omitempty"`
+	Ref     string `json:"ref"`
+	Head    head   `json:"head"` // the ref or HEAD as the worker left it
+	Entries string `json:"entries"`
 }
 
 type fileUpdate struct {
@@ -190,8 +200,28 @@ func (r *reconciler) makePlan() error {
 		back = append(back, w)
 	}
 
+	added, err := r.newEntries(back, wRefs)
+	if err != nil {
+		return err
+	}
+	var logged []string // what the entries name
+	for _, l := range added {
+		for e := range strings.Lines(l.Entries) {
+			for _, id := range strings.Fields(e)[:2] {
+				if strings.Trim(id, "0") != "" {
+					logged = append(logged, id)
+				}
+			}
+		}
+	}
+	commits, others, err := r.shadow.present(ctx, logged)
+	if err != nil {
+		return err
+	}
+
 	// The worker's objects go to main first, kept from git gc until Discard.
-	var wants, haves, indexBlobs, commits, others []string
+	wants := slices.Concat(commits, others)
+	var haves, indexBlobs []string
 	for _, rf := range wRefs {
 		wants, commits = append(wants, rf.OID), append(commits, rf.Commit)
 		if rf.OID != rf.Commit {
@@ -219,7 +249,26 @@ func (r *reconciler) makePlan() error {
 	if err := r.main.pin(ctx, r.returnsRef("worker"), indexBlobs, commits, others); err != nil {
 		return err
 	}
-	// Main keeps its reflogs; the worker's are only recorded.
+	lacking, err := r.main.missing(ctx, logged)
+	if err != nil {
+		return err
+	}
+	// Entries that name objects that the worker lost, such as to git gc, stay out, and so does a reflog that would then
+	// end elsewhere than its ref.
+	for _, l := range added {
+		var kept strings.Builder
+		last := ""
+		for e := range strings.Lines(l.Entries) {
+			if f := strings.Fields(e); !slices.Contains(lacking, f[0]) && !slices.Contains(lacking, f[1]) {
+				kept.WriteString(e)
+				last = f[1]
+			}
+		}
+		if l.Entries = kept.String(); last != "" && last == l.Head.OID {
+			p.Reflogs = append(p.Reflogs, l)
+		}
+	}
+	// The worker's reflogs are recorded too, for what main didn't take.
 	logs := []string{b.GitDir + "/logs"}
 	for _, w := range back {
 		if w.GitDir != b.GitDir {
@@ -437,6 +486,62 @@ func (r *reconciler) planOutside(back []worktree) error {
 		return nil
 	}
 	return visit("/", false)
+}
+
+var objectID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// newEntries reads what the worker added to the reflogs of the refs that a return reconciles and of HEAD in the
+// worktrees that come back: the entries after the last that main's reflog at the same path has, if any.
+func (r *reconciler) newEntries(back []worktree, wRefs map[string]ref) ([]reflog, error) {
+	var found []reflog
+	read := func(p string, l reflog) error {
+		worker, err := os.ReadFile(r.shadow.path(p))
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		mine, _ := os.ReadFile(p) // none, also where a ref is in the way; appendEntries leaves out what it has
+		has := map[string]bool{}
+		for line := range strings.Lines(string(mine)) {
+			has[line] = true
+		}
+		lines := slices.Collect(strings.Lines(string(worker)))
+		i := len(lines)
+		for i > 0 && !has[lines[i-1]] {
+			i--
+		}
+		var entries strings.Builder
+		for _, line := range lines[i:] {
+			if f := strings.Fields(line); strings.HasSuffix(line, "\n") && len(f) > 2 && objectID.MatchString(f[0]) && objectID.MatchString(f[1]) {
+				entries.WriteString(line)
+			}
+		}
+		if l.Entries = entries.String(); l.Entries != "" {
+			found = append(found, l)
+		}
+		return nil
+	}
+	logs := r.base.GitDir + "/logs/"
+	err := filepath.WalkDir(r.shadow.path(logs+"refs"), func(local string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		p := strings.TrimPrefix(local, r.shadow.at)
+		if name := strings.TrimPrefix(p, logs); reconciled(name) {
+			return read(p, reflog{Ref: name, Head: head{OID: wRefs[name].OID}})
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	for _, w := range back {
+		if err := read(w.GitDir+"/logs/HEAD", reflog{Root: w.Root, Ref: "HEAD", Head: w.Head}); err != nil {
+			return nil, err
+		}
+	}
+	return found, nil
 }
 
 // madeOnMain lists the worktrees that main made after the base, which the worker's files stay out of, other than

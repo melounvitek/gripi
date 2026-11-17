@@ -3,6 +3,7 @@ package reconcile
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -112,7 +113,10 @@ func (r *reconciler) apply() error {
 			return err
 		}
 	}
-	return r.applyCheckouts()
+	if err := r.applyCheckouts(); err != nil {
+		return err
+	}
+	return r.applyReflogs()
 }
 
 // updateRefs applies updates in one transaction; with check, only to refs that still hold their old values.
@@ -327,6 +331,83 @@ func (r *reconciler) setIndex(gitDir, root, index string) error {
 		return err
 	}
 	return os.Rename(built, live)
+}
+
+// applyReflogs gives main's reflogs of the refs and HEADs that main has as the worker left them the worker's entries,
+// so that Git keeps the commits that the session left there, such as with git reset. Main's other reflogs would
+// contradict main's refs with them.
+func (r *reconciler) applyReflogs() error {
+	mTrees, err := r.main.worktrees(r.ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, l := range r.plan.Reflogs {
+		mRefs, err := r.main.refs(r.ctx) // anew, as Git may have changed them since the last
+		if err != nil {
+			return err
+		}
+		gitDir, now := r.base.GitDir, head{OID: mRefs[l.Ref].OID}
+		if l.Root != "" {
+			i := slices.IndexFunc(mTrees, func(w worktree) bool { return w.Root == l.Root })
+			if i < 0 {
+				continue
+			}
+			gitDir = mTrees[i].GitDir
+			if now, err = r.main.head(r.ctx, gitDir, mRefs); err != nil {
+				return err
+			}
+		}
+		if now != l.Head || now.OID == "" {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(gitDir, l.Ref+".lock")); err == nil {
+			return fmt.Errorf("git is changing %s in %s", l.Ref, gitDir)
+		}
+		if err := appendEntries(filepath.Join(gitDir, "logs", l.Ref), l.Entries); err != nil {
+			return err
+		}
+		if err := r.step(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// appendEntries appends to the reflog log the entries that it lacks.
+func appendEntries(log, entries string) error {
+	data, err := os.ReadFile(log)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	has := map[string]bool{}
+	for line := range strings.Lines(string(data)) {
+		has[line] = true
+	}
+	var lacking strings.Builder
+	for line := range strings.Lines(entries) {
+		if !has[line] {
+			lacking.WriteString(line)
+		}
+	}
+	if lacking.Len() == 0 {
+		return nil
+	}
+	text := lacking.String()
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		text = "\n" + text // after a line that a crash cut short
+	}
+	if err := os.MkdirAll(filepath.Dir(log), 0o777); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(log, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o666)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(text)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // applyCheckouts gives selected worktrees the worker's HEAD and index, while main has the HEAD and index that the plan
