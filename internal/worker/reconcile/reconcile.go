@@ -261,7 +261,7 @@ func (r *reconciler) makePlan() error {
 	}
 
 	// A selected worktree takes the worker's HEAD and index only if main's checkout there is still the base's.
-	taken := map[string]bool{}
+	taken, keptWhole := map[string]bool{}, map[string]bool{}
 	for _, bw := range b.Worktrees {
 		i := slices.IndexFunc(back, func(w worktree) bool { return w.Root == bw.Root })
 		if i < 0 {
@@ -269,6 +269,14 @@ func (r *reconciler) makePlan() error {
 			continue
 		}
 		w := back[i]
+		// Without its .git, as after the mirror lost track of its folder, what the worker's copy lacks may not be deleted.
+		if _, err := os.Lstat(r.shadow.path(filepath.Join(w.Root, ".git"))); err != nil {
+			if err := r.keepWorktree(w, "the worker's copy has no .git, so main keeps its own"); err != nil {
+				return err
+			}
+			keptWhole[bw.Root] = true
+			continue
+		}
 		if inProgress(r.shadow.path(w.GitDir)) {
 			if err := r.keepCheckout(w, "the worker was in the middle of a merge, rebase, cherry-pick or revert there, which doesn't come back, so main keeps its own HEAD and index"); err != nil {
 				return err
@@ -365,7 +373,7 @@ func (r *reconciler) makePlan() error {
 
 	made := r.madeOnMain(mTrees)
 	for _, bw := range b.Worktrees {
-		if slices.ContainsFunc(back, func(w worktree) bool { return w.Root == bw.Root }) {
+		if !keptWhole[bw.Root] && slices.ContainsFunc(back, func(w worktree) bool { return w.Root == bw.Root }) {
 			_, ok := onMain(bw.Root)
 			if err := r.planFiles(bw.Root, r.others(bw.Root, back), made, ok); err != nil {
 				return err

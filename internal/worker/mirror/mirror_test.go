@@ -482,6 +482,102 @@ func TestAWorktreeDeletedWhileMirroringGoesOnMainAlsoAfterARescan(t *testing.T) 
 	}
 }
 
+// A folder of the unit that the session renames away and back, or replaces with a copy, comes back whole on main, also
+// the main checkout with the Git folder in it, and a worktree in it.
+func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
+	unit := newRepo(t)
+	r := newRig(t, unit)
+	inner := filepath.Join(unit.Main, "inner")
+	git(t, unit.Main, "worktree", "add", "-q", "-b", "inner", inner)
+	r.verify(t)
+	for _, folder := range []string{unit.Worktrees[0], inner, unit.Main} {
+		away := folder + ".bak"
+		if err := os.Rename(folder, away); err != nil {
+			t.Fatal(err)
+		}
+		r.barrier(t)
+		if err := os.Rename(away, folder); err != nil {
+			t.Fatal(err)
+		}
+		r.barrier(t)
+		writeFile(t, folder, "src/new.rb", "new\n")
+		r.verify(t)
+
+		// Away and back between barriers, with a file deleted and its mode changed meanwhile, which makes an early send
+		// watch it again.
+		if err := os.Rename(folder, away); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(away, "src/d1/f2.txt")); err != nil {
+			t.Fatal(err)
+		}
+		os.Chmod(away, 0o750)
+		if err := os.Rename(away, folder); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(200 * time.Millisecond)
+		r.verify(t)
+
+		// Back as another folder, which no event tells.
+		if err := os.Rename(folder, away); err != nil {
+			t.Fatal(err)
+		}
+		r.barrier(t)
+		mustRun(t, "/", "cp", "-a", away, folder)
+		r.verify(t)
+		if err := os.RemoveAll(away); err != nil {
+			t.Fatal(err)
+		}
+		r.barrier(t) // before the next folder goes, as the rescan that this brings stops without the main checkout
+	}
+
+	// What Git ignores changes while a folder is away.
+	featA, away := unit.Worktrees[0], unit.Worktrees[0]+".bak"
+	if err := os.Rename(featA, away); err != nil {
+		t.Fatal(err)
+	}
+	r.barrier(t)
+	writeFile(t, away, ".gitignore", "/tmp/*\n!/tmp/.keep\n*.log\n.env\n*.bigdump\n") // without node_modules/
+	writeFile(t, away, "node_modules/new.js", "x\n")
+	if err := os.Rename(away, featA); err != nil {
+		t.Fatal(err)
+	}
+	r.verify(t)
+
+	// Back where the source can't look, which fails barriers until it can.
+	if err := os.Rename(featA, away); err != nil {
+		t.Fatal(err)
+	}
+	r.barrier(t)
+	if err := os.Rename(away, featA); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(featA)
+	os.Chmod(parent, 0)
+	t.Cleanup(func() { os.Chmod(parent, 0o755) })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if n, _, err := r.src.Barrier(ctx); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("barrier %d with the folder where the source can't look: %v", n, err)
+	}
+	os.Chmod(parent, 0o755)
+	waitFor(t, "the source to recover", r.src.Healthy)
+	r.verify(t)
+
+	// A worktree in a folder that is away is deleted meanwhile.
+	away = unit.Main + ".bak"
+	if err := os.Rename(unit.Main, away); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(away, "inner")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(away, unit.Main); err != nil {
+		t.Fatal(err)
+	}
+	r.verify(t)
+}
+
 // A folder outside Git, such as Pi's session folders, has no worktrees, also when it is in another repository.
 func TestAFolderInAnotherRepositoryKeepsToItselfWhenTheSourceRescans(t *testing.T) {
 	other := newRepo(t)

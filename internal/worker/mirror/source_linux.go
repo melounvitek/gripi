@@ -55,6 +55,7 @@ type Source struct {
 	queue        []rawEvent // unbounded, so the kernel's queue rarely overflows
 	qsig         chan struct{}
 	moveFrom     *rawMove
+	lost         map[string]bool // roots whose watches went, which the next barrier walks again
 	needRescan   bool
 	wtChanged    bool
 	ignChanged   bool
@@ -149,7 +150,7 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) (err error) {
 	s.sender = newSender(s.unit, s.opts, stream)
 	defer s.sender.close()
 	s.sender.watch, s.sender.settling = s.addWatch, map[string]stamp{}
-	s.wdPath, s.pathWd, s.indexChanged = map[int32]string{}, map[string]int32{}, map[string]bool{}
+	s.wdPath, s.pathWd, s.indexChanged, s.lost = map[int32]string{}, map[string]int32{}, map[string]bool{}, map[string]bool{}
 	s.qsig = make(chan struct{}, 1)
 
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
@@ -261,6 +262,9 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 	if err := s.checkSkipped(); err != nil {
 		return err
 	}
+	if err := s.walkLostRoots(); err != nil {
+		return err
+	}
 	if err := s.retryUnread(); err != nil {
 		return err
 	}
@@ -358,6 +362,44 @@ func (s *Source) syncSentinel() error {
 	return nil
 }
 
+// walkLostRoots walks the roots that lost their watches once they are here again, which no event may tell, as when one
+// comes back as another folder, and marks what they lost meanwhile. A lost root that isn't here goes on the
+// destination.
+func (s *Source) walkLostRoots() error {
+	var walked []string
+	seen := map[string]bool{}
+	for _, r := range s.roots {
+		if !s.lost[r] {
+			continue
+		}
+		if c := s.cls[r]; c != nil {
+			if _, err := os.Lstat(r); err == nil {
+				c.start() // its ignore files may have changed unseen
+			}
+		}
+		if err := s.walk(r, seen); err != nil {
+			return err
+		}
+		if seen[r] {
+			walked = append(walked, r)
+			if _, watched := s.pathWd[r]; watched { // or it went again before its watch
+				delete(s.lost, r)
+			}
+		} else if _, sent := s.sent[r]; sent {
+			s.mark(r, writesUnknown)
+		}
+	}
+	if len(walked) == 0 {
+		return nil
+	}
+	for p, e := range s.sent {
+		if slices.Contains(walked, s.rootOf(p)) && !seen[p] && !s.kept(p, e) {
+			s.mark(p, writesUnknown)
+		}
+	}
+	return nil
+}
+
 // checkSkipped looks for excluded files and folders that Git tracks now,
 // through git add -f or a checkout, once an index changed.
 func (s *Source) checkSkipped() error {
@@ -412,6 +454,11 @@ func (s *Source) unwatch(dir string) {
 			unix.InotifyRmWatch(s.fd, uint32(wd))
 			delete(s.wdPath, wd)
 			delete(s.pathWd, p)
+		}
+	}
+	for _, r := range s.roots {
+		if within(r, dir) {
+			s.lost[r] = true
 		}
 	}
 }
@@ -523,6 +570,7 @@ func (s *Source) handleEvent(e rawEvent) error {
 	}
 	if e.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 		if s.isRoot(dir) {
+			s.unwatch(dir) // its watches went with it
 			s.mark(dir, writesUnknown)
 		}
 		return nil

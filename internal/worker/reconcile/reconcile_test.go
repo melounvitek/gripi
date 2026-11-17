@@ -1375,3 +1375,30 @@ func TestWhatTheWorkerMadeOutsideTheSessionsWorktreesIsKeptAside(t *testing.T) {
 		t.Errorf("the notice says %q", result.Notice)
 	}
 }
+
+// A shadow that has a selected worktree's folder without its .git, as a mirror that lost track of it might leave it,
+// doesn't take main's files for deleted.
+func TestAWorktreeWithoutItsGitFileInTheShadowIsLeftAloneOnMain(t *testing.T) {
+	r := newRig(t)
+	r.write(r.feat, ".env", "SECRET=feat\n")
+	r.write(r.feat, "untracked.txt", "u\n")
+	r.write(r.feat, "a.txt", replace("two", "uncommitted"))
+	r.snapshot(r.feat)
+	os.RemoveAll(r.shadow + r.feat)
+	r.write(r.shadow+r.feat, "src/new.rb", "new\n")
+
+	result := r.reconcile()
+
+	r.expectFile(r.feat+"/.env", "SECRET=feat\n")
+	r.expectFile(r.feat+"/untracked.txt", "u\n")
+	r.expectFile(r.feat+"/a.txt", replace("two", "uncommitted"))
+	r.expectFile(r.feat+"/dir/b.txt", "b\n")
+	r.expectMissing(r.feat + "/src/new.rb")
+	if len(result.Applied) > 0 {
+		t.Errorf("applied %v", result.Applied)
+	}
+	if _, ok := asideOf(result, r.feat); !ok || len(result.Aside) != 1 || !strings.Contains(result.Notice, r.feat) {
+		t.Errorf("kept aside %v, notice %q", result.Aside, result.Notice)
+	}
+	r.expectFile(r.recovery+"/worker"+r.feat+"/src/new.rb", "new\n")
+}
