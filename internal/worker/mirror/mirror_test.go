@@ -531,8 +531,21 @@ func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 		r.barrier(t) // before the next folder goes, as the rescan that this brings stops without the main checkout
 	}
 
+	// What Git ignores changes while a folder is away.
+	featA, away := unit.Worktrees[0], unit.Worktrees[0]+".bak"
+	if err := os.Rename(featA, away); err != nil {
+		t.Fatal(err)
+	}
+	r.barrier(t)
+	writeFile(t, away, ".gitignore", "/tmp/*\n!/tmp/.keep\n*.log\n.env\n*.bigdump\n") // without node_modules/
+	writeFile(t, away, "node_modules/new.js", "x\n")
+	if err := os.Rename(away, featA); err != nil {
+		t.Fatal(err)
+	}
+	r.verify(t)
+
 	// A worktree in a folder that is away is deleted meanwhile.
-	away := unit.Main + ".bak"
+	away = unit.Main + ".bak"
 	if err := os.Rename(unit.Main, away); err != nil {
 		t.Fatal(err)
 	}

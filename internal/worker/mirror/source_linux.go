@@ -372,15 +372,20 @@ func (s *Source) walkLostRoots() error {
 		if !s.lost[r] {
 			continue
 		}
+		if _, err := os.Lstat(r); err != nil {
+			if _, sent := s.sent[r]; sent {
+				s.mark(r, writesUnknown)
+			}
+			continue
+		}
+		if c := s.cls[r]; c != nil {
+			c.start() // its ignore files may have changed unseen
+		}
 		if err := s.walk(r, seen); err != nil {
 			return err
 		}
-		if seen[r] {
-			walked = append(walked, r)
-			delete(s.lost, r)
-		} else if _, sent := s.sent[r]; sent {
-			s.mark(r, writesUnknown)
-		}
+		walked = append(walked, r)
+		delete(s.lost, r)
 	}
 	if len(walked) == 0 {
 		return nil
