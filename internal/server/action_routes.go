@@ -854,15 +854,16 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 		app.pendingRemapMu.Unlock()
 		return
 	}
-	unlock := app.sessionMutationLocks.Lock(path)
-	defer unlock()
 	_, releaseDeletion, err := app.promptAdmissions.navigate(func() (string, error) { return path, nil })
-	// From here the locks keep remaps from and to the session away, so the others need not wait for Pi or the trash.
+	// From here the lease keeps remaps and moves from and to the session away, so the others need not wait for Pi or
+	// the trash.
 	app.pendingRemapMu.Unlock()
 	if app.writeRPCError(response, err) {
 		return
 	}
 	defer releaseDeletion()
+	unlock := app.sessionMutationLocks.Lock(path)
+	defer unlock()
 	if !app.knownOrPendingSession(request, path) {
 		http.NotFound(response, request)
 		return
@@ -1488,6 +1489,21 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		// Held until the move commits or rolls back, but not while Pi branches, which can take minutes.
 		app.pendingRemapMu.Lock()
 		unlockRemaps = app.pendingRemapMu.Unlock
+		// As in a remap, the leases keep deletions of either session away meanwhile.
+		releaseSource, err := app.promptAdmissions.tryPrompt(from)
+		if err != nil {
+			return nil, err
+		}
+		releaseDestination, err := app.promptAdmissions.tryPrompt(to)
+		if err != nil {
+			releaseSource()
+			return nil, err
+		}
+		unlockRemaps = func() {
+			releaseDestination()
+			releaseSource()
+			app.pendingRemapMu.Unlock()
+		}
 		if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
 			return nil, os.ErrNotExist
 		}

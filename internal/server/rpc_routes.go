@@ -376,10 +376,11 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 func (app *application) remapPendingRPCClient(from, to string, claim func() (func() error, error)) error {
 	unlock := app.imagePromptLocks.Lock(from)
 	defer unlock()
-	app.pendingRemapMu.Lock()
-	defer app.pendingRemapMu.Unlock()
+	// Taken first, as a deletion of the session holds it while Pi and the trash take their time.
 	unlockMutation := app.sessionMutationLocks.Lock(to)
 	defer unlockMutation()
+	app.pendingRemapMu.Lock()
+	defer app.pendingRemapMu.Unlock()
 	if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
 		return os.ErrNotExist
 	}
