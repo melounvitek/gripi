@@ -1197,3 +1197,124 @@ func TestAWorktreeRemovedOnTheWorkerStaysOnMain(t *testing.T) {
 		t.Errorf("kept aside %v", result.Aside)
 	}
 }
+
+// conflict leaves a merge into branch, checked out in the worktree at root, stopped on the worker on a conflict.
+func (r *rig) conflict(root, branch string) {
+	r.t.Helper()
+	w := r.shadow + root
+	r.write(w, "a.txt", replace("two", "ours"))
+	r.worker(root, "commit", "-qam", "ours")
+	r.worker(root, "switch", "-q", "-c", "theirs", "HEAD~1")
+	r.write(w, "a.txt", replace("two", "theirs"))
+	r.worker(root, "commit", "-qam", "theirs")
+	r.worker(root, "switch", "-q", branch)
+	cmd := exec.Command("git", "merge", "-q", "theirs")
+	cmd.Dir, cmd.Env = w, append(os.Environ(), "GIT_DIR="+r.shadow+r.gitDirOf(root), "GIT_WORK_TREE="+w)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		r.t.Fatalf("the merge didn't stop: %s", out)
+	}
+}
+
+func TestACheckoutInTheMiddleOfAMergeOnTheWorkerIsKeptAside(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.feat)
+	before := r.rev(r.feat, "HEAD")
+	r.conflict(r.feat, "feat")
+	tip := strings.TrimSpace(r.worker(r.feat, "rev-parse", "HEAD"))
+
+	result := r.reconcile()
+
+	if got := r.rev(r.feat, "HEAD"); got != before {
+		t.Errorf("HEAD = %s, want main's %s", got, before)
+	}
+	if got := r.rev(r.main, "refs/gripi/returns/"+move+"/refs/heads/feat"); got != tip {
+		t.Errorf("the worker's feat is kept at %q, want %s", got, tip)
+	}
+	if got := r.rev(r.main, "theirs"); got == "" {
+		t.Errorf("the merged branch didn't come back")
+	}
+	r.expectMissing(r.gitDirOf(r.feat) + "/MERGE_HEAD")
+	if got := r.git(r.feat, "status", "--porcelain"); got != " M a.txt\n" {
+		t.Errorf("git status =\n%s", got)
+	}
+	if item, ok := asideOf(result, r.feat); !ok || !strings.Contains(item.Reason, "merge") {
+		t.Errorf("the worker's merge isn't reported: %v", result.Aside)
+	}
+
+	r = newRig(t)
+	r.snapshot(r.main)
+	made := filepath.Join(filepath.Dir(r.feat), "made")
+	r.workerWorktree(made, "made")
+	r.conflict(made, "made")
+
+	result = r.reconcile()
+
+	r.expectMissing(made)
+	r.expectFile(r.recovery+"/worker"+made+"/a.txt", r.read(r.shadow+made+"/a.txt"))
+	if item, ok := asideOf(result, made); !ok || !strings.Contains(item.Reason, "merge") {
+		t.Errorf("the merge in the new worktree isn't reported: %v", result.Aside)
+	}
+}
+
+func TestUnmergedEntriesWithoutAnOperationComeBack(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.feat)
+	w := r.shadow + r.feat
+	r.write(w, "a.txt", replace("two", "stashed"))
+	r.worker(r.feat, "stash", "push", "-q")
+	r.write(w, "a.txt", replace("two", "feat"))
+	r.worker(r.feat, "commit", "-qam", "feat")
+	cmd := exec.Command("git", "stash", "pop", "-q")
+	cmd.Dir, cmd.Env = w, append(os.Environ(), "GIT_DIR="+r.shadow+r.gitDirOf(r.feat), "GIT_WORK_TREE="+w)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("the stash didn't conflict: %s", out)
+	}
+	tip := strings.TrimSpace(r.worker(r.feat, "rev-parse", "HEAD"))
+
+	result := r.reconcile()
+
+	if got := r.rev(r.feat, "HEAD"); got != tip {
+		t.Errorf("HEAD = %s, want the worker's %s", got, tip)
+	}
+	if got := r.git(r.feat, "status", "--porcelain"); got != "UU a.txt\n" {
+		t.Errorf("git status =\n%s", got)
+	}
+	if len(result.Aside) > 0 {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+}
+
+func TestAnOrphanWorktreeMadeOnTheWorkerIsMadeOnMain(t *testing.T) {
+	for _, taken := range []bool{false, true} {
+		r := newRig(t)
+		r.snapshot(r.main)
+		made := filepath.Join(filepath.Dir(r.feat), "made")
+		r.workerWorktree(made, "made")
+		r.worker(made, "switch", "-q", "--orphan", "pages")
+		r.write(r.shadow+made, "index.html", "pages\n")
+		r.worker(made, "add", "index.html")
+		if taken {
+			r.git(r.main, "branch", "pages")
+		}
+
+		result := r.reconcile()
+
+		if taken {
+			r.expectMissing(made)
+			r.expectFile(r.recovery+"/worker"+made+"/index.html", "pages\n")
+			if _, ok := asideOf(result, made); !ok {
+				t.Errorf("with the branch taken on main: kept aside %v", result.Aside)
+			}
+			continue
+		}
+		if got := strings.TrimSpace(r.git(made, "symbolic-ref", "HEAD")); got != "refs/heads/pages" {
+			t.Errorf("the worktree is on %s", got)
+		}
+		if got := r.git(made, "status", "--porcelain"); got != "A  index.html\n" {
+			t.Errorf("git status =\n%s", got)
+		}
+		if len(result.Aside) > 0 {
+			t.Errorf("kept aside %v", result.Aside)
+		}
+	}
+}

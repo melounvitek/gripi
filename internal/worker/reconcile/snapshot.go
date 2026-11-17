@@ -194,10 +194,8 @@ func check(ctx context.Context, sel Selection, registered []worktree) error {
 		if i < 0 {
 			return fmt.Errorf("%s isn't a worktree of %s", root, sel.GitDir)
 		}
-		for _, name := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"} {
-			if _, err := os.Lstat(filepath.Join(registered[i].GitDir, name)); err == nil {
-				return fmt.Errorf("finish the merge, rebase, cherry-pick or revert in %s first", root)
-			}
+		if inProgress(registered[i].GitDir) {
+			return fmt.Errorf("finish the merge, rebase, cherry-pick or revert in %s first", root)
 		}
 		index, err := repo{}.index(ctx, registered[i])
 		if err != nil {
@@ -208,6 +206,15 @@ func check(ctx context.Context, sel Selection, registered []worktree) error {
 		}
 	}
 	return nil
+}
+
+// inProgress reports whether the worktree whose own Git folder is dir is in the middle of a merge, rebase, cherry-pick
+// or revert.
+func inProgress(dir string) bool {
+	return slices.ContainsFunc([]string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"}, func(name string) bool {
+		_, err := os.Lstat(filepath.Join(dir, name))
+		return err == nil
+	})
 }
 
 var lfsFilter = regexp.MustCompile(`(?m)^[^#\n]*[ \t]filter=lfs\b`)

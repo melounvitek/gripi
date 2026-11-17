@@ -269,6 +269,12 @@ func (r *reconciler) makePlan() error {
 			continue
 		}
 		w := back[i]
+		if inProgress(r.shadow.path(w.GitDir)) {
+			if err := r.keepCheckout(w, "the worker was in the middle of a merge, rebase, cherry-pick or revert there, which doesn't come back, so main keeps its own HEAD and index"); err != nil {
+				return err
+			}
+			continue
+		}
 		if w.Head == bw.Head && w.Index == bw.Index {
 			continue
 		}
@@ -337,6 +343,12 @@ func (r *reconciler) makePlan() error {
 	// Worktrees made on the worker.
 	for _, w := range back {
 		if slices.Contains(b.Registered, w.Root) {
+			continue
+		}
+		if inProgress(r.shadow.path(w.GitDir)) {
+			if err := r.keepWorktree(w, "made on the worker, which was in the middle of a merge, rebase, cherry-pick or revert there"); err != nil {
+				return err
+			}
 			continue
 		}
 		if e, err := lstat(w.Root); err != nil || e.Type != "" || slices.ContainsFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root }) {
