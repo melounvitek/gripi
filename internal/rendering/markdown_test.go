@@ -3,6 +3,9 @@ package rendering
 import (
 	"strings"
 	"testing"
+
+	nethtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 func TestMarkdownRendersBrowserHTMLAndSanitizesUntrustedContent(t *testing.T) {
@@ -72,6 +75,39 @@ func TestMarkdownDoesNotApplyElementIDs(t *testing.T) {
 			}
 			if strings.Contains(rendered, "id=") {
 				t.Errorf("rendered markdown applies an element id: %s", rendered)
+			}
+		})
+	}
+}
+
+// HTML that the parser can't normalise would reach the page with stray or unclosed tags, which can close the message's containers or wrap what follows it in a link.
+func TestMarkdownShowsHTMLItCannotBalanceAsText(t *testing.T) {
+	for _, example := range []struct{ name, source, text string }{
+		{"unclosed link", `<svg><br>x</svg><a href="https://evil.example/login">`, "&lt;a href="},
+		{"stray closing tags", `<svg><br>x</svg></div></article></section></div><h1>Fake</h1>`, "&lt;/div&gt;&lt;h1&gt;Fake&lt;/h1&gt;"},
+		{"too deeply nested", strings.Repeat("<div>", 513) + "x", "&lt;div&gt;x"},
+	} {
+		t.Run(example.name, func(t *testing.T) {
+			rendered := NewMarkdown().Render(example.source)
+			if !strings.Contains(rendered, example.text) {
+				t.Errorf("source is not shown as text: %s", rendered)
+			}
+			var open []string
+			tokenizer := nethtml.NewTokenizer(strings.NewReader(rendered))
+			for tokenizer.Next() != nethtml.ErrorToken {
+				token := tokenizer.Token()
+				switch {
+				case token.Type == nethtml.StartTagToken && token.DataAtom != atom.Br:
+					open = append(open, token.Data)
+				case token.Type == nethtml.EndTagToken:
+					if len(open) == 0 || open[len(open)-1] != token.Data {
+						t.Fatalf("rendered markdown has a stray </%s>: %s", token.Data, rendered)
+					}
+					open = open[:len(open)-1]
+				}
+			}
+			if len(open) > 0 {
+				t.Fatalf("rendered markdown leaves %v open: %s", open, rendered)
 			}
 		})
 	}
