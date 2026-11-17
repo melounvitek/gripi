@@ -660,10 +660,11 @@ func (registry *Registry) CloseClientIfStartedBefore(path string, moment time.Ti
 }
 
 // working reports whether a client runs or holds prompts deferred during a compaction, which exist only in its process
-// until it delivers them, so that closing it would lose them.
+// until it delivers them, so that closing it would lose them. The deferral is read first, as it ends when Pi takes the
+// prompts and starts running, so reading Busy first could miss both.
 func working(client Client) bool {
 	deferrer, ok := client.(CompactionPromptDeferrer)
-	return client.Busy() || ok && deferrer.DeferringCompactionPrompts()
+	return ok && deferrer.DeferringCompactionPrompts() || client.Busy()
 }
 
 // restartIfStartedBefore replaces an idle client that started no later than moment with a new one from the factory,

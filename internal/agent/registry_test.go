@@ -611,10 +611,25 @@ func TestIdleChecksKeepAClientDeferringCompactionPrompts(t *testing.T) {
 	}
 }
 
+func TestIdleChecksKeepAClientThatStartsRunningAsItsDeferredPromptsGo(t *testing.T) {
+	client := newRegistryClient()
+	client.deferring = true
+	client.runsOnBusy = true
+	registry := NewRegistry(nil, nil)
+	if err := registry.Register("/session", client); err != nil {
+		t.Fatal(err)
+	}
+
+	if closed, err := registry.CloseClientIfIdle("/session"); err != nil || closed || client.closed() {
+		t.Fatalf("retired=%v closed=%v err=%v", closed, client.closed(), err)
+	}
+}
+
 type registryClient struct {
 	mu           sync.Mutex
 	isBusy       bool
 	deferring    bool
+	runsOnBusy   bool // Once Busy answers, the client starts running and stops deferring.
 	settled      *time.Time
 	isClosed     bool
 	closeErr     error
@@ -651,7 +666,11 @@ func (client *registryClient) setSettled(value *time.Time) {
 func (client *registryClient) Busy() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	return client.isBusy
+	busy := client.isBusy
+	if client.runsOnBusy {
+		client.isBusy, client.deferring = true, false
+	}
+	return busy
 }
 func (client *registryClient) BusySince() *time.Time { return nil }
 func (client *registryClient) SettledAt() *time.Time {
