@@ -578,8 +578,9 @@ function acceptQueuedMessage(command, kind, reply) {
   }
   const pending = { kind, message: command.message, timer: null };
   pendingMessages.push(pending);
-  respond(command, true, { data: { disposition: "queued" } });
+  // Like Pi, report the queue before the answer, which a stop right after it relies on to find the message queued.
   emit({ type: "queue_update", ...queuedMessages() });
+  respond(command, true, { data: { disposition: "queued" } });
   if (kind === "steering" && command.message === prompts.queuedAbortSteer) {
     queuedAbortSteer = command.message;
     return;

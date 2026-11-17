@@ -312,8 +312,8 @@ for (const type of ["steer", "follow_up"]) {
     await readRecords(records, 4);
     for (const message of removed) {
       child.stdin.write(`${JSON.stringify({ id: message, type, message })}\n`);
-      assert.equal((await nextRecord(records)).success, true);
       assert.equal((await nextRecord(records)).type, "queue_update");
+      assert.equal((await nextRecord(records)).success, true);
     }
 
     child.stdin.write(`${JSON.stringify({ id: "clear", type: "clear_queue" })}\n`);
@@ -342,6 +342,7 @@ for (const type of ["steer", "follow_up"]) {
     assert.equal((await nextRecord(records)).type, "queue_update");
     assert.deepEqual((await nextRecord(records)).data, { steering: [], followUp: [] });
     child.stdin.write(`${JSON.stringify({ id: "fresh", type, message: "Deliver after clearing" })}\n`);
+    assert.equal((await nextRecord(records)).type, "queue_update");
     assert.equal((await nextRecord(records)).success, true);
     const events = [];
     while (events.at(-1)?.type !== "agent_settled") events.push(await nextRecord(records));
@@ -361,11 +362,11 @@ test("fake Pi clear_queue clears both queues but preserves ongoing tool and assi
 
   for (const [type, message] of [["steer", "Discard steering"], ["follow_up", "Discard follow-up"]]) {
     child.stdin.write(`${JSON.stringify({ id: type, type, message })}\n`);
-    assert.equal((await nextRecord(records)).success, true);
     const queue = await nextRecord(records);
     assert.equal(queue.type, "queue_update");
     assert.deepEqual(queue.steering, ["Discard steering"]);
     assert.deepEqual(queue.followUp, type === "follow_up" ? ["Discard follow-up"] : []);
+    assert.equal((await nextRecord(records)).success, true);
   }
   child.stdin.write(`${JSON.stringify({ id: "pending", type: "get_state" })}\n`);
   assert.equal((await nextRecord(records)).data.pendingMessageCount, 2);
@@ -397,8 +398,8 @@ test("fake Pi clear_queue forgets held steering so a later abort cannot deliver 
   assert.equal((await nextRecord(records)).id, "start");
   await readRecords(records, 4);
   child.stdin.write(`${JSON.stringify({ id: "held", type: "steer", message: prompts.queuedAbortSteer })}\n`);
-  assert.equal((await nextRecord(records)).success, true);
   assert.deepEqual((await nextRecord(records)).steering, [prompts.queuedAbortSteer]);
+  assert.equal((await nextRecord(records)).success, true);
   child.stdin.write(`${JSON.stringify({ id: "clear", type: "clear_queue" })}\n`);
   assert.equal((await nextRecord(records)).type, "queue_update");
   assert.deepEqual((await nextRecord(records)).data, { steering: [prompts.queuedAbortSteer], followUp: [] });
