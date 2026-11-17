@@ -218,6 +218,8 @@ test("Hermes starting takes the cursor though Pi replies meanwhile", async ({ pa
 
 test("shown again, Hermes gives the cursor to the dialog it asks in", async ({ page }) => {
   await hermesButton(page).click();
+  // Until the panel's page has loaded, Enter would only add a new line.
+  await expect(page.locator("#hermes-panel")).not.toHaveClass(/is-loading/);
   const composer = panel(page).getByLabel("Message to Hermes");
   await composer.fill(hermes.permission.prompt);
   await composer.press("Enter");
