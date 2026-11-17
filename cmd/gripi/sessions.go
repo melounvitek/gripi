@@ -423,7 +423,7 @@ func age(elapsed time.Duration) string {
 
 const newHelp = `Usage:
   gripi new <directory> [message] [--parent <session>] [--name <name>]
-            [--id | --json]
+            [--model <provider/id>] [--thinking <level>] [--id | --json]
 
 Starts a session in a project directory, then prints it. With a message, it
 also sends that as the first prompt, as 'gripi send' does, and returns once Pi
@@ -442,6 +442,10 @@ show as unread as in any session. A sub-session can't start sub-sessions
 of its own. Nor can a session on a remote machine (see 'gripi worker'),
 because gripi there can't start sessions.
 
+--model and --thinking choose the model and thinking level instead of the
+parent's, or instead of Pi's defaults for a session without a parent. Pi
+changes a thinking level that the model doesn't support to one that it does.
+
 When the message cannot be sent, or the session cannot get its name, model or
 parent, the new session is deleted again and the command fails.
 
@@ -455,6 +459,11 @@ Flags:
                       prefix of it, or its file path, such as
                       "$PI_SESSION_FILE" for the session that runs the command
   --name <name>       Name the new session
+  --model <provider/id>
+                      Start with this model: a provider and model ID from
+                      'pi --list-models', such as anthropic/claude-sonnet-4-5
+  --thinking <level>  Start with this thinking level: off, minimal, low,
+                      medium, high, xhigh or max
   --id                Print only the session's ID
   --json              Print the session as a JSON object instead of a table
 
@@ -475,6 +484,8 @@ func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) i
 	onlyID := flags.Bool("id", false, "")
 	parentReference := flags.String("parent", "", "")
 	name := flags.String("name", "", "")
+	model := flags.String("model", "", "")
+	thinking := flags.String("thinking", "", "")
 	positional, err := parseArguments(flags, arguments)
 	if err != nil {
 		return usageError(stderr, "new", err.Error())
@@ -503,7 +514,7 @@ func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) i
 	if err != nil {
 		return failure(stderr, "new", err)
 	}
-	form := url.Values{"cwd": {directory}, "name": {*name}}
+	form := url.Values{"cwd": {directory}, "name": {*name}, "model": {*model}, "thinking": {*thinking}}
 	// The parent gets a report once the run of the first message is over.
 	sender := ""
 	if *parentReference != "" {
