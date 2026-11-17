@@ -86,6 +86,36 @@ func TestMultiUserTokenApprovalRemainsBrowserBound(t *testing.T) {
 	}
 }
 
+func TestWorkspaceKeyGuessesAreRateLimited(t *testing.T) {
+	cfg := multiUserConfig(t.TempDir())
+	cfg.AdminPassword = "secret"
+	cfg.BrowserAuthDisabled = false
+	handler := multiUserHandler(t, cfg)
+	token := "piu_correct_horse_42"
+	submit := func(key string) *httptest.ResponseRecorder {
+		return postWorkspaceForm(handler, "/workspace-key", url.Values{"workspace_key": {key}}, "")
+	}
+	bootstrap := postWorkspaceForm(handler, "/workspace-key", url.Values{"workspace_key": {token}, "admin_password": {"secret"}}, "")
+	if bootstrap.Code != http.StatusSeeOther {
+		t.Fatalf("bootstrap = %d %s", bootstrap.Code, bootstrap.Body.String())
+	}
+	for _, typo := range []string{"piu_correct_horse_24", "piu_corect_horse_42"} {
+		if response := submit(typo); response.Code != http.StatusForbidden {
+			t.Fatalf("typo %q = %d %s", typo, response.Code, response.Body.String())
+		}
+	}
+	if response := submit(token); response.Code != http.StatusSeeOther || cookieValue(response, "gripi_workspace") == "" {
+		t.Fatalf("token after typos = %d %s", response.Code, response.Body.String())
+	}
+	for range 30 {
+		submit("piu_wrong_horse_00")
+	}
+	limited := submit(token)
+	if limited.Code != http.StatusTooManyRequests || cookieValue(limited, "gripi_workspace") != "" {
+		t.Fatalf("token after guesses = %d %s", limited.Code, limited.Body.String())
+	}
+}
+
 func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	cfg := multiUserConfig(fixture.root)
