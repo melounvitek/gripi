@@ -3,6 +3,9 @@ package rendering
 import (
 	"strings"
 	"testing"
+
+	nethtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 func TestMarkdownRendersBrowserHTMLAndSanitizesUntrustedContent(t *testing.T) {
@@ -72,6 +75,43 @@ func TestMarkdownDoesNotApplyElementIDs(t *testing.T) {
 			}
 			if strings.Contains(rendered, "id=") {
 				t.Errorf("rendered markdown applies an element id: %s", rendered)
+			}
+		})
+	}
+}
+
+// Stray or unclosed tags could close the message's containers or wrap what follows it in a link.
+func TestMarkdownBalancesHTML(t *testing.T) {
+	for _, example := range []struct{ name, source, text string }{
+		{"unclosed link", `<svg><br>x</svg><a href="https://evil.example/login">`, "x"},
+		{"stray closing tags", `<svg><br>x</svg></div></article></section></div><h1>Fake</h1>`, "Fake"},
+		// The sanitizer reads these differently from an HTML parser, which sees only a comment inside the SVG.
+		{"hidden unclosed link", `<svg><style><!--</style><a href="https://evil.example/login">--></style></svg>`, "--&gt;"},
+		{"hidden stray closing tags", `<svg><style><!--</style></div></article></section></div><h1>Fake</h1>--></style></svg>`, "Fake"},
+		// Too deep for the parser, so shown as text.
+		{"too deeply nested", strings.Repeat("<div>\n", 513) + "x", "&lt;div&gt;<br>"},
+	} {
+		t.Run(example.name, func(t *testing.T) {
+			rendered := NewMarkdown().Render(example.source)
+			if !strings.Contains(rendered, example.text) {
+				t.Errorf("rendered markdown does not contain %q: %s", example.text, rendered)
+			}
+			var open []string
+			tokenizer := nethtml.NewTokenizer(strings.NewReader(rendered))
+			for tokenizer.Next() != nethtml.ErrorToken {
+				token := tokenizer.Token()
+				switch {
+				case token.Type == nethtml.StartTagToken && token.DataAtom != atom.Br:
+					open = append(open, token.Data)
+				case token.Type == nethtml.EndTagToken:
+					if len(open) == 0 || open[len(open)-1] != token.Data {
+						t.Fatalf("rendered markdown has a stray </%s>: %s", token.Data, rendered)
+					}
+					open = open[:len(open)-1]
+				}
+			}
+			if len(open) > 0 {
+				t.Fatalf("rendered markdown leaves %v open: %s", open, rendered)
 			}
 		})
 	}

@@ -68,7 +68,12 @@ func (markdown *Markdown) Render(source string) string {
 	if err := markdown.engine.Convert([]byte(source), &rendered); err != nil {
 		return ""
 	}
-	return removeIDs(markdown.policy.Sanitize(continueOrderedLists(rendered.String())))
+	// Parsing the sanitized HTML balances its tags, which the sanitizer doesn't. What the parser refuses is shown as text.
+	normalized, err := continueOrderedLists(markdown.policy.Sanitize(rendered.String()))
+	if err != nil {
+		return "<p>" + strings.ReplaceAll(stdhtml.EscapeString(source), "\n", "<br>\n") + "</p>"
+	}
+	return removeIDs(normalized)
 }
 
 // Element ids belong to the application, and the sanitizer's policy cannot refuse them.
@@ -131,11 +136,11 @@ func highlightCode(code, language string) string {
 	return output.String()
 }
 
-func continueOrderedLists(fragment string) string {
+func continueOrderedLists(fragment string) (string, error) {
 	context := &nethtml.Node{Type: nethtml.ElementNode, Data: "div", DataAtom: atom.Div}
 	nodes, err := nethtml.ParseFragment(strings.NewReader(fragment), context)
 	if err != nil {
-		return fragment
+		return "", err
 	}
 	nextStart := 0
 	for _, node := range nodes {
@@ -165,11 +170,11 @@ func continueOrderedLists(fragment string) string {
 	}
 	var output strings.Builder
 	for _, node := range nodes {
-		if nethtml.Render(&output, node) != nil {
-			return fragment
+		if err := nethtml.Render(&output, node); err != nil {
+			return "", err
 		}
 	}
-	return output.String()
+	return output.String(), nil
 }
 
 func setAttribute(attributes []nethtml.Attribute, key, value string) []nethtml.Attribute {
