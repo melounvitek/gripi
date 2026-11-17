@@ -405,7 +405,13 @@ func (manager *Manager) Return(ctx context.Context, key string, prepare func(ctx
 		return err
 	}
 	recovery := manager.recoveryFolder(placement.Move)
-	result, err := reconcile.Reconcile(ctx, filepath.Join(folder, "base"), filepath.Join(folder, "shadow"), recovery)
+	base, shadow := filepath.Join(folder, "base"), filepath.Join(folder, "shadow")
+	result, err := reconcile.Reconcile(ctx, base, shadow, recovery)
+	if err != nil && ctx.Err() == nil {
+		// Running it again would most likely fail the same way, and the session can't start until it's back.
+		log.Printf("the return of session %s from worker %s failed, so it keeps aside what it hasn't brought back: %v", key, placement.Worker, err)
+		result, err = reconcile.KeepAside(ctx, base, shadow, recovery, err)
+	}
 	if err != nil {
 		return fmt.Errorf("bring the session's changes to this machine: %w", err)
 	}
