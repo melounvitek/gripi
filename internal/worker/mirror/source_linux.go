@@ -55,6 +55,7 @@ type Source struct {
 	queue        []rawEvent // unbounded, so the kernel's queue rarely overflows
 	qsig         chan struct{}
 	moveFrom     *rawMove
+	lost         map[string]bool // roots whose watches went, which the next barrier walks again
 	needRescan   bool
 	wtChanged    bool
 	ignChanged   bool
@@ -149,7 +150,7 @@ func (s *Source) Run(ctx context.Context, stream io.ReadWriter) (err error) {
 	s.sender = newSender(s.unit, s.opts, stream)
 	defer s.sender.close()
 	s.sender.watch, s.sender.settling = s.addWatch, map[string]stamp{}
-	s.wdPath, s.pathWd, s.indexChanged = map[int32]string{}, map[string]int32{}, map[string]bool{}
+	s.wdPath, s.pathWd, s.indexChanged, s.lost = map[int32]string{}, map[string]int32{}, map[string]bool{}, map[string]bool{}
 	s.qsig = make(chan struct{}, 1)
 
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
@@ -261,7 +262,7 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 	if err := s.checkSkipped(); err != nil {
 		return err
 	}
-	if err := s.walkUnwatchedRoots(); err != nil {
+	if err := s.walkLostRoots(); err != nil {
 		return err
 	}
 	if err := s.retryUnread(); err != nil {
@@ -361,13 +362,14 @@ func (s *Source) syncSentinel() error {
 	return nil
 }
 
-// walkUnwatchedRoots walks the roots that are here but not watched, such as one that moved away and back or was made
-// again, which no event tells, and marks what they lost meanwhile.
-func (s *Source) walkUnwatchedRoots() error {
+// walkLostRoots walks the roots that lost their watches once they are here again, which no event may tell, as when one
+// comes back as another folder, and marks what they lost meanwhile. A lost root that isn't here goes on the
+// destination.
+func (s *Source) walkLostRoots() error {
 	var walked []string
 	seen := map[string]bool{}
 	for _, r := range s.roots {
-		if _, watched := s.pathWd[r]; watched {
+		if !s.lost[r] {
 			continue
 		}
 		if err := s.walk(r, seen); err != nil {
@@ -375,6 +377,9 @@ func (s *Source) walkUnwatchedRoots() error {
 		}
 		if seen[r] {
 			walked = append(walked, r)
+			delete(s.lost, r)
+		} else if _, sent := s.sent[r]; sent {
+			s.mark(r, writesUnknown)
 		}
 	}
 	if len(walked) == 0 {
@@ -553,8 +558,13 @@ func (s *Source) handleEvent(e rawEvent) error {
 	}
 	if e.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 		if s.isRoot(dir) {
-			// Its watches went with it, so the next barrier walks it again if it is here.
+			// Its watches went with it, and those of the roots in it.
 			s.unwatch(dir)
+			for _, r := range s.roots {
+				if within(r, dir) {
+					s.lost[r] = true
+				}
+			}
 			s.mark(dir, writesUnknown)
 		}
 		return nil

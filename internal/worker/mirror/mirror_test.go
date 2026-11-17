@@ -487,7 +487,7 @@ func TestAWorktreeDeletedWhileMirroringGoesOnMainAlsoAfterARescan(t *testing.T) 
 func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 	unit := newRepo(t)
 	r := newRig(t, unit)
-	for _, folder := range []string{unit.Worktrees[0], unit.Main} {
+	for i, folder := range []string{unit.Worktrees[0], unit.Main} {
 		away := folder + ".bak"
 		if err := os.Rename(folder, away); err != nil {
 			t.Fatal(err)
@@ -500,16 +500,23 @@ func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 		writeFile(t, folder, "src/new.rb", "new\n")
 		r.verify(t)
 
-		// Away and back between barriers, with a file deleted meanwhile.
+		// Away and back between barriers, with a file and a worktree in it deleted meanwhile, and its mode changed, which
+		// makes an early send watch it again.
+		git(t, folder, "worktree", "add", "-q", "-b", fmt.Sprint("nested", i), filepath.Join(folder, "nested"))
+		r.verify(t)
 		if err := os.Rename(folder, away); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Remove(filepath.Join(away, "src/d1/f2.txt")); err != nil {
-			t.Fatal(err)
+		for _, p := range []string{"src/d1/f2.txt", "nested"} {
+			if err := os.RemoveAll(filepath.Join(away, p)); err != nil {
+				t.Fatal(err)
+			}
 		}
+		os.Chmod(away, 0o750)
 		if err := os.Rename(away, folder); err != nil {
 			t.Fatal(err)
 		}
+		time.Sleep(200 * time.Millisecond)
 		r.verify(t)
 
 		// Back as another folder, which no event tells.
