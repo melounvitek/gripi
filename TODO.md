@@ -37,3 +37,18 @@
 - Fuzzy, phrase and `re:` queries in `gripi search`, as Pi's `/resume` picker has. It matches one literal text, ignoring case.
 - Report a sub-session that waits for an answer. A sub-session's parent hears from it only once its turn ends, so one that waits on a dialog or a `gripi sudo` request, which sends no notification either, waits unseen.
 - Keep a sub-session's due report over a restart. Reports live in memory, so a gateway restart, a lost Pi, or Stop with queued messages, which closes the sub-session's Pi, drops the report its parent was due.
+- Send a sub-session's report when Pi refuses its queued prompt. The prompt fails, but the report its parent expects waits until the sub-session's next turn ends.
+- Follow a folder above a moved session's worktree that is renamed on the worker, such as `~/Work/client`. The mirror watches only the unit's folders, so the next edit at the new path is sent as a delete of the old one, and a return removes that file on main. Fixing it means watching the folders above each worktree.
+- Mirror edge cases while a moved session's folder is away. If Git's worktree list is refreshed meanwhile, the mirror stops tracking that worktree; main stays safe, because a return then keeps its own copy. If the mirror scans again while the main checkout is away, it stops. A change to `.git/info/exclude` while the main checkout is away reaches the other worktrees only at the next full scan.
+- Reword the return's notice for files made outside the repository's worktrees. It says "Main kept its own …" for them too, though main never had them.
+- Keep Pi open when a prompt waits behind the prompts held during a compaction. Such a prompt can still time out and close Pi, unlike one that Pi has accepted.
+- Let a fork or clone go ahead while the page checks for updates. When the check comes at the moment it starts, the fork or clone fails with "please retry".
+- Don't make a page load wait for the deletion of a session that it remaps onto. Only that session waits, but the page load holds one of the two heavy-request slots meanwhile.
+- Keep the access prompt on a request that another tab answers. When another tab answers the shown request just before the click, the prompt moves on to the next request.
+- End every process of a `gripi sudo` command on Stop on main. Only the command's first process gets SIGTERM, so processes it started may keep running as root. A worker ends them with the session's cgroup; main would need one too.
+- Rate limits behind a reverse proxy. The limiters count by the client's address, so all clients behind a proxy share one limit.
+- Move Electron to its newest major release, 45.x on 2026-11-17. The desktop app is on the newest 43.x.
+- Bring back the reflogs of repositories that store refs in reftable. A return appends the worker's reflog entries only to file-based reflogs; `git reflog write` could do it once Gripi can require Git 2.52.
+- Don't drop a live message that repeats an earlier one. The page drops a live message with the same role, text and second as one in the history, which can be a real repeat.
+- Tell a Pi that crashed right after a turn from Pi CLI. When the gateway hasn't looked at Pi's last writes before Pi exits, it takes them for Pi CLI's and asks to take the session over.
+- Fix the E2E specs that fail only in full local runs, on master too, and pass on their own: `environment.spec.js:320`, `new_session.spec.js:67`, `command_palette.spec.js:319` and `tree_session.spec.js:81`. Also look at the one-off CI failures of `notifications.spec.js:131` and `active_activity.spec.js:735`.
