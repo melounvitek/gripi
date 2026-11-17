@@ -327,7 +327,11 @@ export const live = {
     gates: { thinking: "Finish the first thought?", ended: "Answer after thinking?", failing: "Fail while thinking?" },
     errorPrompt: "Fail while thinking",
     abortPrompt: "Keep thinking until stopped",
+    // The page takes a live message for one in the history with its text from the same second, such as the thought
+    // that the scenario before saved, so each scenario has a thought of its own.
     thought: "Weighing the first option.",
+    errorThought: "Weighing the second option.",
+    abortThought: "Weighing whether to go on.",
     error: "Provider stream ended while thinking.",
     reply: "Thinking characterization complete."
   }

@@ -19,10 +19,14 @@ for (const scenario of [
         const response = message(page, "assistant", scenario.texts[0]);
         await expect(response).toBeVisible();
         // The last block may still be wiping in while the view glides to it, which would move the reply between measurements.
+        // A promise of false would end the wait as well, so the page checks again until both have stopped.
         await page.waitForFunction(() => new Promise((resolve) => {
           const scroller = document.getElementById("conversation-scroll");
-          const top = scroller.scrollTop;
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve(scroller.scrollTop === top && !document.querySelector(".message-body--revealing"))));
+          const settle = (top) => requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (scroller.scrollTop === top && !document.querySelector(".message-body--revealing")) resolve(true);
+            else settle(scroller.scrollTop);
+          }));
+          settle(scroller.scrollTop);
         }));
         const conversation = await page.locator("#conversation-scroll").boundingBox();
         const article = await response.boundingBox();

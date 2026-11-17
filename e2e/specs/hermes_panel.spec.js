@@ -218,6 +218,8 @@ test("Hermes starting takes the cursor though Pi replies meanwhile", async ({ pa
 
 test("shown again, Hermes gives the cursor to the dialog it asks in", async ({ page }) => {
   await hermesButton(page).click();
+  // Until the panel's page has loaded, Enter would only add a new line.
+  await expect(page.locator("#hermes-panel")).not.toHaveClass(/is-loading/);
   const composer = panel(page).getByLabel("Message to Hermes");
   await composer.fill(hermes.permission.prompt);
   await composer.press("Enter");
@@ -302,6 +304,8 @@ test("Ctrl+Shift+H starts and ends Hermes's voice call while the panel shows, an
   await hermesButton(page).click();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
   await page.keyboard.press("Control+h");
+  // From the panel's page, the keys ask the page around it to hide the panel, which takes a moment.
+  await expect(page.locator("#hermes-panel")).toBeHidden();
   await page.keyboard.press("Control+Shift+h");
   await hermesButton(page).click();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();

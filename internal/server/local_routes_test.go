@@ -268,7 +268,9 @@ func TestThePromptAfterPiEndedStartsANewPi(t *testing.T) {
 	if response := postPrompt(local, socketHost, url.Values{"session": {alpha}, "message": {"Hello"}}); response.Code != http.StatusOK {
 		t.Fatalf("first prompt = %d %s", response.Code, response.Body.String())
 	}
-	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
+	// Once Pi is gone, what it wrote to the session that the gateway has not looked at yet would pass for Pi CLI's. The
+	// poll that finds the turn settled has looked.
+	waitForFakePiSettled(t, handler, alpha, 0)
 	// Pi ends by itself, as when it crashes or the connection to the worker that runs it breaks.
 	started, _ := fakePiPIDs(t, alpha)
 	if err := syscall.Kill(int(started[0]), syscall.SIGKILL); err != nil {
