@@ -188,6 +188,7 @@ Requirements and limits:
 - sudoers must not keep `SUDO_ASKPASS` or `GRIPI_SUDO_TOKEN` with `env_keep`, which would pass them on to the command.
 - Every command needs your approval and your password. Gripi runs sudo with `-k`, so an earlier sudo login doesn’t count.
 - `!` commands and nested subagents can’t use it. Gripi can’t tell which conversation they belong to, so `gripi sudo` fails at once.
+- When `gripi sudo` ends before the command, such as when you stop the agent, sudo passes SIGTERM on to the command’s first process only. Processes that it started, such as the step in progress of `sh -c 'a; b'`, may keep running as root. On a [worker](#on-a-worker), they stop with the session.
 - Hermes stops a terminal command after 180 seconds unless its model sets a longer timeout, and the wait for your answer counts.
 - In [multi-user mode](#multi-user-mode), only the session’s owner sees the request and can answer it.
 

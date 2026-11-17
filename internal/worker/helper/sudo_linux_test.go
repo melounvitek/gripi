@@ -21,7 +21,8 @@ import (
 // fakeSudo stands in for sudo, which needs a password and root. Named sudo, it is a parent that gripi's askpass
 // program accepts. It asks askpass for the password twice, as sudo does after a wrong one, and records a hash of each
 // answer in askpass next to itself. Then it runs the command as this user, who can enter the namespaces of its own
-// views only through their user namespace, which root doesn't need.
+// views only through their user namespace, which root doesn't need. Like classic sudo 1.9.5p2 to 1.9.12, it passes
+// SIGTERM on to the command, but drops one from its own process group, such as from its parent, gripi.
 const fakeSudo = `#!/bin/sh
 [ "$1 $2 $3 $4 $5" = "-A -k -p gripi --" ] || { echo "fake sudo: unexpected arguments $*" >&2; exit 99; }
 shift 5
@@ -29,7 +30,17 @@ for call in 1 2; do
 	"$SUDO_ASKPASS" "[sudo: gripi] Password: " | sha256sum | cut -d ' ' -f 1 >> "${0%/*}/askpass"
 done
 [ "$1" = nsenter ] && shift && set -- nsenter --user --preserve-credentials "$@"
-exec "$@"
+trap '[ $(ps -o pgid= -p $PPID) = $(ps -o pgid= -p $$) ] || kill -TERM $command' TERM
+"$@" &
+command=$!
+# wait returns early when the trap runs.
+wait $command
+status=$?
+while kill -0 $command 2>/dev/null; do
+	wait $command
+	status=$?
+done
+exit $status
 `
 
 // sudoRun is `gripi worker sudo` as main runs it, under the user's systemd, for a command that the helper prepared.

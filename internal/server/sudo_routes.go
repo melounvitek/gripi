@@ -264,7 +264,9 @@ func (app *application) runSudo(response http.ResponseWriter, request *http.Requ
 	command.Env = append(agent.ScrubbedEnvironment(os.Environ()), "SUDO_ASKPASS="+executable, "GRIPI_SUDO_TOKEN="+token)
 	var stdout, stderr cappedBuffer
 	command.Stdout, command.Stderr = &stdout, &stderr
-	// sudo passes SIGTERM on to the command.
+	// sudo passes SIGTERM on to the command. Classic sudo 1.9.5p2 to 1.9.12 drops one from its own process group, so
+	// sudo gets a group of its own, not gripi's.
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
 	command.WaitDelay = 10 * time.Second
 	err = command.Run()
