@@ -483,11 +483,14 @@ func TestAWorktreeDeletedWhileMirroringGoesOnMainAlsoAfterARescan(t *testing.T) 
 }
 
 // A folder of the unit that the session renames away and back, or replaces with a copy, comes back whole on main, also
-// the main checkout with the Git folder in it.
+// the main checkout with the Git folder in it, and a worktree in it.
 func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 	unit := newRepo(t)
 	r := newRig(t, unit)
-	for i, folder := range []string{unit.Worktrees[0], unit.Main} {
+	inner := filepath.Join(unit.Main, "inner")
+	git(t, unit.Main, "worktree", "add", "-q", "-b", "inner", inner)
+	r.verify(t)
+	for _, folder := range []string{unit.Worktrees[0], inner, unit.Main} {
 		away := folder + ".bak"
 		if err := os.Rename(folder, away); err != nil {
 			t.Fatal(err)
@@ -500,17 +503,13 @@ func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 		writeFile(t, folder, "src/new.rb", "new\n")
 		r.verify(t)
 
-		// Away and back between barriers, with a file and a worktree in it deleted meanwhile, and its mode changed, which
-		// makes an early send watch it again.
-		git(t, folder, "worktree", "add", "-q", "-b", fmt.Sprint("nested", i), filepath.Join(folder, "nested"))
-		r.verify(t)
+		// Away and back between barriers, with a file deleted and its mode changed meanwhile, which makes an early send
+		// watch it again.
 		if err := os.Rename(folder, away); err != nil {
 			t.Fatal(err)
 		}
-		for _, p := range []string{"src/d1/f2.txt", "nested"} {
-			if err := os.RemoveAll(filepath.Join(away, p)); err != nil {
-				t.Fatal(err)
-			}
+		if err := os.Remove(filepath.Join(away, "src/d1/f2.txt")); err != nil {
+			t.Fatal(err)
 		}
 		os.Chmod(away, 0o750)
 		if err := os.Rename(away, folder); err != nil {
@@ -529,7 +528,21 @@ func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 		if err := os.RemoveAll(away); err != nil {
 			t.Fatal(err)
 		}
+		r.barrier(t) // before the next folder goes, as the rescan that this brings stops without the main checkout
 	}
+
+	// A worktree in a folder that is away is deleted meanwhile.
+	away := unit.Main + ".bak"
+	if err := os.Rename(unit.Main, away); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(away, "inner")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(away, unit.Main); err != nil {
+		t.Fatal(err)
+	}
+	r.verify(t)
 }
 
 // A folder outside Git, such as Pi's session folders, has no worktrees, also when it is in another repository.

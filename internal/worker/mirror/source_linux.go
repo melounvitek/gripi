@@ -449,6 +449,11 @@ func (s *Source) unwatch(dir string) {
 			delete(s.pathWd, p)
 		}
 	}
+	for _, r := range s.roots {
+		if within(r, dir) {
+			s.lost[r] = true
+		}
+	}
 }
 
 func (s *Source) read() error {
@@ -558,13 +563,7 @@ func (s *Source) handleEvent(e rawEvent) error {
 	}
 	if e.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 		if s.isRoot(dir) {
-			// Its watches went with it, and those of the roots in it.
-			s.unwatch(dir)
-			for _, r := range s.roots {
-				if within(r, dir) {
-					s.lost[r] = true
-				}
-			}
+			s.unwatch(dir) // its watches went with it
 			s.mark(dir, writesUnknown)
 		}
 		return nil
