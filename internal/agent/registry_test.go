@@ -576,21 +576,38 @@ func TestRegistryClosesSettledClientWithOnlyObservers(t *testing.T) {
 	}
 }
 
-func TestCloseClientIfStartedBeforeKeepsAClientDeferringCompactionPrompts(t *testing.T) {
+func TestIdleChecksKeepAClientDeferringCompactionPrompts(t *testing.T) {
 	now := time.Unix(1_000, 0)
-	client := newRegistryClient()
-	client.deferring = true
-	registry := NewRegistry(nil, func() time.Time { return now })
-	if err := registry.Register("/session", client); err != nil {
-		t.Fatal(err)
+	checks := map[string]func(*Registry) (bool, error){
+		"close if idle":            func(registry *Registry) (bool, error) { return registry.CloseClientIfIdle("/session") },
+		"close without operations": func(registry *Registry) (bool, error) { return registry.CloseClientWithoutOperations("/session") },
+		"close if expired": func(registry *Registry) (bool, error) {
+			return registry.CloseClientIfExpired("/session", time.Minute, now.Add(time.Hour), nil)
+		},
+		"close idle clients": func(registry *Registry) (bool, error) {
+			closed, err := registry.CloseIdleClients(time.Minute, now.Add(time.Hour), nil, nil)
+			return len(closed) > 0, err
+		},
+		"close if started before": func(registry *Registry) (bool, error) { return registry.CloseClientIfStartedBefore("/session", now) },
+		"drain":                   func(registry *Registry) (bool, error) { return registry.DrainIfIdle(), nil },
 	}
+	for name, check := range checks {
+		t.Run(name, func(t *testing.T) {
+			client := newRegistryClient()
+			client.deferring = true
+			registry := NewRegistry(nil, func() time.Time { return now })
+			if err := registry.Register("/session", client); err != nil {
+				t.Fatal(err)
+			}
 
-	if closed, err := registry.CloseClientIfStartedBefore("/session", now); err != nil || closed || client.closed() {
-		t.Fatalf("deferring client: retired=%v closed=%v err=%v", closed, client.closed(), err)
-	}
-	client.deferring = false
-	if closed, err := registry.CloseClientIfStartedBefore("/session", now); err != nil || !closed || !client.closed() {
-		t.Fatalf("settled client: retired=%v closed=%v err=%v", closed, client.closed(), err)
+			if done, err := check(registry); err != nil || done || client.closed() {
+				t.Fatalf("deferring client: done=%v closed=%v err=%v", done, client.closed(), err)
+			}
+			client.deferring = false
+			if done, err := check(registry); err != nil || !done {
+				t.Fatalf("settled client: done=%v err=%v", done, err)
+			}
+		})
 	}
 }
 

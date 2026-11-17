@@ -2438,19 +2438,23 @@ func (client *Client) flushCompactionPrompts(compactionWillRetry bool) {
 			err = &agent.RequestTimeoutError{Command: command}
 		}
 		var timeout *agent.RequestTimeoutError
-		drop := (err == nil && response["success"] == true) || (errors.As(err, &timeout) && timeout.Accepted)
+		// A prompt that Pi refuses leaves the queue, as one sent at once would fail, and the user sees why.
+		drop := err == nil || (errors.As(err, &timeout) && timeout.Accepted)
 		client.mu.Lock()
 		// readerStopped may already have discarded the queue and its counters.
 		if client.compactionFollowUpCount > 0 {
 			if drop {
 				client.compactionFollowUpCount--
 				client.compactionFollowUpBytes -= promptPayloadSize(payload)
+				if err == nil && response["success"] != true {
+					client.appendGatewayEventLocked(map[string]any{"type": "queued_message_error", "error": "Failed to send queued message: " + stringValue(response["error"]), "gatewayTimestamp": client.clock().UnixMilli()})
+				}
 			} else {
 				client.compactionFollowUps = append([]map[string]any{payload}, client.compactionFollowUps...)
 				client.appendQueuedMessagesEventLocked()
 			}
 		}
-		stop := err != nil || response["success"] != true || len(client.compactionFollowUps) == 0
+		stop := err != nil || len(client.compactionFollowUps) == 0
 		if stop {
 			client.flushingCompactionFollowUps = false
 		}

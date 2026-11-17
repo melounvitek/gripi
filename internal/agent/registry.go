@@ -91,7 +91,7 @@ func (registry *Registry) registerStartedAt(path string, client Client, startedA
 		registry.mu.Unlock()
 		return ErrClientRetiring
 	}
-	if current != nil && current.client != client && (current.activeRequests > 0 || current.client.Busy()) {
+	if current != nil && current.client != client && (current.activeRequests > 0 || working(current.client)) {
 		registry.mu.Unlock()
 		return ErrOperationPending
 	}
@@ -543,7 +543,7 @@ func (registry *Registry) moveWithCommit(oldPath, newPath string, prepare func()
 			registry.mu.Unlock()
 			return ErrClientRetiring
 		}
-		if destination.activeRequests > 0 || destination.client.Busy() {
+		if destination.activeRequests > 0 || working(destination.client) {
 			registry.mu.Unlock()
 			return fmt.Errorf("%w: destination session client is busy", ErrOperationPending)
 		}
@@ -643,10 +643,12 @@ func (registry *Registry) RetireQueuedClient(path string, client Client) (bool, 
 	return retired, queued, err
 }
 func (registry *Registry) CloseClientIfIdle(path string) (bool, error) {
-	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests == 0 && !entry.client.Busy() }, nil)
+	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests == 0 && !working(entry.client) }, nil)
 }
 func (registry *Registry) CloseClientWithoutOperations(path string) (bool, error) {
-	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests <= entry.observers && !entry.client.Busy() }, nil)
+	return registry.closeWhen(path, func(entry *clientEntry) bool {
+		return entry.activeRequests <= entry.observers && !working(entry.client)
+	}, nil)
 }
 func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, now time.Time, onClose func(string)) (bool, error) {
 	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return !activityAt(entry).Add(idle).After(now) }, onClose)
@@ -654,13 +656,14 @@ func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, 
 
 // CloseClientIfStartedBefore retires an idle client that started no later than the given time.
 func (registry *Registry) CloseClientIfStartedBefore(path string, moment time.Time) (bool, error) {
-	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return startedBefore(entry, moment) }, nil)
+	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return !entry.startedAt.After(moment) }, nil)
 }
 
-func startedBefore(entry *clientEntry, moment time.Time) bool {
-	// Prompts deferred during a compaction exist only in the process until they are delivered.
-	state, ok := entry.client.(CompactionPromptDeferrer)
-	return !entry.startedAt.After(moment) && !(ok && state.DeferringCompactionPrompts())
+// working reports whether a client runs or holds prompts deferred during a compaction, which exist only in its process
+// until it delivers them, so that closing it would lose them.
+func working(client Client) bool {
+	deferrer, ok := client.(CompactionPromptDeferrer)
+	return client.Busy() || ok && deferrer.DeferringCompactionPrompts()
 }
 
 // restartIfStartedBefore replaces an idle client that started no later than moment with a new one from the factory,
@@ -670,7 +673,7 @@ func (registry *Registry) restartIfStartedBefore(path string, moment time.Time, 
 	registry.mu.Lock()
 	entry := registry.clients[path]
 	// Observers only read, and the old client keeps answering them until the new one is ready.
-	if registry.closed || entry == nil || entry.retiring || entry.activeRequests > entry.observers || entry.client.Busy() || !startedBefore(entry, moment) {
+	if registry.closed || entry == nil || entry.retiring || entry.activeRequests > entry.observers || working(entry.client) || entry.startedAt.After(moment) {
 		registry.mu.Unlock()
 		return false, nil
 	}
@@ -714,7 +717,7 @@ func (registry *Registry) restartIfStartedBefore(path string, moment time.Time, 
 // closeIdleWhen closes an idle client that is due and keeps its last event sequence for EventsAfter.
 func (registry *Registry) closeIdleWhen(path string, due func(*clientEntry) bool, onClose func(string)) (bool, error) {
 	closed, err := registry.closeWhen(path, func(entry *clientEntry) bool {
-		if entry.activeRequests != 0 || entry.client.Busy() || !due(entry) {
+		if entry.activeRequests != 0 || working(entry.client) || !due(entry) {
 			return false
 		}
 		registry.retiredSequences[path] = entry.client.EventSequence()
@@ -733,7 +736,7 @@ func (registry *Registry) closeIdleWhen(path string, due func(*clientEntry) bool
 func (registry *Registry) closeIdleAfter(path string, check func(Client) error) (bool, error) {
 	registry.mu.Lock()
 	entry := registry.clients[path]
-	if entry == nil || entry.retiring || entry.activeRequests != 0 || entry.client.Busy() {
+	if entry == nil || entry.retiring || entry.activeRequests != 0 || working(entry.client) {
 		registry.mu.Unlock()
 		return false, nil
 	}
@@ -765,7 +768,7 @@ func (registry *Registry) IdleClientPaths(idle time.Duration, now time.Time, exc
 	defer registry.mu.Unlock()
 	result := []string{}
 	for path, entry := range registry.clients {
-		if !except[path] && !entry.retiring && entry.activeRequests == 0 && !entry.client.Busy() && !activityAt(entry).Add(idle).After(now) {
+		if !except[path] && !entry.retiring && entry.activeRequests == 0 && !working(entry.client) && !activityAt(entry).Add(idle).After(now) {
 			result = append(result, path)
 		}
 	}
@@ -842,7 +845,7 @@ func (registry *Registry) DrainIfIdle() bool {
 		return false
 	}
 	for _, entry := range registry.clients {
-		if entry.activeRequests > 0 || entry.client.Busy() {
+		if entry.activeRequests > 0 || working(entry.client) {
 			return false
 		}
 	}

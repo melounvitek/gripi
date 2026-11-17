@@ -270,42 +270,34 @@ func TestCompactionRetryQueuesNativeSteeringAndFollowUps(t *testing.T) {
 	}
 }
 
-func TestNextPromptRetriesARejectedCompactionFlushFirst(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	stdoutReader, stdoutWriter := io.Pipe()
-	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
-	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
-
-	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
+func TestARefusedCompactionPromptFailsAndTheNextOneIsSent(t *testing.T) {
+	client, stdout, commands := queueTestClient(t, time.Second)
+	writeRecord(t, stdout, map[string]any{"type": "compaction_start"})
 	waitSequence(t, client, 1)
-	if _, queued, err := client.QueueCompactionPrompt(context.Background(), "retry me", nil, "steer"); err != nil || !queued {
-		t.Fatalf("queue = %v, %v", queued, err)
+	queueDeferred(t, client, "refused", "steer")
+	queueDeferred(t, client, "next", "followUp")
+	cursor := client.EventSequence()
+	writeRecord(t, stdout, map[string]any{"type": "compaction_end"})
+	refused := nextQueueCommand(t, commands, "prompt")
+	if refused["message"] != "refused" {
+		t.Fatalf("first prompt = %#v", refused)
 	}
-	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_end"})
-	decoder := json.NewDecoder(stdinReader)
-	var rejected map[string]any
-	if err := decoder.Decode(&rejected); err != nil {
-		t.Fatal(err)
+	writeRecord(t, stdout, map[string]any{"type": "response", "id": refused["id"], "command": "prompt", "success": false, "error": "No model selected"})
+	next := nextQueueCommand(t, commands, "prompt")
+	if next["message"] != "next" {
+		t.Fatalf("second prompt = %#v", next)
 	}
-	writeRecord(t, stdoutWriter, map[string]any{"id": rejected["id"], "type": "response", "command": "prompt", "success": false, "error": "retry"})
+	writeRecord(t, stdout, map[string]any{"type": "response", "id": next["id"], "command": "prompt", "success": true})
 
-	result := make(chan error, 1)
-	go func() {
-		_, err := client.Prompt(context.Background(), "new prompt", nil)
-		result <- err
-	}()
-	for _, expected := range []string{"retry me", "new prompt"} {
-		var command map[string]any
-		if err := decoder.Decode(&command); err != nil {
-			t.Fatal(err)
-		}
-		if command["message"] != expected {
-			t.Fatalf("command = %#v, want %q", command, expected)
-		}
-		writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
+	deadline := time.Now().Add(time.Second)
+	for client.DeferringCompactionPrompts() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
-	if err := <-result; err != nil {
-		t.Fatal(err)
+	if client.DeferringCompactionPrompts() || len(client.LiveSnapshot().QueuedMessages) != 0 {
+		t.Fatalf("queue after the flush = %#v", client.LiveSnapshot().QueuedMessages)
+	}
+	if failure := eventOfType(t, client.EventsAfter(cursor).Events, "queued_message_error"); failure["error"] != "Failed to send queued message: No model selected" {
+		t.Fatalf("failure = %#v", failure)
 	}
 }
 
