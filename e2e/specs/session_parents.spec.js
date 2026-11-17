@@ -59,13 +59,16 @@ for (const touch of [false, true]) {
     const row = (page, session) => page.locator(`.session-row[data-session-path="${session.file}"]`);
     const fold = (page, session) => page.locator(`details[data-worker-fold="${session.file}"]`);
 
-    test("done sub-sessions fold into a line under their parent that opens on the first tap and stays open", async ({ page, linked }, testInfo) => {
+    test("sub-sessions fold into a line of dots under their parent that opens on the first tap and stays open", async ({ page, linked }, testInfo) => {
       await page.clock.install();
       await openSidebar(page, linked.parent);
       const parentRow = row(page, linked.parent);
       const summary = fold(page, linked.parent).locator("summary");
       expect(await parentRow.evaluate((element) => element.nextElementSibling?.dataset.workerFold)).toBe(linked.parent.file);
-      await expect(summary).toHaveText("3 sub-sessions done");
+      await expect(summary).toHaveText("3 sub-sessions");
+      // A dot for each, named on hover.
+      await expect(summary.locator(".worker-dot")).toHaveCount(3);
+      for (const worker of linked.workers) await expect(summary.locator(`.worker-dot.is-done[title="${worker.title}"]`)).toBeVisible();
       for (const worker of linked.workers) await expect(row(page, worker)).toBeHidden();
 
       await press(summary);
@@ -99,24 +102,31 @@ for (const touch of [false, true]) {
       await openSidebar(page, open);
       await expect(row(page, open).locator("a.session.selected")).toBeVisible();
       expect(await row(page, linked.parent).evaluate((element) => element.nextElementSibling?.dataset.sessionPath)).toBe(open.file);
-      await expect(fold(page, linked.parent).locator("summary")).toHaveText("2 sub-sessions done");
+      await expect(fold(page, linked.parent).locator("summary")).toHaveText("2 sub-sessions");
     });
 
-    test("a running sub-session stays listed above the fold", async ({ page, linked }) => {
+    test("a running sub-session folds first, as a green dot", async ({ page, linked }) => {
       const running = linked.workers[2];
       // It runs until someone answers its dialog.
       await gripi("send", running.file, prompts.extension);
       try {
         await openSidebar(page, linked.parent);
+        const summary = fold(page, linked.parent).locator("summary");
+        await expect(summary).toHaveText("3 sub-sessions, 1 running");
+        const dot = summary.locator(".worker-dot").first();
+        await expect(dot).toHaveAttribute("title", running.title);
+        await expect(dot).toHaveClass(/\bis-running\b/);
+        await expect(row(page, running)).toBeHidden();
+
+        await press(summary);
         await expect(row(page, running).getByRole("img", { name: "Pi is working" })).toBeVisible();
-        expect(await row(page, linked.parent).evaluate((element) => element.nextElementSibling?.dataset.sessionPath)).toBe(running.file);
-        await expect(fold(page, linked.parent).locator("summary")).toHaveText("2 sub-sessions done");
+        expect(await summary.evaluate((element) => element.nextElementSibling?.dataset.sessionPath)).toBe(running.file);
       } finally {
         await gripi("stop", running.file);
       }
     });
 
-    test("an unread sub-session stays listed in bold under its parent until it is opened", async ({ page, linked }) => {
+    test("an unread sub-session folds as an orange dot, and its row is in bold, until it is opened", async ({ page, linked }) => {
       const [unread] = linked.workers;
       // Unlike its parent's, a message of the user's own leaves a reply to read.
       await gripi("send", unread.file, prompts.standard);
@@ -125,25 +135,27 @@ for (const touch of [false, true]) {
         expect(JSON.parse(stdout).find((session) => session.path === unread.file)).toMatchObject({ state: "idle", unread: true });
       }).toPass();
       await openSidebar(page, linked.parent);
+      const summary = fold(page, linked.parent).locator("summary");
+      await expect(summary).toHaveText("3 sub-sessions, 1 unread");
+      await expect(summary.locator(".worker-dot.is-unread")).toHaveAttribute("title", unread.title);
+
+      await press(summary);
       const link = row(page, unread).locator("a.session");
-      expect(await row(page, linked.parent).evaluate((element) => element.nextElementSibling?.dataset.sessionPath)).toBe(unread.file);
       await expect(link).toHaveClass(/\bunread\b/);
       await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
-      await expect(fold(page, linked.parent).locator("summary")).toHaveText("2 sub-sessions done");
-
       await press(link);
       await expect(page.getByRole("heading", { level: 1, name: unread.title })).toBeVisible();
       await openSidebar(page, linked.parent);
-      await expect(fold(page, linked.parent).locator("summary")).toHaveText("3 sub-sessions done");
-      await expect(row(page, unread)).toBeHidden();
+      await expect(summary).toHaveText("3 sub-sessions");
+      await expect(summary.locator(".worker-dot.is-unread")).toHaveCount(0);
     });
 
-    test("a pinned parent folds its done sub-sessions too", async ({ page, linked }) => {
+    test("a pinned parent folds its sub-sessions too", async ({ page, linked }) => {
       await gripi("pin", linked.parent.file);
       try {
         await openSidebar(page, linked.parent);
         const summary = page.locator(".pinned-sessions-list").locator(`details[data-worker-fold="${linked.parent.file}"] summary`);
-        await expect(summary).toHaveText("3 sub-sessions done");
+        await expect(summary).toHaveText("3 sub-sessions");
         await press(summary);
         for (const worker of linked.workers) await expect(row(page, worker)).toBeVisible();
       } finally {

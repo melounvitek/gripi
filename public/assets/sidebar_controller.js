@@ -22,7 +22,7 @@ export class SidebarController {
     this.temporarySessionsLimit = null;
     this.filterOperationActive = false;
     this.notifiedFinalReplyKeys = new Set();
-    // The parents whose done sub-sessions are unfolded, which every redraw of the sidebar keeps.
+    // The parents whose sub-sessions are unfolded, which every redraw of the sidebar keeps.
     this.openWorkerFolds = new Set();
     this.listenersBound = false;
   }
