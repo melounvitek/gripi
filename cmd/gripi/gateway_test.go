@@ -118,6 +118,8 @@ func eventually(t *testing.T, reference string, done func(gateway.LocalSession) 
 	var listed []gateway.LocalSession
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
 		_, stdout, _ := runCLI("list", "--json")
+		// Decoded into the last poll's sessions, a session would keep the fields that it omits, such as its parent.
+		listed = nil
 		if err := json.Unmarshal([]byte(stdout), &listed); err != nil {
 			t.Fatal(err)
 		}
