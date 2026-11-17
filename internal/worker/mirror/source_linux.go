@@ -382,7 +382,9 @@ func (s *Source) walkLostRoots() error {
 		}
 		if seen[r] {
 			walked = append(walked, r)
-			delete(s.lost, r)
+			if _, watched := s.pathWd[r]; watched { // or it went again before its watch
+				delete(s.lost, r)
+			}
 		} else if _, sent := s.sent[r]; sent {
 			s.mark(r, writesUnknown)
 		}
