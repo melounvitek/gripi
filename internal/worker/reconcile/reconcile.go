@@ -119,11 +119,9 @@ func Reconcile(ctx context.Context, base, shadow, recovery string) (Result, erro
 			return result, err
 		}
 		if r.failure != "" {
-			err = r.keepCopy()
-		} else {
-			err = r.makePlan()
+			return r.keepCopy()
 		}
-		if err != nil {
+		if err := r.makePlan(); err != nil {
 			return result, err
 		}
 		// The plan names objects and recovery files that must outlive a crash as it does.
@@ -160,21 +158,25 @@ func KeepAside(ctx context.Context, base, shadow, recovery string, cause error) 
 }
 
 // keepCopy keeps the worker's whole copy aside, for a return that failed before it planned anything, so that main
-// keeps everything as it was.
-func (r *reconciler) keepCopy() error {
+// keeps everything as it was. It needs nothing of Git, which may be what failed.
+func (r *reconciler) keepCopy() (Result, error) {
 	kept := r.in("worker")
 	if _, err := os.Lstat(r.shadow.at); err == nil {
 		if err := os.RemoveAll(kept); err != nil {
-			return err
+			return Result{}, err
 		}
 		if err := os.Rename(r.shadow.at, kept); err != nil {
-			return err
+			return Result{}, err
 		}
 	} else if _, err := os.Lstat(kept); err != nil { // not moved there before a crash either
-		return err
+		return Result{}, err
 	}
-	r.plan.Aside = []Item{{Path: filepath.Dir(r.base.GitDir), Reason: "the return failed before it compared anything, so main keeps everything as it was; the worker's whole copy, with its Git folder, is in " + kept}}
-	return nil
+	aside := []Item{{Path: filepath.Dir(r.base.GitDir), Reason: "the return failed before it compared anything, so main keeps everything as it was; the worker's whole copy, with its Git folder, is in " + kept}}
+	result := Result{Aside: aside, Notice: notice(r.recovery, r.failure, aside)}
+	if err := syncFilesystems(r.recovery); err != nil {
+		return Result{}, err
+	}
+	return result, writeJSON(r.in("result.json"), result)
 }
 
 // Discard drops the recovery record of a return, with the move's base and the refs that keep the worker's commits.

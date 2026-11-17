@@ -248,13 +248,22 @@ func (r *reconciler) applyWorktree(w worktree) error {
 		return err
 	}
 	if r.failure != "" {
-		// One that the return made has the worker's HEAD, and the worker's index once it has the worker's files.
+		// One that the return made has the worker's HEAD.
 		if i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root }); i >= 0 && mTrees[i].Head.OID == w.Head.OID {
 			index, err := r.main.index(ctx, mTrees[i])
 			if err != nil {
 				return err
 			}
-			if index != "" && index == w.Index {
+			worker, err := r.shadow.walk(ctx, w.Root, r.others(w.Root, r.plan.Worktrees))
+			if err != nil {
+				return err
+			}
+			paths := slices.Collect(maps.Keys(worker))
+			main, err := r.main.entries(ctx, w.Root, paths)
+			if err != nil {
+				return err
+			}
+			if index == w.Index && !slices.ContainsFunc(paths, func(p string) bool { return !main[p].same(worker[p]) }) {
 				r.result.Applied = append(r.result.Applied, w.Root)
 				return nil
 			}

@@ -1576,18 +1576,17 @@ func TestACheckoutThatAFailedReturnCutShortGoesBack(t *testing.T) {
 	}
 }
 
-// A return that fails before it compares anything, as on an object that the worker lost, keeps the worker's whole copy
-// aside, and main keeps everything as it was.
+// A return that fails before it compares anything, as on Git refusing main's configuration, keeps the worker's whole
+// copy aside, without Git, and main keeps everything as it was.
 func TestAReturnThatFailsBeforeItsPlanKeepsTheWorkersWholeCopyAside(t *testing.T) {
 	r := newRig(t)
 	r.git(r.main, "branch", "fast")
 	r.snapshot(r.main)
 	r.write(r.shadow+r.main, "c.txt", "c\n")
 	fast := r.commit(func(args ...string) string { return r.worker(r.main, args...) }, "fast", "worker")
-	if err := os.Remove(r.shadow + r.gitDir + "/objects/" + fast[:2] + "/" + fast[2:]); err != nil {
-		t.Fatal(err)
-	}
 	before := r.rev(r.main, "fast")
+	config := r.read(r.gitDir + "/config")
+	r.write(r.gitDir, "config", "[broken\n")
 	_, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery)
 	if err == nil {
 		t.Fatal("the return didn't fail")
@@ -1597,6 +1596,7 @@ func TestAReturnThatFailsBeforeItsPlanKeepsTheWorkersWholeCopyAside(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.write(r.gitDir, "config", config)
 
 	r.expectMissing(r.main + "/c.txt")
 	if got := r.rev(r.main, "fast"); got != before {
@@ -1604,7 +1604,7 @@ func TestAReturnThatFailsBeforeItsPlanKeepsTheWorkersWholeCopyAside(t *testing.T
 	}
 	r.expectFile(r.recovery+"/worker"+r.main+"/c.txt", "c\n")
 	r.expectFile(r.recovery+"/worker"+r.gitDir+"/refs/heads/fast", fast+"\n")
-	if _, ok := asideOf(result, r.main); !ok || len(result.Aside) != 1 || !strings.Contains(result.Notice, r.recovery+"/worker") {
+	if _, ok := asideOf(result, r.main); !ok || len(result.Aside) != 1 || !strings.Contains(result.Notice, "bad config") {
 		t.Errorf("kept aside %v, notice:\n%s", result.Aside, result.Notice)
 	}
 	if again := r.reconcile(); again.Notice != result.Notice {
@@ -1691,5 +1691,35 @@ func TestKeepingTheRestAsideAfterAFailureAtAnyChangeLosesNothing(t *testing.T) {
 			t.Errorf("stopped after %d: the notice says\n%s", stop, result.Notice)
 		}
 		r.git(r.main, "fsck", "--no-progress")
+	}
+}
+
+// A worktree that a failed return made without its index keeps the worker's files aside, also when keeping them aside
+// stops once the worktree has an index.
+func TestAWorktreeThatAFailedReturnMadeHalfwayKeepsTheWorkersFilesAside(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	made := filepath.Join(filepath.Dir(r.feat), "made")
+	r.workerWorktree(made, "made")
+	r.write(r.shadow+made, "untracked.txt", "u\n")
+	stopWhen(t, func() bool { return exists(made) })
+	_, err := Reconcile(context.Background(), r.base, r.shadow, r.recovery)
+	if err == nil {
+		t.Fatal("the return didn't stop")
+	}
+	stopWhen(t, func() bool { return r.git(made, "ls-files") != "" })
+	if _, err := KeepAside(context.Background(), r.base, r.shadow, r.recovery, err); err == nil {
+		t.Fatal("keeping the rest aside didn't stop")
+	}
+	interrupt = nil
+
+	result := r.reconcile()
+
+	r.expectFile(r.recovery+"/worker"+made+"/untracked.txt", "u\n")
+	if _, ok := asideOf(result, made); !ok {
+		t.Errorf("kept aside %v", result.Aside)
+	}
+	if got := r.git(made, "diff", "--cached", "--name-status"); got != "" {
+		t.Errorf("the index differs from HEAD:\n%s", got)
 	}
 }
