@@ -170,7 +170,7 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'data-sidebar-visibility-toggle',
     'title="Demo notifications off — click to enable" aria-label="Demo notifications off — click to enable" data-notification-toggle',
     'placeholder="Ask Pi…"',
-    'openai-codex/gpt-5.5 (medium)',
+    'anthropic/claude-opus-5-5 (medium)',
   ]) assert.ok(html.includes(expected), `missing ${expected}`);
   assert.match(html, /@media \(pointer: coarse\) \{[\s\S]*?\.send-button \{ display: inline-flex;/);
   assert.match(javascript, /pin\.setAttribute\("aria-label", session\.pinned \? `Unpin session \$\{session\.name\}` : `Pin session \$\{session\.name\}`\)/);

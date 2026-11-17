@@ -49,14 +49,14 @@ test("background reply notifications preserve literal Markdown punctuation", () 
     else globalThis.window = originalWindow;
   }
 
-  assert.deepEqual(notifications, [["Background task", "Finished feat/my_branch_name", "/?session=background", "gripi-final-reply:background"]]);
+  assert.deepEqual(notifications, [["Background task", "Finished feat/my_branch_name", "/?session=background", "gripi-final-reply:background", "background"]]);
 });
 
 test("background notifications follow settled completion IDs, not progress counts or previews", () => {
   const originalWindow = globalThis.window;
   const window = { location: { href: "https://example.test/?session=current", origin: "https://example.test", search: "?session=current" } };
   const notifications = [];
-  const controller = new SidebarController({}, window, {}, {}, (...notification) => notifications.push(notification));
+  const controller = new SidebarController({ querySelector: () => null }, window, {}, {}, (...notification) => notifications.push(notification));
   const link = {
     dataset: { sessionPath: "background", completedReplyId: "", assistantResponseCount: "0" },
     querySelector: () => ({ textContent: "Background task" }),
@@ -130,7 +130,7 @@ for (const initialMode of ["", "external_follow"]) {
       link.dataset.completedReplyPreview = "New gateway reply";
       controller.notifyBackgroundFinalReplies(previousCounts);
       controller.notifyBackgroundFinalReplies(previousCounts);
-      assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background"]]);
+      assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background", "background"]]);
     } finally {
       if (originalWindow === undefined) delete globalThis.window;
       else globalThis.window = originalWindow;
@@ -175,7 +175,7 @@ for (const observedExternal of [true, false]) {
         link.dataset.completedReplyPreview = "New gateway reply";
         controller.notifyBackgroundFinalReplies(takeoverCounts);
       }
-      assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background"]]);
+      assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background", "background"]]);
       assert.equal(previousCounts.get("background"), "completion-2", "external rows must retain their previous completion ID");
       controller.notifyBackgroundFinalReplies(previousCounts);
       assert.equal(notifications.length, 1, "repeated refreshes must not notify twice");

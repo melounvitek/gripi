@@ -81,8 +81,8 @@ const sidebarController = new SidebarController(
   window,
   projectSelectController,
   gatewayUpdateController,
-  (name, body, url, tag) => {
-    if (webPushController.enabled()) return;
+  (name, body, url, tag, sessionPath) => {
+    if (webPushController.enabled() || sessionIsActivelyViewed(sessionPath)) return;
     showGripiNotification(name, body, url, tag).catch(() => {});
   }
 );

@@ -135,7 +135,8 @@ type pageView struct {
 	HermesPanel   bool
 	// VoiceEnabled offers Hermes sessions a voice conversation.
 	VoiceEnabled bool
-	// SubSession tells that the selected session is linked under another, so its page does not notify.
+	// SubSession tells that the selected session is linked under another, so its page leaves notifying to the sidebar,
+	// which shows only the replies to the user's own turns as completed.
 	SubSession bool
 }
 
@@ -285,10 +286,6 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	links, err := app.gatewayState.SessionParents()
 	if err != nil {
 		return nil, err
-	}
-	// Sub-sessions never show as unread, so nothing counts them.
-	for path := range links {
-		delete(unread, path)
 	}
 	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil}
 	view.ExternalFollow = externalFollow
@@ -638,7 +635,7 @@ func (view *pageView) prepareSidebar() {
 	for _, session := range append(slices.Clone(view.PinnedSessions), view.SidebarSessions...) {
 		parents[session.Path] = true
 	}
-	// Running sub-sessions and the open one show under their parent, and the others fold into one line.
+	// Running and unread sub-sessions and the open one show under their parent, and the others fold into one line.
 	view.SidebarWorkers = make(map[string][]*agent.Session)
 	view.FoldedWorkers = make(map[string][]*agent.Session)
 	for _, session := range view.Sessions {
@@ -647,7 +644,7 @@ func (view *pageView) prepareSidebar() {
 			continue
 		}
 		activity := view.SidebarActivity[session.Path]
-		if activity.Busy || activity.Compacting || view.Selected != nil && view.Selected.Path == session.Path {
+		if activity.Busy || activity.Compacting || view.Unread[session.Path] || view.Selected != nil && view.Selected.Path == session.Path {
 			view.SidebarWorkers[parent] = append(view.SidebarWorkers[parent], session)
 		} else {
 			view.FoldedWorkers[parent] = append(view.FoldedWorkers[parent], session)

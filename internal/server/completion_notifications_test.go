@@ -458,12 +458,15 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	}
 }
 
-func TestSubSessionsNeitherNotifyNorShowAsUnread(t *testing.T) {
+func TestASubSessionNotifiesOnlyOfTheTurnsThatItsParentDidNotStart(t *testing.T) {
 	// The parent need not be listed.
 	parent := filepath.Join(t.TempDir(), "parent.jsonl")
 
 	t.Run("settled", func(t *testing.T) {
 		app, notifier, client, path := settledNotificationFixture(t)
+		if err := app.gatewayState.SetSessionParent(path, parent); err != nil {
+			t.Fatal(err)
+		}
 		turn := func(id, parentID string) {
 			t.Helper()
 			final := notificationMessage(id, "Reply "+id, "stop")
@@ -472,44 +475,37 @@ func TestSubSessionsNeitherNotifyNorShowAsUnread(t *testing.T) {
 			notifier.observePi(client, notificationAgentEnd(final))
 			notifier.observePi(client, map[string]any{"type": "agent_settled"})
 		}
-		turn("before", "")
-		assertSettledUnread(t, app, path, true)
-		if len(notifier.queue) != 1 {
-			t.Fatal("the reply was not queued")
-		}
-		<-notifier.queue
-
-		// A reply that finished before the link no longer waits to be read.
-		if err := app.gatewayState.SetSessionParent(path, parent); err != nil {
-			t.Fatal(err)
-		}
-		assertSettledUnread(t, app, path, false)
-		turn("after", "before")
+		// The parent's turn gets it a report instead, which the gateway sends once the notifier has seen the run settle.
+		app.subSessionReports.expect(client, parent)
+		turn("parent", "")
+		app.subSessionReports.forget(client)
 		assertSettledUnread(t, app, path, false)
 		completions, err := app.gatewayState.Completions()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(notifier.queue) != 0 || completions[path].ID != piReplyID(notificationMessage("before", "Reply before", "stop")) {
-			t.Fatalf("a sub-session's reply was queued or published: %d queued, %+v", len(notifier.queue), completions[path])
+		if len(notifier.queue) != 0 || completions[path].ID != "" {
+			t.Fatalf("the parent's turn was queued or published: %d queued, %+v", len(notifier.queue), completions[path])
+		}
+
+		turn("user", "parent")
+		assertSettledUnread(t, app, path, true)
+		if len(notifier.queue) != 1 {
+			t.Fatal("the user's turn was not queued")
 		}
 	})
 
-	t.Run("linked while the notification waits", func(t *testing.T) {
+	t.Run("delivered", func(t *testing.T) {
 		root := t.TempDir()
 		path := writeNotificationSession(t, root, "Sub-session")
 		fake := &recordingPushNotifier{}
 		app := notificationTestApplication(t, root, false, true, fake)
-		notifier := newCompletionNotifier(app)
-		reply := completedReply{path: path, text: "done", id: "reply"}
-		if err := notifier.deliver(context.Background(), reply); err != nil || len(fake.owners) != 1 {
-			t.Fatalf("deliveries before the link = %d, %v", len(fake.owners), err)
-		}
 		if err := app.gatewayState.SetSessionParent(path, parent); err != nil {
 			t.Fatal(err)
 		}
-		if err := notifier.deliver(context.Background(), reply); err != nil || len(fake.owners) != 1 {
-			t.Fatalf("deliveries after the link = %d, %v", len(fake.owners), err)
+		notifier := newCompletionNotifier(app)
+		if err := notifier.deliver(context.Background(), completedReply{path: path, text: "done", id: "reply"}); err != nil || len(fake.owners) != 1 {
+			t.Fatalf("deliveries = %d, %v", len(fake.owners), err)
 		}
 	})
 }

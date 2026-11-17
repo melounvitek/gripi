@@ -69,6 +69,13 @@ func (reports *subSessionReports) expect(client agent.Client, parent string) boo
 	return true
 }
 
+// owes tells whether the client owes its parent a report, so that the run is the parent's.
+func (reports *subSessionReports) owes(client agent.Client) bool {
+	reports.mu.Lock()
+	defer reports.mu.Unlock()
+	return reports.due[client] != nil
+}
+
 // forget drops what a client owes, such as when the parent's message left the queue before it ran.
 func (reports *subSessionReports) forget(client agent.Client) {
 	reports.mu.Lock()

@@ -9,7 +9,7 @@
       messages: [
         { role: "user", text: "What is Gripi?" },
         { role: "thinking", text: "I’ll summarize what Gripi adds while keeping Pi’s role clear." },
-        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi does not patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated." }
+        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi doesn’t patch it or touch your sessions and settings. It only adds a small extension, so the browser can show Pi’s session tree, and a short skill, so the model knows it can work with your other sessions. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated." }
       ]
     },
     {
@@ -34,7 +34,7 @@
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?" },
         { role: "thinking", text: "I’ll check the boundary between Gripi and the Pi runtime." },
-        { role: "assistant", text: "No. Gripi does not patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to the Pi coding-agent harness through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data." }
+        { role: "assistant", text: "Barely. Gripi doesn’t patch Pi, rewrite sessions, or change Pi-owned configuration. It starts Pi through a gateway, and Pi still runs the agent, its tools, models and sessions.\n\nGripi adds just two small things. An extension lets the browser show Pi’s session tree, and a short `gripi` skill tells the model that it runs in Gripi, so it can start sub-sessions when you ask, or run a command as root once you agree. If you’d rather go without the skill, set `GRIPI_SKILL=0`." }
       ]
     },
     {

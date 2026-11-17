@@ -436,8 +436,9 @@ under the parent, as 'gripi link' does, and starts it with the parent's model
 and thinking level. When a turn that the parent started is over, Gripi sends
 the parent a report as a message, as 'gripi send' would: that the turn
 finished, stopped or failed, and how to read it. The parent starts a turn with
-the first message, or with 'gripi send' run in the parent's session. Turns
-started in the browser don't report. A sub-session can't start sub-sessions
+the first message, or with 'gripi send' run in the parent's session. Other
+turns, such as those started in the browser, don't report, but notify and
+show as unread as in any session. A sub-session can't start sub-sessions
 of its own. Nor can a session on a remote machine (see 'gripi worker'),
 because gripi there can't start sessions.
 
