@@ -131,8 +131,8 @@ const linkHelp = `Usage:
 
 Links a session under a parent, as 'gripi new --parent' does for a
 sub-session, then prints the session. The browser's sidebar shows the session
-below its parent: listed while it runs or has a reply you haven't read, and
-folded into one line with the other done ones afterwards. A linked session
+below its parent, folded with the others into one line of dots: green while
+it runs, orange when it has a reply you haven't read. A linked session
 notifies and shows as unread only for the turns that its parent didn't start,
 such as yours in the browser. Linking a linked session again moves it under
 the new parent.

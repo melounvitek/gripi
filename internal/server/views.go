@@ -635,7 +635,8 @@ func (view *pageView) prepareSidebar() {
 	for _, session := range append(slices.Clone(view.PinnedSessions), view.SidebarSessions...) {
 		parents[session.Path] = true
 	}
-	// Running and unread sub-sessions and the open one show under their parent, and the others fold into one line.
+	// The open sub-session shows under its parent, and the others fold into a line of dots: running ones first, then
+	// unread ones.
 	view.SidebarWorkers = make(map[string][]*agent.Session)
 	view.FoldedWorkers = make(map[string][]*agent.Session)
 	for _, session := range view.Sessions {
@@ -643,12 +644,17 @@ func (view *pageView) prepareSidebar() {
 		if !parents[parent] || view.Pinned[session.Path] {
 			continue
 		}
-		activity := view.SidebarActivity[session.Path]
-		if activity.Busy || activity.Compacting || view.Unread[session.Path] || view.Selected != nil && view.Selected.Path == session.Path {
+		if view.Selected != nil && view.Selected.Path == session.Path {
 			view.SidebarWorkers[parent] = append(view.SidebarWorkers[parent], session)
 		} else {
 			view.FoldedWorkers[parent] = append(view.FoldedWorkers[parent], session)
 		}
+	}
+	states := []string{"running", "unread", "done"}
+	for _, workers := range view.FoldedWorkers {
+		slices.SortStableFunc(workers, func(a, b *agent.Session) int {
+			return slices.Index(states, workerState(view, a)) - slices.Index(states, workerState(view, b))
+		})
 	}
 	if view.Selected != nil && !view.Pinned[view.Selected.Path] {
 		selected := func(session *agent.Session) bool { return session.Path == view.Selected.Path }
@@ -656,6 +662,16 @@ func (view *pageView) prepareSidebar() {
 			view.SeparateCurrent = view.Selected
 		}
 	}
+}
+
+func workerState(view *pageView, session *agent.Session) string {
+	if activity := view.SidebarActivity[session.Path]; activity.Busy || activity.Compacting {
+		return "running"
+	}
+	if view.Unread[session.Path] {
+		return "unread"
+	}
+	return "done"
 }
 
 func knownCWDs(all []*agent.Session, projects map[string]bool) ([]string, map[string]time.Time) {
@@ -751,7 +767,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		"workerData": func(view *pageView, session *agent.Session) sidebarSessionData {
 			return sidebarSessionData{View: view, Session: session, Worker: true}
 		},
-		"sessionParent": sessionParent, "sessionChildren": sessionChildren, "sessionRoot": sessionRoot,
+		"sessionParent": sessionParent, "sessionChildren": sessionChildren, "sessionRoot": sessionRoot, "workerState": workerState,
 		"relationData": func(view *pageView, session, current *agent.Session) relationData {
 			return relationData{view, session, current}
 		},
