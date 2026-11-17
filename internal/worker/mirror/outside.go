@@ -2,6 +2,7 @@ package mirror
 
 import (
 	"archive/tar"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -133,10 +134,10 @@ func ReadOutside(r io.Reader, folder string) error {
 	}
 }
 
-// writeIn writes the file name in root with contents, through a temporary file next to it.
+// writeIn writes the file name in root with contents, through a new temporary file next to it.
 func writeIn(root *os.Root, name string, contents io.Reader, mode fs.FileMode, modified time.Time) error {
-	temporary := name + ".gripi-tmp"
-	file, err := root.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	temporary := filepath.Join(filepath.Dir(name), ".gripi-"+rand.Text())
+	file, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

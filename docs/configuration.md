@@ -446,7 +446,7 @@ The helper pings main every second. When main has not answered for 30 seconds, o
 What happens next is up to you:
 
 - If the worker answers again, the session’s next message connects again and continues on the worker, from its copy there.
-- Otherwise, continue on main. In the editor’s place, Gripi counts down to when the worker must have stopped everything, 32 seconds after main’s last answer, and then offers **continue on main**; `gripi worker return` refuses until then and says when that is. The session’s changes then come back as main last got them, as in a return. The worker’s copy may have changes that main never got; the worker deletes it once main reaches the worker again.
+- Otherwise, continue on main. In the editor’s place, Gripi counts down to when the worker must have stopped everything, 32 seconds after main’s last answer, and then offers **continue on main**; `gripi worker return` refuses until then and says when that is. The session’s changes then come back as main last got them, as in a return. The worker’s copy may have changes that main never got, such as every file that the session made outside its worktrees; the worker deletes it once main reaches the worker again.
 
 Losing a worker loses the running step and the background processes that the session started there, such as dev servers, which, unlike on main, stop with the connection. Continuing on main also leaves the files outside the copy behind on the worker. Stopping the gateway, such as for an update, also stops everything that sessions run on workers.
 

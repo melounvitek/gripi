@@ -32,6 +32,10 @@ func TestWhatACopyHoldsOutsideItsFoldersTravelsInAnArchive(t *testing.T) {
 	if err := os.Symlink("src/proj", filepath.Join(base, "link")); err != nil {
 		t.Fatal(err)
 	}
+	// Taking NOTES.md again never writes through a link next to it.
+	if err := os.Symlink("src/proj/todo.txt", filepath.Join(base, "NOTES.md.gripi-tmp")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(base, "api", "empty"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +64,12 @@ func TestWhatACopyHoldsOutsideItsFoldersTravelsInAnArchive(t *testing.T) {
 		}
 		return err
 	})
-	if want := []string{"NOTES.md", "api", "api/empty", "api/main.go", "link", "src", "src/proj", "src/proj/todo.txt"}; !slices.Equal(found, want) {
+	if want := []string{"NOTES.md", "NOTES.md.gripi-tmp", "api", "api/empty", "api/main.go", "link", "src", "src/proj", "src/proj/todo.txt"}; !slices.Equal(found, want) {
 		t.Errorf("main got\n%q\nwant\n%q", found, want)
 	}
-	for path, want := range map[string]string{"NOTES.md": "notes\n", "api/main.go": "api\n"} {
+	for path, want := range map[string]string{
+		"NOTES.md": "notes\n", "api/main.go": "api\n", "src/proj/todo.txt": "in the main checkout, which isn't the unit's\n",
+	} {
 		if got, _ := os.ReadFile(filepath.Join(main+base, path)); string(got) != want {
 			t.Errorf("main's %s = %q, want %q", path, got, want)
 		}
