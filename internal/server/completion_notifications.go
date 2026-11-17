@@ -116,7 +116,8 @@ func (notifier *completionNotifier) Observe(client agent.Client, lifecycle agent
 				ready = nil
 			}
 		}
-		if ready != nil && notifier.subSession(path) {
+		// A run that the parent of a sub-session started gets the parent a report instead.
+		if ready != nil && notifier.app.subSessionReports.owes(client) {
 			ready = nil
 		}
 		if ready != nil {
@@ -133,15 +134,6 @@ func (notifier *completionNotifier) Observe(client agent.Client, lifecycle agent
 	if ready != nil {
 		notifier.schedule(*ready)
 	}
-}
-
-// subSession tells whether the session is linked under a parent. Sub-sessions never notify.
-func (notifier *completionNotifier) subSession(path string) bool {
-	links, err := notifier.app.gatewayState.SessionParents()
-	if err != nil {
-		log.Printf("read session parents: %v", err)
-	}
-	return links[path] != ""
 }
 
 // Only in-flight candidates retain clients; published metadata lives in GatewayState.
@@ -261,10 +253,6 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	path, err := notifier.sessionPath(ctx, reply)
 	if err != nil {
 		return err
-	}
-	// The session may have been linked during the wait.
-	if notifier.subSession(path) {
-		return nil
 	}
 	if notifier.app.guard != nil {
 		for {

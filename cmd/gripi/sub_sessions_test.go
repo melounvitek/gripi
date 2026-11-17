@@ -209,6 +209,50 @@ func TestASubSessionReportsOnlyTheTurnsThatItsParentStarts(t *testing.T) {
 	}
 }
 
+func TestASubSessionShowsOnlyTheUsersTurnsAsUnread(t *testing.T) {
+	_, beta := fakePiGateway(t)
+	outsideSessions(t)
+	code, stdout, stderr := runCLI("new", t.TempDir(), "Show the deterministic browser response", "--parent", "0a1-b", "--id")
+	id := strings.TrimSpace(stdout)
+	if code != 0 || stderr != "" {
+		t.Fatalf("gripi new --parent = %d, stderr %q", code, stderr)
+	}
+	// completed tells whether Gripi recorded a finished reply of the sub-session, which it notifies of, from the
+	// sidebar, which notifies when that changes.
+	completed := func(path string) bool {
+		t.Helper()
+		sidebar := browserRequest(http.MethodGet, "/sidebar?no_session=1", nil, "").Body.String()
+		_, row, found := strings.Cut(sidebar, `data-session-path="`+path+`"`)
+		if !found {
+			t.Fatalf("the sidebar does not show %s", path)
+		}
+		row, _, _ = strings.Cut(row, "</a>")
+		return !strings.Contains(row, `data-completed-reply-id=""`)
+	}
+
+	// The parent started the first turn, and starts another with gripi send.
+	reportsUntil(t, beta, 1)
+	session := eventually(t, id, func(session gateway.LocalSession) bool { return session.State == "idle" })
+	t.Setenv("PI_SESSION_FILE", beta)
+	if code, _, stderr := runCLI("send", id, "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send from the parent = %d, stderr %q", code, stderr)
+	}
+	reportsUntil(t, beta, 2)
+	if session = eventually(t, id, func(gateway.LocalSession) bool { return true }); session.Unread || completed(session.Path) {
+		t.Fatalf("a turn that the parent started shows: unread %t, completed %t", session.Unread, completed(session.Path))
+	}
+
+	// The user's own turn shows as in any session.
+	form := url.Values{"session": {session.Path}, "message": {"Show the deterministic browser response"}}
+	if response := browserRequest(http.MethodPost, "/prompt", form, ""); response.Code != http.StatusOK {
+		t.Fatalf("prompt from the browser = %d %s", response.Code, response.Body.String())
+	}
+	eventually(t, id, func(session gateway.LocalSession) bool { return session.State == "idle" && session.Unread })
+	if !completed(session.Path) {
+		t.Fatal("the user's turn has no finished reply to notify of")
+	}
+}
+
 func TestASubSessionReportsAStoppedOrFailedTurn(t *testing.T) {
 	_, beta := fakePiGateway(t)
 	outsideSessions(t)

@@ -341,13 +341,15 @@ export class SidebarController {
       const sessionPath = link.dataset.sessionPath;
       const previousId = previousReplyIds.get(sessionPath);
       const currentId = link.dataset.completedReplyId;
-      if (previousId == null || !currentId || currentId === previousId || sessionPath === this.currentSessionPath()) return;
+      if (previousId == null || !currentId || currentId === previousId) return;
+      // The open page notifies of its own replies, except in a sub-session, where only the gateway knows who started the turn.
+      if (sessionPath === this.currentSessionPath() && this.document.querySelector("#live-output")?.dataset.subSession !== "true") return;
 
       const key = `${sessionPath}:${currentId}`;
       if (this.notifiedFinalReplyKeys.has(key)) return;
       this.notifiedFinalReplyKeys.add(key);
       const name = link.querySelector(".session-title")?.textContent.trim() || "a background session";
-      this.notifyFinalReply(name, notificationReplyPreview(link.dataset.completedReplyPreview), sessionUrl(sessionPath), `gripi-final-reply:${sessionPath}`);
+      this.notifyFinalReply(name, notificationReplyPreview(link.dataset.completedReplyPreview), sessionUrl(sessionPath), `gripi-final-reply:${sessionPath}`, sessionPath);
     });
   }
 

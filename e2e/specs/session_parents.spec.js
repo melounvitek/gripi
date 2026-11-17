@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { prompts, sessions } from "../support/contract.mjs";
+import { prompts, replies, sessions } from "../support/contract.mjs";
+import { expectRunFinished, sendPrompt } from "../support/ui.mjs";
 
 const run = promisify(execFile);
 const gripi = (...args) => run(process.env.GRIPI_E2E_GRIPI, args, { env: { ...process.env, GRIPI_SOCKET_PATH: process.env.GRIPI_E2E_SOCKET_PATH } });
@@ -115,6 +116,28 @@ for (const touch of [false, true]) {
       }
     });
 
+    test("an unread sub-session stays listed in bold under its parent until it is opened", async ({ page, linked }) => {
+      const [unread] = linked.workers;
+      // Unlike its parent's, a message of the user's own leaves a reply to read.
+      await gripi("send", unread.file, prompts.standard);
+      await expect(async () => {
+        const { stdout } = await gripi("list", "--json");
+        expect(JSON.parse(stdout).find((session) => session.path === unread.file)).toMatchObject({ state: "idle", unread: true });
+      }).toPass();
+      await openSidebar(page, linked.parent);
+      const link = row(page, unread).locator("a.session");
+      expect(await row(page, linked.parent).evaluate((element) => element.nextElementSibling?.dataset.sessionPath)).toBe(unread.file);
+      await expect(link).toHaveClass(/\bunread\b/);
+      await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
+      await expect(fold(page, linked.parent).locator("summary")).toHaveText("2 sub-sessions done");
+
+      await press(link);
+      await expect(page.getByRole("heading", { level: 1, name: unread.title })).toBeVisible();
+      await openSidebar(page, linked.parent);
+      await expect(fold(page, linked.parent).locator("summary")).toHaveText("3 sub-sessions done");
+      await expect(row(page, unread)).toBeHidden();
+    });
+
     test("a pinned parent folds its done sub-sessions too", async ({ page, linked }) => {
       await gripi("pin", linked.parent.file);
       try {
@@ -130,31 +153,40 @@ for (const touch of [false, true]) {
   });
 }
 
-test("an open sub-session does not notify of its replies", async ({ page, linked }) => {
+test("an open sub-session notifies of the user's own turns, not of those that its parent started or joined", async ({ page, linked }) => {
   await page.addInitScript(() => {
     window.replyNotifications = [];
     document.hasFocus = () => false;
     localStorage.removeItem("gripi:notifications-disabled");
     window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
   });
-  let pending = null;
-  let seq = 0;
-  await page.route(/\/events(?:\?|$)/, (route) => {
-    const payload = pending || { events: [], last_seq: seq, missed: false };
-    pending = null;
-    return route.fulfill({ json: payload });
-  });
-  const notified = [];
-  for (const session of [linked.workers[0], linked.parent]) {
-    await page.goto(`/?session=${encodeURIComponent(session.file)}`);
-    await expect(page.locator("#live-output")).toBeAttached();
-    const reply = { role: "assistant", id: `reply-${seq}`, content: [{ type: "text", text: `Reply in ${session.title}` }], stopReason: "stop" };
-    const title = `Notification poll ${++seq}`;
-    pending = { events: [{ type: "message_end", message: reply }, { type: "agent_end", messages: [reply] }, { type: "agent_settled" }, { type: "extension_ui_request", method: "setTitle", title }], last_seq: seq, missed: false };
-    await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
-    await expect(page).toHaveTitle(title);
-    // The reply is settled before the title changes, so its notification has been shown by now.
-    notified.push(...await page.evaluate(() => window.replyNotifications.map((notification) => notification.body)));
-  }
-  expect(notified).toEqual([`Reply in ${linked.parent.title}`]);
+  const [open] = linked.workers;
+  // As the parent's bash tool runs it, gripi sends as the parent, which gets a report of the turn instead.
+  const fromParent = (...args) => run(process.env.GRIPI_E2E_GRIPI, args, { env: { ...process.env, GRIPI_SOCKET_PATH: process.env.GRIPI_E2E_SOCKET_PATH, PI_SESSION_FILE: linked.parent.file } });
+  // The sidebar notifies of the turns that the gateway finished since it last drew, and focus redraws it at once.
+  const notified = (session) => page.evaluate((tag) => {
+    window.dispatchEvent(new Event("focus"));
+    return window.replyNotifications.filter((notification) => notification.tag === tag).map((notification) => notification.body);
+  }, `gripi-final-reply:${session.file}`);
+  await page.goto(`/?session=${encodeURIComponent(open.file)}`);
+  await expect(page.locator("#live-output")).toBeAttached();
+
+  // The parent's reply to the report notifies, so the turn has ended by then.
+  await fromParent("send", open.file, prompts.standard);
+  await expect.poll(() => notified(linked.parent)).toHaveLength(1);
+  await expectRunFinished(page);
+
+  // A turn that the page started is the parent's too once the parent joins it.
+  await sendPrompt(page, prompts.followUpStart);
+  await expect(async () => {
+    const { stdout } = await gripi("list", "--json");
+    expect(JSON.parse(stdout).find((session) => session.path === open.file)).toMatchObject({ state: "working" });
+  }).toPass();
+  await fromParent("send", open.file, prompts.followUpMessage);
+  await expect.poll(() => notified(linked.parent)).toHaveLength(2);
+  await expectRunFinished(page);
+
+  // Only the user's own turn notifies.
+  await sendPrompt(page, prompts.standard);
+  await expect.poll(() => notified(open)).toEqual([replies.standard]);
 });

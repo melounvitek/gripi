@@ -257,6 +257,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.completionNotifications = newCompletionNotifier(app)
 	app.subSessionReports.app = app
 	observe := func(client agent.Client, lifecycle agent.Lifecycle) {
+		// The notifier asks whether a settled run owes a report before the reports take it.
 		app.completionNotifications.Observe(client, lifecycle)
 		app.subSessionReports.Observe(client, lifecycle)
 	}
