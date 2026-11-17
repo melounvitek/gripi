@@ -544,6 +544,26 @@ func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 	}
 	r.verify(t)
 
+	// Back where the source can't look, which fails barriers until it can.
+	if err := os.Rename(featA, away); err != nil {
+		t.Fatal(err)
+	}
+	r.barrier(t)
+	if err := os.Rename(away, featA); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(featA)
+	os.Chmod(parent, 0)
+	t.Cleanup(func() { os.Chmod(parent, 0o755) })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if n, _, err := r.src.Barrier(ctx); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("barrier %d with the folder where the source can't look: %v", n, err)
+	}
+	os.Chmod(parent, 0o755)
+	waitFor(t, "the source to recover", r.src.Healthy)
+	r.verify(t)
+
 	// A worktree in a folder that is away is deleted meanwhile.
 	away = unit.Main + ".bak"
 	if err := os.Rename(unit.Main, away); err != nil {
