@@ -1384,7 +1384,8 @@ func (app *application) extensionUIResponse(response http.ResponseWriter, reques
 	if !ok {
 		return
 	}
-	err := app.rpcClients.WithExistingClient(request.Context(), path, true, func(client agent.Client) error {
+	// Without the operation lane, which the operation that waits on the dialog, such as a fork, holds.
+	err := app.rpcClients.WithObservingClient(request.Context(), path, true, func(client agent.Client) error {
 		responder, err := capability[agent.Responder](client)
 		if err != nil {
 			return err
