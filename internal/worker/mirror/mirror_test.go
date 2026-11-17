@@ -482,8 +482,8 @@ func TestAWorktreeDeletedWhileMirroringGoesOnMainAlsoAfterARescan(t *testing.T) 
 	}
 }
 
-// A folder of the unit that the session renames away and back comes back whole on main, also the main checkout with
-// the Git folder in it.
+// A folder of the unit that the session renames away and back, or replaces with a copy, comes back whole on main, also
+// the main checkout with the Git folder in it.
 func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 	unit := newRepo(t)
 	r := newRig(t, unit)
@@ -511,6 +511,17 @@ func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
 			t.Fatal(err)
 		}
 		r.verify(t)
+
+		// Back as another folder, which no event tells.
+		if err := os.Rename(folder, away); err != nil {
+			t.Fatal(err)
+		}
+		r.barrier(t)
+		mustRun(t, "/", "cp", "-a", away, folder)
+		r.verify(t)
+		if err := os.RemoveAll(away); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

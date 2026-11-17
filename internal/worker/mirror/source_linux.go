@@ -261,6 +261,9 @@ func (s *Source) runBarrier(reqs []barrierRequest) error {
 	if err := s.checkSkipped(); err != nil {
 		return err
 	}
+	if err := s.walkUnwatchedRoots(); err != nil {
+		return err
+	}
 	if err := s.retryUnread(); err != nil {
 		return err
 	}
@@ -353,6 +356,33 @@ func (s *Source) syncSentinel() error {
 			}
 		case <-timeout:
 			return errors.New("mirror: file events stopped arriving")
+		}
+	}
+	return nil
+}
+
+// walkUnwatchedRoots walks the roots that are here but not watched, such as one that moved away and back or was made
+// again, which no event tells, and marks what they lost meanwhile.
+func (s *Source) walkUnwatchedRoots() error {
+	var walked []string
+	seen := map[string]bool{}
+	for _, r := range s.roots {
+		if _, watched := s.pathWd[r]; watched {
+			continue
+		}
+		if err := s.walk(r, seen); err != nil {
+			return err
+		}
+		if seen[r] {
+			walked = append(walked, r)
+		}
+	}
+	if len(walked) == 0 {
+		return nil
+	}
+	for p, e := range s.sent {
+		if slices.Contains(walked, s.rootOf(p)) && !seen[p] && !s.kept(p, e) {
+			s.mark(p, writesUnknown)
 		}
 	}
 	return nil
@@ -523,7 +553,9 @@ func (s *Source) handleEvent(e rawEvent) error {
 	}
 	if e.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 		if s.isRoot(dir) {
-			return s.rewalk(dir, e.wd)
+			// Its watches went with it, so the next barrier walks it again if it is here.
+			s.unwatch(dir)
+			s.mark(dir, writesUnknown)
 		}
 		return nil
 	}
@@ -557,33 +589,6 @@ func (s *Source) handleEvent(e rawEvent) error {
 			w = s.dirty[p] // a change of mode or time doesn't end a write
 		}
 		s.mark(p, w)
-	}
-	return nil
-}
-
-// rewalk looks again at the root dir, and the roots in it, after it moved or was deleted. The watches below it moved
-// with it and name the wrong paths, so they go, but its own stays: its parent isn't watched, so only that one tells
-// when it comes back. What the walk finds is sent anew, and what it doesn't find goes on the destination.
-func (s *Source) rewalk(dir string, wd int32) error {
-	for w, p := range s.wdPath {
-		if w != wd && within(p, dir) {
-			unix.InotifyRmWatch(s.fd, uint32(w))
-			delete(s.wdPath, w)
-			delete(s.pathWd, p)
-		}
-	}
-	seen := map[string]bool{}
-	for _, r := range s.roots {
-		if within(r, dir) {
-			if err := s.walk(r, seen); err != nil {
-				return err
-			}
-		}
-	}
-	for p, e := range s.sent {
-		if within(p, dir) && !seen[p] && !s.kept(p, e) {
-			s.mark(p, writesUnknown)
-		}
 	}
 	return nil
 }
