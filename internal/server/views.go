@@ -635,8 +635,8 @@ func (view *pageView) prepareSidebar() {
 	for _, session := range append(slices.Clone(view.PinnedSessions), view.SidebarSessions...) {
 		parents[session.Path] = true
 	}
-	// The open sub-session shows under its parent, and the others fold into a line of dots: running ones first, then
-	// unread ones.
+	// The open sub-session shows under its parent, and the others fold into one line: running ones first, then unread
+	// ones.
 	view.SidebarWorkers = make(map[string][]*agent.Session)
 	view.FoldedWorkers = make(map[string][]*agent.Session)
 	for _, session := range view.Sessions {

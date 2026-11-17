@@ -18,7 +18,9 @@ import (
 )
 
 // sidebarRow finds the rows of a sidebar, and where the fold of sub-sessions starts, with what it says, and ends.
-var sidebarRow = regexp.MustCompile(`<div class="session-row([^"]*)" data-session-tags="[^"]*" data-session-path="([^"]*)"|<details class="worker-fold"[^>]*><summary>.*?<span class="visually-hidden">([^<]+)</span>|</details>`)
+var sidebarRow = regexp.MustCompile(`<div class="session-row([^"]*)" data-session-tags="[^"]*" data-session-path="([^"]*)"|<details class="worker-fold"[^>]*><summary>(.*?)</summary>|</details>`)
+
+var htmlTag = regexp.MustCompile(`<[^>]*>`)
 
 // sidebarRows lists the rows of a sidebar in order: a sub-session indented under its parent, and the fold of its
 // sub-sessions with those it holds.
@@ -29,7 +31,7 @@ func sidebarRows(html string) []string {
 		id := strings.TrimSuffix(filepath.Base(match[2]), ".jsonl")
 		switch {
 		case match[3] != "":
-			result = append(result, "  ▸ "+match[3])
+			result = append(result, "  ▸ "+htmlTag.ReplaceAllString(match[3], ""))
 			indent = "    "
 		case match[0] == "</details>":
 			indent = "  "
@@ -84,7 +86,7 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 	t.Run("sub-sessions fold under their parent, whoever ran them", func(t *testing.T) {
 		for _, shown := range []bool{false, true} {
 			html := sidebar(t, url.Values{"no_session": {"1"}}, shown)
-			want := []string{"pinned-parent", "  ▸ 1 sub-session", "    pinned-done", "parent", "  ▸ 3 sub-sessions", "    continued", "    done", "    older", "beta", "alpha"}
+			want := []string{"pinned-parent", "  ▸ Sub-sessions: 1 done", "    pinned-done", "parent", "  ▸ Sub-sessions: 3 done", "    continued", "    done", "    older", "beta", "alpha"}
 			if got := sidebarRows(html); !reflect.DeepEqual(got, want) {
 				t.Fatalf("with Pi CLI sessions shown %t, rows = %q, want %q", shown, got, want)
 			}
@@ -96,13 +98,13 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 	})
 
 	t.Run("sub-sessions follow their parent out of a search", func(t *testing.T) {
-		if got, want := sidebarRows(sidebar(t, url.Values{"no_session": {"1"}, "session_search": {"done"}}, false)), []string{"pinned-parent", "  ▸ 1 sub-session", "    pinned-done"}; !reflect.DeepEqual(got, want) {
+		if got, want := sidebarRows(sidebar(t, url.Values{"no_session": {"1"}, "session_search": {"done"}}, false)), []string{"pinned-parent", "  ▸ Sub-sessions: 1 done", "    pinned-done"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("rows = %q, want %q", got, want)
 		}
 	})
 
 	t.Run("the open sub-session stays listed though it is done", func(t *testing.T) {
-		want := []string{"pinned-parent", "  ▸ 1 sub-session", "    pinned-done", "parent", "  done", "  ▸ 2 sub-sessions", "    continued", "    older", "beta", "alpha"}
+		want := []string{"pinned-parent", "  ▸ Sub-sessions: 1 done", "    pinned-done", "parent", "  done", "  ▸ Sub-sessions: 2 done", "    continued", "    older", "beta", "alpha"}
 		if got := sidebarRows(sidebar(t, url.Values{"session": {done}}, false)); !reflect.DeepEqual(got, want) {
 			t.Fatalf("rows = %q, want %q", got, want)
 		}
@@ -122,7 +124,7 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 		if response := postPrompt(handler, browserHost, url.Values{"session": {older}, "message": {"Ask me for release approval"}}); response.Code != http.StatusOK {
 			t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
 		}
-		want := []string{"pinned-parent", "  ▸ 1 sub-session", "    pinned-done", "parent", "  ▸ 3 sub-sessions, 1 running", "    older", "    continued", "    done", "beta", "alpha"}
+		want := []string{"pinned-parent", "  ▸ Sub-sessions: 1 done", "    pinned-done", "parent", "  ▸ Sub-sessions: 1 running · 2 done", "    older", "    continued", "    done", "beta", "alpha"}
 		var html string
 		for deadline := time.Now().Add(5 * time.Second); !reflect.DeepEqual(sidebarRows(html), want); time.Sleep(25 * time.Millisecond) {
 			if time.Now().After(deadline) {
@@ -130,11 +132,7 @@ func TestSidebarNestsLinkedSessionsUnderTheirParent(t *testing.T) {
 			}
 			html = sidebar(t, url.Values{"no_session": {"1"}}, false)
 		}
-		_, fold, _ := strings.Cut(html, `data-worker-fold="`+parent+`"`)
-		if !strings.Contains(fold, `<span class="worker-dot is-running" title="Prompt for older"></span><span class="worker-dot is-done" title="Prompt for continued"></span>`) {
-			t.Errorf("the dots don't show the running sub-session first: %s", fold)
-		}
-		_, row, _ := strings.Cut(fold, `data-session-path="`+older+`"`)
+		_, row, _ := strings.Cut(html, `data-session-path="`+older+`"`)
 		row, _, _ = strings.Cut(row, `<div class="session-row`)
 		if !strings.Contains(row, "session-running-indicator") {
 			t.Errorf("the running sub-session shows no activity: %s", row)
@@ -197,11 +195,8 @@ func TestASubSessionShowsTheUsersTurnAsUnreadUntilOpened(t *testing.T) {
 	unread(t, alpha)
 	// It folds under its parent as unread, and its row is in bold.
 	sidebar := serveAction(handler, getActionRequest("/sidebar?no_session=1")).Body.String()
-	if got, want := sidebarRows(sidebar), []string{"parent", "  ▸ 1 sub-session, 1 unread", "    alpha", "beta"}; !reflect.DeepEqual(got, want) {
+	if got, want := sidebarRows(sidebar), []string{"parent", "  ▸ Sub-sessions: 1 unread", "    alpha", "beta"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %q, want %q", got, want)
-	}
-	if !strings.Contains(sidebar, `<span class="worker-dot is-unread"`) {
-		t.Error("the unread sub-session's dot is not marked")
 	}
 	_, row, _ := strings.Cut(sidebar, `data-session-path="`+alpha+`"`)
 	if row, _, _ = strings.Cut(row, "</a>"); !strings.Contains(row, `class="session recent-session unread"`) {
@@ -214,7 +209,7 @@ func TestASubSessionShowsTheUsersTurnAsUnreadUntilOpened(t *testing.T) {
 	}
 	unread(t)
 	sidebar = serveAction(handler, getActionRequest("/sidebar?no_session=1")).Body.String()
-	if got, want := sidebarRows(sidebar), []string{"parent", "  ▸ 1 sub-session", "    alpha", "beta"}; !reflect.DeepEqual(got, want) {
+	if got, want := sidebarRows(sidebar), []string{"parent", "  ▸ Sub-sessions: 1 done", "    alpha", "beta"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %q, want %q", got, want)
 	}
 }

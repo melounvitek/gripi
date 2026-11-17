@@ -443,16 +443,13 @@
     .session-row.is-worker .session-title { color: var(--muted); font-family: var(--mono); font-size: 0.78rem; }
     .session-row.is-worker > a.session::before, .worker-fold > summary::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 0.45rem; border-left: 1px solid var(--border-strong); background: linear-gradient(var(--border-strong), var(--border-strong)) 0 50% / 100% 1px no-repeat; }
     .session-row.is-worker:not(:has(+ .is-worker, + .worker-fold)) > a.session::before, .worker-fold:not([open]) > summary::before { bottom: 50%; background-position: 0 100%; }
-    /* Sub-sessions fold into one quiet line of dots on the same guide: green while running, orange when unread. */
+    /* Sub-sessions fold into one quiet line on the same guide, which counts those that run, are unread or are done. */
     .worker-fold > summary { position: relative; display: flex; align-items: center; gap: 0.4rem; min-height: 1.8rem; margin: 0 0 0 0.95rem; padding: 0 0.5rem 0 0.7rem; border-radius: 0.25rem; color: var(--muted-soft); font-family: var(--mono); font-size: 0.72rem; list-style: none; cursor: pointer; }
     .worker-fold > summary::-webkit-details-marker { display: none; }
     .worker-fold > summary::after { content: "▸"; order: -1; }
     .worker-fold[open] > summary::after { content: "▾"; }
     .worker-fold > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-    .worker-dots { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.22rem; }
-    .worker-dot { width: 0.42rem; height: 0.42rem; border: 1px solid var(--muted-soft); border-radius: 999px; }
-    .worker-dot.is-running { border-color: var(--success); background: var(--success); }
-    .worker-dot.is-unread { border-color: var(--accent); background: var(--accent); }
+    .worker-fold-unread { color: var(--accent); font-weight: 700; }
     /* The time slot fits "13h" and shows the activity dot while Pi works. */
     .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
     a.session { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }
