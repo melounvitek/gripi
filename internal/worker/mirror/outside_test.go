@@ -50,6 +50,10 @@ func TestWhatACopyHoldsOutsideItsFoldersTravelsInAnArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	main, temporary := t.TempDir(), filepath.Join(t.TempDir(), "file")
+	// As a crash before a file reached its place leaves it.
+	if err := os.WriteFile(temporary, []byte("partial"), 0o400); err != nil {
+		t.Fatal(err)
+	}
 	// Again, as a return that runs again does.
 	for range 2 {
 		if err := ReadOutside(bytes.NewReader(archive.Bytes()), main, temporary); err != nil {

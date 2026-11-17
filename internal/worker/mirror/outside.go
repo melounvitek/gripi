@@ -135,9 +135,13 @@ func ReadOutside(r io.Reader, folder, temporary string) error {
 	}
 }
 
-// place writes contents to the file temporary, then moves it to name in root, in place of a file or link there.
+// place writes contents to the file temporary, in place of what a crash left there, then moves it to name in root, in
+// place of a file or link there.
 func place(root *os.Root, name, temporary string, contents io.Reader, mode fs.FileMode, modified time.Time) error {
-	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err := os.Remove(temporary); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
