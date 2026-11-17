@@ -259,6 +259,9 @@ func keepTree(from, tree, p string) error {
 	if err := os.RemoveAll(dst); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
 	return filepath.WalkDir(from, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

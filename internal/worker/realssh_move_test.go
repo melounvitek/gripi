@@ -65,7 +65,8 @@ func serveMirror(t *testing.T, conn *Conn, move, file string, destination *mirro
 
 // A session moves to a worker whose user's home folder differs from main's, on a private copy of its repository: its
 // Pi sees the copy at main's paths, also a worktree that it makes there, main gets what the session changed until
-// its processes stopped, and the folders that Git ignores stay on the worker for the next copy.
+// its processes stopped, also outside the repository, and the folders that Git ignores stay on the worker for the next
+// copy.
 func TestRealSSHMovesASessionOnACopyOfItsRepository(t *testing.T) {
 	worker := connectRealWorker(t, 0)
 	ctx := context.Background()
@@ -169,7 +170,7 @@ func TestRealSSHMovesASessionOnACopyOfItsRepository(t *testing.T) {
 	if seen, want := run(`echo "$HOME"; pwd -P; cat README; cat `+file+`; ls -A ../repo`), home+"\n"+feature+"\nmain's\n{\"type\":\"session\"}\n.git\n"; seen != want {
 		t.Fatalf("the session sees\n%s\nwant\n%s", seen, want)
 	}
-	run(`git worktree add -q -b more ../more && echo new > ../more/new && mkdir node_modules && echo dependency > node_modules/dependency`)
+	run(`git worktree add -q -b more ../more && echo new > ../more/new && mkdir node_modules && echo dependency > node_modules/dependency && echo notes > ../NOTES.md`)
 	run(`echo '{"type":"message"}' >> ` + file + `; (while :; do date +%s%N > counter; done) &`)
 	time.Sleep(300 * time.Millisecond)
 	barriers, err := conn.ReleaseMove(ctx, "m1")
@@ -181,9 +182,13 @@ func TestRealSSHMovesASessionOnACopyOfItsRepository(t *testing.T) {
 			t.Fatalf("a mirror ended with %v", err)
 		}
 	}
+	if err := conn.TakeOutside(ctx, "m1", shadow, filepath.Join(t.TempDir(), "file")); err != nil {
+		t.Fatal(err)
+	}
 	counter := worker.direct("cat " + ShellQuote(copy+strings.TrimPrefix(filepath.Join(feature, "counter"), home)))
 	for path, want := range map[string]string{
 		shadow + filepath.Join(feature, "counter"): counter, shadow + filepath.Join(private, "more", "new"): "new\n",
+		shadow + filepath.Join(private, "NOTES.md"): "notes\n",
 		file: "{\"type\":\"session\"}\n{\"type\":\"message\"}\n",
 	} {
 		if got, _ := os.ReadFile(path); string(got) != want {

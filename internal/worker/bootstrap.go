@@ -19,6 +19,7 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/worker/auth"
+	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
@@ -147,6 +148,40 @@ func (conn *Conn) UploadMove(ctx context.Context, id, folder string) error {
 // leaves the other files in its folder as they are.
 func (conn *Conn) UploadSessionFile(ctx context.Context, file string) error {
 	return conn.upload(ctx, []string{"--file", file}, mirror.Unit{Main: filepath.Dir(file), File: file}, mirror.Options{})
+}
+
+// TakeOutside writes into folder, main's shadow of its home folder, what the copy of a move that the worker released held
+// outside the move's folders, which the release archived, through the file temporary (mirror.ReadOutside).
+func (conn *Conn) TakeOutside(ctx context.Context, id, folder, temporary string) error {
+	command, release, err := conn.Command(ctx, ShellQuote("cat", helper.OutsideArchive(conn.installDir, id)))
+	if err != nil {
+		return err
+	}
+	defer release()
+	output, err := command.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr := &lastLines{}
+	command.Stderr = stderr
+	if err := command.Start(); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { command.Process.Kill() })
+	defer stop()
+	err = mirror.ReadOutside(output, folder, temporary)
+	if err == nil {
+		_, err = io.Copy(io.Discard, output)
+	} else {
+		command.Process.Kill()
+	}
+	if waited := command.Wait(); err == nil {
+		err = waited
+	}
+	if err != nil {
+		return fmt.Errorf("%w %s", err, stderr)
+	}
+	return nil
 }
 
 // upload copies main's unit to the worker with `gripi worker receive <arguments>`, where the helper makes the copy, so

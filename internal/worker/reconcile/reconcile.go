@@ -372,7 +372,63 @@ func (r *reconciler) makePlan() error {
 			}
 		}
 	}
+	if err := r.planOutside(back); err != nil {
+		return err
+	}
 	return r.planGitFiles()
+}
+
+// planOutside keeps aside what the shadow holds outside the worktrees that come back and the Git folder, other than the
+// folders that lead to them and folders without files: what the session made elsewhere in the folders that showed its
+// copy, which the worker sends when it releases the move, and in the folders of worktrees that weren't selected.
+func (r *reconciler) planOutside(back []worktree) error {
+	roots := []string{r.base.GitDir}
+	for _, w := range back {
+		roots = append(roots, w.Root)
+	}
+	unselected := slices.DeleteFunc(slices.Clone(r.base.Registered), func(root string) bool { return slices.Contains(roots, root) })
+	leadsTo := func(folders []string, p string) bool {
+		return slices.ContainsFunc(folders, func(folder string) bool { return within(folder, p) })
+	}
+	holdsFiles := func(p string) bool {
+		found := false
+		filepath.WalkDir(r.shadow.path(p), func(_ string, d fs.DirEntry, err error) error {
+			if found = err == nil && !d.IsDir(); found {
+				return fs.SkipAll
+			}
+			return nil
+		})
+		return found
+	}
+	var visit func(dir string, inRoot bool) error
+	visit = func(dir string, inRoot bool) error {
+		entries, err := os.ReadDir(r.shadow.path(dir))
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			p := filepath.Join(dir, entry.Name())
+			in := slices.Contains(roots, p) || inRoot && !slices.Contains(unselected, p)
+			// In a worktree that comes back, only the unselected worktrees are outside.
+			ahead := roots
+			if in {
+				ahead = unselected
+			}
+			switch {
+			case entry.IsDir() && leadsTo(ahead, p):
+				err = visit(p, in)
+			case !in && holdsFiles(p):
+				if err = keepTree(r.shadow.path(p), r.in("worker"), p); err == nil {
+					err = r.kept(Item{Path: p, Reason: "made on the worker outside the session's worktrees"}, "")
+				}
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return visit("/", false)
 }
 
 // madeOnMain lists the worktrees that main made after the base, which the worker's files stay out of, other than
