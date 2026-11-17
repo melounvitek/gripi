@@ -1397,7 +1397,7 @@ func TestAWorktreeWithoutItsGitFileInTheShadowIsLeftAloneOnMain(t *testing.T) {
 	if len(result.Applied) > 0 {
 		t.Errorf("applied %v", result.Applied)
 	}
-	if _, ok := asideOf(result, r.feat); !ok || !strings.Contains(result.Notice, r.feat) {
+	if _, ok := asideOf(result, r.feat); !ok || len(result.Aside) != 1 || !strings.Contains(result.Notice, r.feat) {
 		t.Errorf("kept aside %v, notice %q", result.Aside, result.Notice)
 	}
 	r.expectFile(r.recovery+"/worker"+r.feat+"/src/new.rb", "new\n")
