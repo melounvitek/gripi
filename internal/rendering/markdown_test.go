@@ -80,17 +80,21 @@ func TestMarkdownDoesNotApplyElementIDs(t *testing.T) {
 	}
 }
 
-// HTML that the parser can't normalise would reach the page with stray or unclosed tags, which can close the message's containers or wrap what follows it in a link.
-func TestMarkdownShowsHTMLItCannotBalanceAsText(t *testing.T) {
+// Stray or unclosed tags could close the message's containers or wrap what follows it in a link.
+func TestMarkdownBalancesHTML(t *testing.T) {
 	for _, example := range []struct{ name, source, text string }{
-		{"unclosed link", `<svg><br>x</svg><a href="https://evil.example/login">`, "&lt;a href="},
-		{"stray closing tags", `<svg><br>x</svg></div></article></section></div><h1>Fake</h1>`, "&lt;/div&gt;&lt;h1&gt;Fake&lt;/h1&gt;"},
-		{"too deeply nested", strings.Repeat("<div>", 513) + "x", "&lt;div&gt;x"},
+		{"unclosed link", `<svg><br>x</svg><a href="https://evil.example/login">`, "x"},
+		{"stray closing tags", `<svg><br>x</svg></div></article></section></div><h1>Fake</h1>`, "Fake"},
+		// The sanitizer reads these differently from an HTML parser, which sees only a comment inside the SVG.
+		{"hidden unclosed link", `<svg><style><!--</style><a href="https://evil.example/login">--></style></svg>`, "--&gt;"},
+		{"hidden stray closing tags", `<svg><style><!--</style></div></article></section></div><h1>Fake</h1>--></style></svg>`, "Fake"},
+		// Too deep for the parser, so shown as text.
+		{"too deeply nested", strings.Repeat("<div>\n", 513) + "x", "&lt;div&gt;<br>"},
 	} {
 		t.Run(example.name, func(t *testing.T) {
 			rendered := NewMarkdown().Render(example.source)
 			if !strings.Contains(rendered, example.text) {
-				t.Errorf("source is not shown as text: %s", rendered)
+				t.Errorf("rendered markdown does not contain %q: %s", example.text, rendered)
 			}
 			var open []string
 			tokenizer := nethtml.NewTokenizer(strings.NewReader(rendered))

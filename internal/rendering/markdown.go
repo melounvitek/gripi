@@ -68,12 +68,12 @@ func (markdown *Markdown) Render(source string) string {
 	if err := markdown.engine.Convert([]byte(source), &rendered); err != nil {
 		return ""
 	}
-	normalized, err := continueOrderedLists(rendered.String())
+	// Parsing the sanitized HTML balances its tags, which the sanitizer doesn't. What the parser refuses is shown as text.
+	normalized, err := continueOrderedLists(markdown.policy.Sanitize(rendered.String()))
 	if err != nil {
-		// The sanitizer doesn't balance tags, so HTML that the parser can't normalise is shown as text.
 		return "<p>" + strings.ReplaceAll(stdhtml.EscapeString(source), "\n", "<br>\n") + "</p>"
 	}
-	return removeIDs(markdown.policy.Sanitize(normalized))
+	return removeIDs(normalized)
 }
 
 // Element ids belong to the application, and the sanitizer's policy cannot refuse them.
