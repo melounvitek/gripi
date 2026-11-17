@@ -1373,7 +1373,8 @@ func TestClientLeavesASwitchWhoseCallerLeftAndDropsItsLateResponse(t *testing.T)
 	if err := commands.Decode(&next); err != nil {
 		t.Fatal(err)
 	}
-	writeRecord(t, stdoutWriter, map[string]any{"id": abandoned["id"], "type": "response", "command": "new_session", "success": true, "data": map[string]any{"cancelled": false}})
+	// A switch that Pi made after all closes the client, so this one was cancelled.
+	writeRecord(t, stdoutWriter, map[string]any{"id": abandoned["id"], "type": "response", "command": "new_session", "success": true, "data": map[string]any{"cancelled": true}})
 	writeRecord(t, stdoutWriter, map[string]any{"id": next["id"], "type": "response", "command": "get_state", "success": true, "data": map[string]any{"sessionFile": "/next.jsonl"}})
 	if response := <-state; response["command"] != "get_state" || response["data"].(map[string]any)["sessionFile"] != "/next.jsonl" {
 		t.Fatalf("next response = %#v", response)
