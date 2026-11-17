@@ -88,7 +88,8 @@ class AccessRequestController {
         const payload = await response.json();
         if (generation !== this.pollGeneration || !this.active) return;
         const requests = payload.requests || [];
-        this.show(requests[0]);
+        // Keep the shown request until it's answered, so that the buttons can't switch to another one just before a click.
+        this.show(requests.find((request) => request.code === this.currentCode) || requests[0]);
         this.notifyNewRequests(requests);
       }
     } catch (_error) {

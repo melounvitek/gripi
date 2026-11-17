@@ -157,6 +157,29 @@ func TestBrowserStoreDeniesRerequestsAndReplacesTokens(t *testing.T) {
 	}
 }
 
+func TestBrowserStorePutsARequestThatAsksAgainAfterADenialLast(t *testing.T) {
+	store := NewBrowserStore(filepath.Join(t.TempDir(), "browser-access.json"))
+	denied, err := store.RequestAccess("denied", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.DenyCode(denied.Code); err != nil || !found {
+		t.Fatalf("DenyCode() found = %t, err = %v", found, err)
+	}
+	waiting, err := store.RequestAccess("waiting", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RequestAccess("denied", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err := store.PendingRequests()
+	if err != nil || len(pending) != 2 || pending[0].Code != waiting.Code || pending[1].Code != denied.Code {
+		t.Fatalf("PendingRequests() = %#v, %v", pending, err)
+	}
+}
+
 func TestBrowserStoreBoundsPersistedMetadataByUTF8Bytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "browser-access.json")
 	store := NewBrowserStore(path)

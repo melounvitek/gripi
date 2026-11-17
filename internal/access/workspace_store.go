@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -145,8 +146,14 @@ func (store *WorkspaceStore) RequestAccess(workspaceID, browserToken string) (Wo
 			index = len(value.PendingRequests) - 1
 		}
 		request := &value.PendingRequests[index]
-		if (request.DeniedAt != "" || request.ApprovedAt != "") && activeWorkspaceRequests(value.PendingRequests, index) >= maxPendingWorkspaces {
-			return nil, &WorkspacePendingRequestsFullError{Limit: maxPendingWorkspaces}
+		if request.DeniedAt != "" || request.ApprovedAt != "" {
+			if activeWorkspaceRequests(value.PendingRequests, index) >= maxPendingWorkspaces {
+				return nil, &WorkspacePendingRequestsFullError{Limit: maxPendingWorkspaces}
+			}
+			// Asking again after an answer goes behind the requests that waited.
+			answered := *request
+			value.PendingRequests = append(slices.Delete(value.PendingRequests, index, index+1), answered)
+			request = &value.PendingRequests[len(value.PendingRequests)-1]
 		}
 		request.DeniedAt, request.ApprovedAt, request.RequestedAt = "", "", now
 		return *request, nil

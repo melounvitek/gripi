@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -162,6 +163,10 @@ func (s *BrowserStore) RequestAccess(token, ip, userAgent string) (PendingReques
 			if err := enforcePendingLimit(current, index); err != nil {
 				return err
 			}
+			// Asking again after a denial goes behind the requests that waited.
+			denied := *request
+			current.PendingRequests = append(slices.Delete(current.PendingRequests, index, index+1), denied)
+			request = &current.PendingRequests[len(current.PendingRequests)-1]
 		}
 		request.DeniedAt = nil
 		request.Requested = true

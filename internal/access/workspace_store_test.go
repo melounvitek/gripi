@@ -113,6 +113,29 @@ func TestWorkspaceRequestsStayBoundToEachBrowser(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStorePutsARequestThatAsksAgainAfterADenialLast(t *testing.T) {
+	store := NewWorkspaceStore(filepath.Join(t.TempDir(), "access.json"))
+	denied, err := store.RequestAccess("denied", "browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.DenyCode(denied.Code); err != nil || !found {
+		t.Fatalf("DenyCode() found = %t, err = %v", found, err)
+	}
+	waiting, err := store.RequestAccess("waiting", "browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RequestAccess("denied", "browser"); err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err := store.PendingRequests()
+	if err != nil || len(pending) != 2 || pending[0].Code != waiting.Code || pending[1].Code != denied.Code {
+		t.Fatalf("PendingRequests() = %#v, %v", pending, err)
+	}
+}
+
 func TestWorkspaceOwnershipNormalizesPersistedPhysicalSessionPaths(t *testing.T) {
 	root := t.TempDir()
 	physicalRoot := filepath.Join(root, "physical-sessions")
