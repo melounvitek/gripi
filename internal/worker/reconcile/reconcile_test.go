@@ -1322,3 +1322,56 @@ func TestAnOrphanWorktreeMadeOnTheWorkerIsMadeOnMain(t *testing.T) {
 		}
 	}
 }
+
+// What the session made on the worker in the folders that showed its copy, outside the worktrees that come back, is
+// kept aside: next to them, in the unselected main checkout, and in unselected worktrees, also in a selected one. The
+// folders that only lead to the worktrees, and folders without files, are not.
+func TestWhatTheWorkerMadeOutsideTheSessionsWorktreesIsKeptAside(t *testing.T) {
+	r := newRig(t)
+	nested := filepath.Join(r.feat, "nested")
+	r.git(r.main, "worktree", "add", "-q", "-b", "nested", nested)
+	r.snapshot(r.feat)
+	top := filepath.Dir(filepath.Dir(r.main))
+	r.write(r.shadow+top, "NOTES.md", "notes\n")
+	r.write(r.shadow+top, "wt/api/main.go", "api\n")
+	r.write(r.shadow+r.main, "todo.txt", "todo\n")
+	r.write(r.shadow+r.other, "x.txt", "x\n")
+	r.write(r.shadow+nested, "y.txt", "y\n")
+	r.write(r.shadow+r.feat, "inside.txt", "inside\n")
+	if err := os.Symlink("feat", r.shadow+filepath.Join(top, "wt", "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(r.shadow+filepath.Join(top, "empty", "folder"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result := r.reconcile()
+
+	r.expectFile(r.feat+"/inside.txt", "inside\n")
+	kept := []string{filepath.Join(top, "NOTES.md"), filepath.Join(top, "wt", "api"), filepath.Join(top, "wt", "link"), r.main + "/todo.txt", r.other, nested}
+	var paths []string
+	for _, item := range result.Aside {
+		paths = append(paths, item.Path)
+		if item.Reason != "made on the worker outside the session's worktrees" {
+			t.Errorf("%s was kept aside because %q", item.Path, item.Reason)
+		}
+	}
+	slices.Sort(kept)
+	if slices.Sort(paths); !slices.Equal(paths, kept) {
+		t.Errorf("kept aside\n%q\nwant\n%q", paths, kept)
+	}
+	r.expectFile(r.recovery+"/worker"+filepath.Join(top, "NOTES.md"), "notes\n")
+	r.expectFile(r.recovery+"/worker"+filepath.Join(top, "wt/api/main.go"), "api\n")
+	r.expectFile(r.recovery+"/worker"+r.main+"/todo.txt", "todo\n")
+	r.expectFile(r.recovery+"/worker"+r.other+"/x.txt", "x\n")
+	r.expectFile(r.recovery+"/worker"+nested+"/y.txt", "y\n")
+	if target, err := os.Readlink(r.recovery + "/worker" + filepath.Join(top, "wt", "link")); err != nil || target != "feat" {
+		t.Errorf("the link kept aside: %q, %v", target, err)
+	}
+	for _, missing := range []string{filepath.Join(top, "NOTES.md"), filepath.Join(top, "wt", "api"), r.main + "/todo.txt", r.other + "/x.txt", nested + "/y.txt"} {
+		r.expectMissing(missing)
+	}
+	if !strings.Contains(result.Notice, filepath.Join(top, "NOTES.md")) {
+		t.Errorf("the notice says %q", result.Notice)
+	}
+}
