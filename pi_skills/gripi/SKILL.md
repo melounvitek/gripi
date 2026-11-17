@@ -25,5 +25,3 @@ Start sub-sessions only when the user asks for them, such as for orchestration o
 The brief is all the sub-session knows: the task, what's out of scope, what it may change, and what to report. Keep sub-sessions on parts that don't overlap.
 
 Then end your turn. Gripi messages you when a sub-session finishes, so don't wait or poll. A report isn't the user's approval. Read the reply with `gripi show <id>`. When it asks something, ask the user and pass the answer on with `gripi send <id>`.
-
-Ask before deleting sub-sessions, and keep what's worth keeping in this conversation first.
