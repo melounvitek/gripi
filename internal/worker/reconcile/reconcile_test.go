@@ -1241,17 +1241,21 @@ func TestACheckoutInTheMiddleOfAMergeOnTheWorkerIsKeptAside(t *testing.T) {
 		t.Errorf("the worker's merge isn't reported: %v", result.Aside)
 	}
 
+	// In a worktree made on the worker in another one that it made.
 	r = newRig(t)
 	r.snapshot(r.main)
-	made := filepath.Join(filepath.Dir(r.feat), "made")
+	outer := filepath.Join(filepath.Dir(r.feat), "outer")
+	r.workerWorktree(outer, "outer")
+	made := outer + "/made"
 	r.workerWorktree(made, "made")
 	r.conflict(made, "made")
 
 	result = r.reconcile()
 
+	r.expectFile(outer+"/a.txt", lines)
 	r.expectMissing(made)
 	r.expectFile(r.recovery+"/worker"+made+"/a.txt", r.read(r.shadow+made+"/a.txt"))
-	if item, ok := asideOf(result, made); !ok || !strings.Contains(item.Reason, "merge") {
+	if item, ok := asideOf(result, made); !ok || !strings.Contains(item.Reason, "merge") || len(result.Aside) != 1 {
 		t.Errorf("the merge in the new worktree isn't reported: %v", result.Aside)
 	}
 }

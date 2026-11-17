@@ -219,6 +219,10 @@ func (r *reconciler) asideNow(u fileUpdate, current entry, reason string) error 
 // index.
 func (r *reconciler) applyWorktree(w worktree) error {
 	ctx := r.ctx
+	// Planned all the same, so that a worktree that it is in leaves its files out.
+	if inProgress(r.shadow.path(w.GitDir)) {
+		return r.keepWorktree(w, "made on the worker, which was in the middle of a merge, rebase, cherry-pick or revert there")
+	}
 	mRefs, err := r.main.refs(ctx)
 	if err != nil {
 		return err

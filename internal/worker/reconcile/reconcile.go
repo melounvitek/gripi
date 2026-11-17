@@ -345,12 +345,6 @@ func (r *reconciler) makePlan() error {
 		if slices.Contains(b.Registered, w.Root) {
 			continue
 		}
-		if inProgress(r.shadow.path(w.GitDir)) {
-			if err := r.keepWorktree(w, "made on the worker, which was in the middle of a merge, rebase, cherry-pick or revert there"); err != nil {
-				return err
-			}
-			continue
-		}
 		if e, err := lstat(w.Root); err != nil || e.Type != "" || slices.ContainsFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root }) {
 			if err := r.keepWorktree(w, "made on the worker, but main has something at its path"); err != nil {
 				return err
