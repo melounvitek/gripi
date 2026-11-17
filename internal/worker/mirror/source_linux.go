@@ -523,7 +523,7 @@ func (s *Source) handleEvent(e rawEvent) error {
 	}
 	if e.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 		if s.isRoot(dir) {
-			s.mark(dir, writesUnknown)
+			return s.rewalk(dir, e.wd)
 		}
 		return nil
 	}
@@ -557,6 +557,33 @@ func (s *Source) handleEvent(e rawEvent) error {
 			w = s.dirty[p] // a change of mode or time doesn't end a write
 		}
 		s.mark(p, w)
+	}
+	return nil
+}
+
+// rewalk looks again at the root dir, and the roots in it, after it moved or was deleted. The watches below it moved
+// with it and name the wrong paths, so they go, but its own stays: its parent isn't watched, so only that one tells
+// when it comes back. What the walk finds is sent anew, and what it doesn't find goes on the destination.
+func (s *Source) rewalk(dir string, wd int32) error {
+	for w, p := range s.wdPath {
+		if w != wd && within(p, dir) {
+			unix.InotifyRmWatch(s.fd, uint32(w))
+			delete(s.wdPath, w)
+			delete(s.pathWd, p)
+		}
+	}
+	seen := map[string]bool{}
+	for _, r := range s.roots {
+		if within(r, dir) {
+			if err := s.walk(r, seen); err != nil {
+				return err
+			}
+		}
+	}
+	for p, e := range s.sent {
+		if within(p, dir) && !seen[p] && !s.kept(p, e) {
+			s.mark(p, writesUnknown)
+		}
 	}
 	return nil
 }

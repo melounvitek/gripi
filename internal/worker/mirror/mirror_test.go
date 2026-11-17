@@ -482,6 +482,38 @@ func TestAWorktreeDeletedWhileMirroringGoesOnMainAlsoAfterARescan(t *testing.T) 
 	}
 }
 
+// A folder of the unit that the session renames away and back comes back whole on main, also the main checkout with
+// the Git folder in it.
+func TestAFolderOfTheUnitRenamedAwayAndBackComesBackWhole(t *testing.T) {
+	unit := newRepo(t)
+	r := newRig(t, unit)
+	for _, folder := range []string{unit.Worktrees[0], unit.Main} {
+		away := folder + ".bak"
+		if err := os.Rename(folder, away); err != nil {
+			t.Fatal(err)
+		}
+		r.barrier(t)
+		if err := os.Rename(away, folder); err != nil {
+			t.Fatal(err)
+		}
+		r.barrier(t)
+		writeFile(t, folder, "src/new.rb", "new\n")
+		r.verify(t)
+
+		// Away and back between barriers, with a file deleted meanwhile.
+		if err := os.Rename(folder, away); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(away, "src/d1/f2.txt")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(away, folder); err != nil {
+			t.Fatal(err)
+		}
+		r.verify(t)
+	}
+}
+
 // A folder outside Git, such as Pi's session folders, has no worktrees, also when it is in another repository.
 func TestAFolderInAnotherRepositoryKeepsToItselfWhenTheSourceRescans(t *testing.T) {
 	other := newRepo(t)
