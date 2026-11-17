@@ -88,9 +88,13 @@ type reconciler struct {
 	base         manifest
 	recovery     string
 	plan         *plan
-	applying     bool // past the plan, which no longer changes
+	applying     bool   // past the plan, which no longer changes
+	failure      string // why the return failed, once it keeps aside what it hasn't applied
 	result       Result
 }
+
+// notBack is why a return that failed kept something aside.
+const notBack = "not brought back, as the return failed"
 
 // Reconcile brings what the worker changed, as the shadow has it, to main's folders and repository: each change that
 // main didn't make too, a clean merge of text that both changed, and otherwise main's version, with the worker's kept
@@ -103,6 +107,9 @@ func Reconcile(ctx context.Context, base, shadow, recovery string) (Result, erro
 		return result, err
 	}
 	r := &reconciler{ctx: ctx, recovery: recovery, plan: &plan{}}
+	if err := readJSON(r.in("failure.json"), &r.failure); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return result, err
+	}
 	if err := readJSON(filepath.Join(base, "manifest.json"), &r.base); err != nil {
 		return result, err
 	}
@@ -111,7 +118,12 @@ func Reconcile(ctx context.Context, base, shadow, recovery string) (Result, erro
 		if err := writeJSON(r.in("record.json"), record{Move: r.base.Move, GitDir: r.base.GitDir}); err != nil {
 			return result, err
 		}
-		if err := r.makePlan(); err != nil {
+		if r.failure != "" {
+			err = r.keepCopy()
+		} else {
+			err = r.makePlan()
+		}
+		if err != nil {
 			return result, err
 		}
 		// The plan names objects and recovery files that must outlive a crash as it does.
@@ -127,11 +139,42 @@ func Reconcile(ctx context.Context, base, shadow, recovery string) (Result, erro
 	if err := r.apply(); err != nil {
 		return result, err
 	}
-	r.result.Notice = notice(recovery, r.result.Aside)
+	r.result.Notice = notice(recovery, r.failure, r.result.Aside)
 	if err := syncFilesystems(append(r.roots(), r.base.GitDir, recovery)...); err != nil {
 		return result, err
 	}
 	return r.result, writeJSON(r.in("result.json"), r.result)
+}
+
+// KeepAside finishes a return that failed with cause, which running it again would most likely not fix, by keeping aside
+// what it hasn't brought to main's folders and repository yet, as Reconcile keeps the worker's version of what main
+// changed too, with cause in the notice. It changes main only to undo a checkout that the failure cut short. Reconcile
+// does the same from then on.
+func KeepAside(ctx context.Context, base, shadow, recovery string, cause error) (Result, error) {
+	if _, err := os.Lstat(filepath.Join(recovery, "failure.json")); errors.Is(err, fs.ErrNotExist) {
+		if err := writeJSON(filepath.Join(recovery, "failure.json"), cause.Error()); err != nil {
+			return Result{}, err
+		}
+	}
+	return Reconcile(ctx, base, shadow, recovery)
+}
+
+// keepCopy keeps the worker's whole copy aside, for a return that failed before it planned anything, so that main
+// keeps everything as it was.
+func (r *reconciler) keepCopy() error {
+	kept := r.in("worker")
+	if _, err := os.Lstat(r.shadow.at); err == nil {
+		if err := os.RemoveAll(kept); err != nil {
+			return err
+		}
+		if err := os.Rename(r.shadow.at, kept); err != nil {
+			return err
+		}
+	} else if _, err := os.Lstat(kept); err != nil { // not moved there before a crash either
+		return err
+	}
+	r.plan.Aside = []Item{{Path: filepath.Dir(r.base.GitDir), Reason: "the return failed before it compared anything, so main keeps everything as it was; the worker's whole copy, with its Git folder, is in " + kept}}
+	return nil
 }
 
 // Discard drops the recovery record of a return, with the move's base and the refs that keep the worker's commits.
@@ -812,11 +855,14 @@ func (r *reconciler) planGitFiles() error {
 	return nil
 }
 
-func notice(recovery string, aside []Item) string {
+func notice(recovery, failure string, aside []Item) string {
 	if len(aside) == 0 {
 		return ""
 	}
 	var b strings.Builder
+	if failure != "" {
+		fmt.Fprintf(&b, "The return failed, so it kept aside what it hadn't brought back: %s\n", failure)
+	}
 	fmt.Fprintf(&b, "Main kept its own version of what follows. The worker's is in %s or under the ref named, with the base's and main's in %s and %s to compare, until the record is discarded:",
 		filepath.Join(recovery, "worker"), filepath.Join(recovery, "base"), filepath.Join(recovery, "main"))
 	for _, item := range aside {

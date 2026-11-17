@@ -23,6 +23,7 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
+	"github.com/melounvitek/gripi/internal/worker/reconcile"
 )
 
 // fakeStore knows the folders of some saved sessions, and the paths that their tool calls named.
@@ -704,6 +705,55 @@ func TestAFailedReleaseFinishesWhenTheReturnRunsAgain(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(rig.feature, "new.txt")); got != "new\n" {
 		t.Fatalf("new.txt = %q", got)
+	}
+}
+
+// A return that fails in a way that running it again wouldn't fix, such as a worktree on a branch without commits,
+// which Git before 2.42 can't make, keeps aside what it hasn't brought to main, and the session continues on main.
+func TestAFailedReturnKeepsTheRestAsideAndTheSessionContinuesOnMain(t *testing.T) {
+	rig := newMoveRig(t)
+	placement := rig.move()
+	writeTestFile(t, rig.shadow(placement, filepath.Join(rig.feature, "new.txt")), "new\n", 0600)
+	pages := filepath.Join(rig.home, "Work", ".worktrees", "app", "pages")
+	shadowGitDir := rig.shadow(placement, rig.gitDir)
+	git(t, rig.shadow(placement, rig.repository), "--git-dir", shadowGitDir, "worktree", "add", "-q", "--orphan", "-b", "pages", rig.shadow(placement, pages))
+	// The worker names main's paths.
+	writeTestFile(t, filepath.Join(shadowGitDir, "worktrees", "pages", "gitdir"), pages+"/.git\n", 0600)
+	writeTestFile(t, rig.shadow(placement, filepath.Join(pages, ".git")), "gitdir: "+filepath.Join(rig.gitDir, "worktrees", "pages")+"\n", 0600)
+	writeTestFile(t, rig.shadow(placement, filepath.Join(pages, "index.html")), "pages\n", 0600)
+	git(t, rig.shadow(placement, pages), "--git-dir", filepath.Join(shadowGitDir, "worktrees", "pages"), "--work-tree", rig.shadow(placement, pages), "add", "index.html")
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	writeTestFile(t, filepath.Join(bin, "git"), `#!/bin/sh
+case " $* " in *" worktree add "*"--orphan "*) echo "error: unknown option 'orphan'" >&2; exit 129;; esac
+exec `+real+` "$@"
+`, 0755)
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+
+	if err := rig.manager.Return(context.Background(), rig.key, rig.prepare); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(rig.feature, "new.txt")); got != "new\n" {
+		t.Errorf("new.txt = %q", got)
+	}
+	if _, err := os.Stat(pages); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("main's pages worktree: %v", err)
+	}
+	notices := rig.manager.Notices(rig.key)
+	if len(notices) != 1 || !slices.ContainsFunc(notices[0].Result.Aside, func(item reconcile.Item) bool { return item.Path == pages }) || !strings.Contains(notices[0].Result.Notice, "unknown option") {
+		t.Fatalf("notices = %+v", notices)
+	}
+	if got := readFile(t, filepath.Join(notices[0].Recovery, "worker")+filepath.Join(pages, "index.html")); got != "pages\n" {
+		t.Errorf("the worker's index.html kept aside = %q", got)
+	}
+	if command, _, err := rig.manager.Launch(agent.Process{Key: rig.key}); command != nil || err != nil {
+		t.Fatalf("the returned session's Pi = %v, %v; want it on main", command, err)
+	}
+	if _, err := os.Stat(rig.manager.moveFolder(placement.Move)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("main's side of the move: %v", err)
 	}
 }
 

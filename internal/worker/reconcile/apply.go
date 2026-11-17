@@ -65,6 +65,10 @@ func (r *reconciler) apply() error {
 		checkedOut := slices.ContainsFunc(mTrees, func(w worktree) bool { return w.Head.Branch == u.Name && !slices.Contains(taking, w.Root) })
 		switch current := mRefs[u.Name].OID; {
 		case current == u.New:
+		case r.failure != "":
+			if err := r.recover(u.Name, u.New, notBack); err != nil {
+				return err
+			}
 		case current == u.Old && !checkedOut:
 			updates = append(updates, u)
 		default:
@@ -95,6 +99,12 @@ func (r *reconciler) apply() error {
 	}
 	for _, s := range p.Stashes {
 		if slices.ContainsFunc(mStash, func(m stash) bool { return m.OID == s.OID }) {
+			continue
+		}
+		if r.failure != "" {
+			if err := r.kept(Item{Path: "stash", Reason: fmt.Sprintf("the worker's %q, %s", s.Message, notBack), Ref: r.returnsRef("stashes/" + s.OID)}, s.OID); err != nil {
+				return err
+			}
 			continue
 		}
 		if _, err := r.main.git(ctx, nil, r.base.GitDir, "", "stash", "store", "-m", s.Message, s.OID); err != nil {
@@ -177,6 +187,8 @@ func (r *reconciler) applyFiles() error {
 		applied, err := current.same(u.New), error(nil)
 		switch {
 		case applied:
+		case r.failure != "":
+			err = r.asideNow(u, current, notBack)
 		case !current.same(u.Old):
 			err = r.asideNow(u, current, "changed on main meanwhile")
 		case slices.ContainsFunc(made, func(root string) bool { return within(u.Path, root) }):
@@ -234,6 +246,29 @@ func (r *reconciler) applyWorktree(w worktree) error {
 	mTrees, err := r.main.worktrees(ctx, mRefs)
 	if err != nil {
 		return err
+	}
+	if r.failure != "" {
+		// One that the return made has the worker's HEAD, and the worker's index once it has the worker's files.
+		if i := slices.IndexFunc(mTrees, func(mw worktree) bool { return mw.Root == w.Root }); i >= 0 && mTrees[i].Head.OID == w.Head.OID {
+			index, err := r.main.index(ctx, mTrees[i])
+			if err != nil {
+				return err
+			}
+			if index != "" && index == w.Index {
+				r.result.Applied = append(r.result.Applied, w.Root)
+				return nil
+			}
+			if index == "" && w.Head.OID != "" {
+				// An index of its HEAD makes them agree.
+				if _, err := r.main.git(ctx, nil, mTrees[i].GitDir, "", "read-tree", "HEAD"); err != nil {
+					return err
+				}
+				if err := r.step(); err != nil {
+					return err
+				}
+			}
+		}
+		return r.keepWorktree(w, notBack)
 	}
 	if w.Head.Branch != "" && (mRefs[w.Head.Branch].OID != w.Head.OID || slices.ContainsFunc(mTrees, func(mw worktree) bool {
 		return mw.Head.Branch == w.Head.Branch && mw.Root != w.Root
@@ -360,6 +395,15 @@ func (r *reconciler) applyReflogs() error {
 		if now != l.Head || now.OID == "" {
 			continue
 		}
+		if r.failure != "" { // the recovery folder has the worker's reflogs already
+			log := filepath.Join(gitDir, "logs", l.Ref)
+			if lacking, _, err := lackingEntries(log, l.Entries); err != nil || lacking != "" {
+				if err := r.kept(Item{Path: log, Reason: notBack}, ""); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if _, err := os.Lstat(filepath.Join(gitDir, l.Ref+".lock")); err == nil {
 			return fmt.Errorf("git is changing %s in %s", l.Ref, gitDir)
 		}
@@ -373,11 +417,11 @@ func (r *reconciler) applyReflogs() error {
 	return nil
 }
 
-// appendEntries appends to the reflog log the entries that it lacks.
-func appendEntries(log, entries string) error {
+// lackingEntries returns the entries that the reflog log lacks, and what it holds.
+func lackingEntries(log, entries string) (string, []byte, error) {
 	data, err := os.ReadFile(log)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		return "", nil, err
 	}
 	has := map[string]bool{}
 	for line := range strings.Lines(string(data)) {
@@ -389,10 +433,15 @@ func appendEntries(log, entries string) error {
 			lacking.WriteString(line)
 		}
 	}
-	if lacking.Len() == 0 {
-		return nil
+	return lacking.String(), data, nil
+}
+
+// appendEntries appends to the reflog log the entries that it lacks.
+func appendEntries(log, entries string) error {
+	text, data, err := lackingEntries(log, entries)
+	if err != nil || text == "" {
+		return err
 	}
-	text := lacking.String()
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		text = "\n" + text // after a line that a crash cut short
 	}
@@ -435,6 +484,21 @@ func (r *reconciler) applyCheckouts() error {
 				return err
 			}
 		}
+		if r.failure != "" {
+			if !gone && mTrees[i].Head == c.New && index == c.NewIndex {
+				continue
+			}
+			if !gone && index == c.OldIndex {
+				if err := r.undoCheckout(c, mTrees[i].Head, mRefs); err != nil {
+					return err
+				}
+			}
+			w.Head, w.Index = c.New, c.NewIndex
+			if err := r.keepCheckout(w, notBack); err != nil {
+				return err
+			}
+			continue
+		}
 		if gone || mTrees[i].Head != c.Old && mTrees[i].Head != c.New || index != c.OldIndex && index != c.NewIndex || elsewhere {
 			w.Head, w.Index = c.New, c.NewIndex
 			if err := r.keepCheckout(w, "main's checkout there changed meanwhile, so it keeps its own HEAD and index"); err != nil {
@@ -462,4 +526,37 @@ func (r *reconciler) applyCheckouts() error {
 		}
 	}
 	return nil
+}
+
+// undoCheckout moves main's HEAD in a worktree whose checkout a failure cut short, and the branch that it has there,
+// back to as they were before the return, as its index still is, and keeps the worker's commit of the branch aside.
+func (r *reconciler) undoCheckout(c checkout, now head, mRefs map[string]ref) error {
+	if now == c.New && now != c.Old {
+		var err error
+		if c.Old.Branch != "" {
+			_, err = r.main.git(r.ctx, nil, c.GitDir, "", "symbolic-ref", "HEAD", c.Old.Branch)
+		} else {
+			_, err = r.main.git(r.ctx, nil, c.GitDir, "", "update-ref", "--no-deref", "HEAD", c.Old.OID)
+		}
+		if err != nil {
+			return err
+		}
+		if err := r.step(); err != nil {
+			return err
+		}
+	} else if now.Branch != c.Old.Branch {
+		return nil
+	}
+	i := slices.IndexFunc(r.plan.Refs, func(u refUpdate) bool { return u.Name == c.Old.Branch })
+	if c.Old.Branch == "" || i < 0 || mRefs[c.Old.Branch].OID != r.plan.Refs[i].New {
+		return nil
+	}
+	u := r.plan.Refs[i]
+	if err := r.updateRefs([]refUpdate{{Name: u.Name, Old: u.New, New: u.Old}}, true); err != nil {
+		return err
+	}
+	if err := r.recover(u.Name, u.New, notBack); err != nil {
+		return err
+	}
+	return r.step()
 }
