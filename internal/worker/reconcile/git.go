@@ -225,6 +225,27 @@ func (r repo) missing(ctx context.Context, ids []string) ([]string, error) {
 	return lacking, nil
 }
 
+// present returns those of ids that the repository has: the commits, and the other objects.
+func (r repo) present(ctx context.Context, ids []string) (commits, others []string, err error) {
+	if len(ids) == 0 {
+		return nil, nil, nil
+	}
+	out, err := r.git(ctx, strings.NewReader(strings.Join(ids, "\n")+"\n"), r.gitDir, "", "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	if err != nil {
+		return nil, nil, err
+	}
+	for line := range strings.Lines(out) {
+		switch id, kind, _ := strings.Cut(strings.TrimSuffix(line, "\n"), " "); kind {
+		case "commit":
+			commits = append(commits, id)
+		case "missing":
+		default:
+			others = append(others, id)
+		}
+	}
+	return commits, others, nil
+}
+
 // fetch adds to main the objects of the shadow's repository that wants reach and main lacks, leaving out what haves
 // reach. It writes them as a pack, as git fetch would, without changing any ref.
 func fetch(ctx context.Context, main, shadow repo, wants, haves []string) error {

@@ -797,6 +797,9 @@ func TestAReconcileStoppedAfterAnyChangeFinishesWhenRunAgain(t *testing.T) {
 		if got := r.git(r.main, "stash", "list", "--format=%gs"); got != "On main: on the worker\n" {
 			t.Errorf("stopped after %d: stash list =\n%s", stop, got)
 		}
+		if got := r.git(r.feat, "reflog", "--format=%gs", "feat"); strings.Count(got, "commit: feat\n") != 1 {
+			t.Errorf("stopped after %d: git reflog feat =\n%s", stop, got)
+		}
 		if _, ok := asideOf(result, r.main+"/bin.dat"); !ok || len(result.Aside) != 1 {
 			t.Errorf("stopped after %d: kept aside %v", stop, result.Aside)
 		}
@@ -1401,4 +1404,122 @@ func TestAWorktreeWithoutItsGitFileInTheShadowIsLeftAloneOnMain(t *testing.T) {
 		t.Errorf("kept aside %v, notice %q", result.Aside, result.Notice)
 	}
 	r.expectFile(r.recovery+"/worker"+r.feat+"/src/new.rb", "new\n")
+}
+
+// Commits that the session left on the worker, such as with git reset or on a detached HEAD, stay in main's reflogs,
+// as they would on one machine.
+func TestCommitsThatOnlyTheWorkersReflogsReachComeBack(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.feat)
+	w := r.shadow + r.feat
+	r.write(w, "a.txt", replace("two", "reset"))
+	r.worker(r.feat, "commit", "-qam", "reset")
+	reset := strings.TrimSpace(r.worker(r.feat, "rev-parse", "HEAD"))
+	r.worker(r.feat, "reset", "-q", "--hard", "HEAD~1")
+	r.worker(r.feat, "switch", "-q", "--detach")
+	r.write(w, "a.txt", replace("two", "detached"))
+	r.worker(r.feat, "commit", "-qam", "detached")
+	detached := strings.TrimSpace(r.worker(r.feat, "rev-parse", "HEAD"))
+	r.worker(r.feat, "switch", "-q", "feat")
+	r.write(w, "a.txt", replace("two", "kept"))
+	r.worker(r.feat, "commit", "-qam", "kept")
+
+	if result := r.reconcile(); len(result.Aside) > 0 {
+		t.Fatalf("kept aside %v", result.Aside)
+	}
+	if err := Discard(context.Background(), r.recovery); err != nil {
+		t.Fatal(err)
+	}
+	r.git(r.main, "gc", "-q", "--prune=now")
+
+	want := "commit: kept\nreset: moving to HEAD~1\ncommit: reset\ngripi: back from a worker\nbranch: Created from HEAD\n"
+	if got := r.git(r.feat, "reflog", "--format=%gs", "feat"); got != want {
+		t.Errorf("git reflog feat =\n%s\nwant\n%s", got, want)
+	}
+	head := r.git(r.feat, "reflog", "--format=%H %gs", "HEAD")
+	for _, entry := range []string{reset + " commit: reset", detached + " commit: detached"} {
+		if !strings.Contains(head, entry+"\n") {
+			t.Errorf("git reflog HEAD in feat lacks %q:\n%s", entry, head)
+		}
+	}
+	r.git(r.main, "fsck", "--no-progress")
+}
+
+// A worktree made on the worker and a tag with a reflog keep what only their reflogs reach too.
+func TestAWorktreeMadeOnTheWorkerAndATagKeepTheirReflogs(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.main)
+	made := filepath.Join(filepath.Dir(r.feat), "made")
+	r.workerWorktree(made, "made")
+	inMade := func(args ...string) string {
+		return strings.TrimSpace(run(t, r.shadow+made, []string{"GIT_DIR=" + r.shadow + r.gitDirOf(made), "GIT_WORK_TREE=" + r.shadow + made}, "git", args...))
+	}
+	inMade("switch", "-q", "--detach")
+	inMade("commit", "-q", "--allow-empty", "-m", "detached")
+	detached := inMade("rev-parse", "HEAD")
+	inMade("tag", "-a", "-m", "first", "--create-reflog", "moved")
+	first := inMade("rev-parse", "moved")
+	inMade("switch", "-q", "made")
+	inMade("tag", "-f", "-a", "-m", "second", "moved")
+
+	if result := r.reconcile(); len(result.Aside) > 0 {
+		t.Fatalf("kept aside %v", result.Aside)
+	}
+	if err := Discard(context.Background(), r.recovery); err != nil {
+		t.Fatal(err)
+	}
+	r.git(r.main, "gc", "-q", "--prune=now")
+
+	if got := r.git(made, "reflog", "--format=%H %gs", "HEAD"); !strings.Contains(got, detached+" commit: detached\n") {
+		t.Errorf("git reflog HEAD in made =\n%s", got)
+	}
+	if got := r.rev(r.main, "refs/tags/moved@{1}"); got != first {
+		t.Errorf("refs/tags/moved@{1} = %s, want %s", got, first)
+	}
+	r.git(r.main, "fsck", "--no-progress")
+}
+
+// A reflog that the worker's lost objects would leave ending elsewhere than its ref stays main's.
+func TestAReflogThatWouldEndElsewhereThanItsRefStaysMains(t *testing.T) {
+	r := newRig(t)
+	r.snapshot(r.feat)
+	r.worker(r.feat, "commit", "-q", "--allow-empty", "-m", "a")
+	r.worker(r.feat, "commit", "-q", "--allow-empty", "-m", "b")
+	b := strings.TrimSpace(r.worker(r.feat, "rev-parse", "HEAD"))
+	r.worker(r.feat, "reset", "-q", "--hard", "HEAD~2")
+	if err := os.Remove(r.shadow + r.gitDir + "/objects/" + b[:2] + "/" + b[2:]); err != nil {
+		t.Fatal(err)
+	}
+
+	r.reconcile()
+
+	for _, name := range []string{"feat", "HEAD"} {
+		if got, want := strings.TrimSpace(r.git(r.feat, "reflog", "-1", "--format=%H", name)), r.rev(r.feat, name); got != want {
+			t.Errorf("the last entry of git reflog %s is %s, want %s", name, got, want)
+		}
+	}
+	r.git(r.main, "fsck", "--no-progress")
+}
+
+// A ref or a checkout that main changed too keeps main's reflog, which the worker's entries would contradict, also
+// where main's HEAD is at the worker's commit on another branch.
+func TestWhatMainKeepsKeepsItsReflog(t *testing.T) {
+	r := newRig(t)
+	r.git(r.main, "branch", "diverged")
+	r.snapshot(r.main, r.feat)
+	r.commit(func(args ...string) string { return r.worker(r.main, args...) }, "diverged", "worker")
+	r.commit(r.onMain, "diverged", "main")
+	r.worker(r.feat, "switch", "-q", "topic")
+	r.git(r.feat, "switch", "-q", "-c", "mine")
+	diverged := r.git(r.main, "reflog", "--format=%H %gs", "diverged")
+	head := r.git(r.feat, "reflog", "--format=%H %gs", "HEAD")
+
+	r.reconcile()
+
+	if got := r.git(r.main, "reflog", "--format=%H %gs", "diverged"); got != diverged {
+		t.Errorf("git reflog diverged =\n%s\nwant main's\n%s", got, diverged)
+	}
+	if got := r.git(r.feat, "reflog", "--format=%H %gs", "HEAD"); got != head {
+		t.Errorf("git reflog HEAD in feat =\n%s\nwant main's\n%s", got, head)
+	}
 }
