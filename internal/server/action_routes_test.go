@@ -610,6 +610,28 @@ func TestAnsweringADialogLetsTheCloneThatWaitsOnItFinish(t *testing.T) {
 	}
 }
 
+func TestLeavingACloneThatWaitsOnADialogFreesTheSession(t *testing.T) {
+	handler, sessionPath, waitForDialog := startConfirmCloneGateway(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	left := make(chan struct{})
+	go func() {
+		serveAction(handler, formActionRequest("/sessions/clone", map[string]string{"session": sessionPath}, true).WithContext(ctx))
+		close(left)
+	}()
+	waitForDialog()
+
+	cancel()
+	select {
+	case <-left:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the clone outlived its request")
+	}
+	prompted := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Still there?"}, true))
+	if prompted.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", prompted.Code, prompted.Body.String())
+	}
+}
+
 // startConfirmCloneGateway serves a saved session through the fake Pi, which asks before it clones a session, as an
 // extension can. waitForDialog returns once the gateway has the question.
 func startConfirmCloneGateway(t *testing.T) (handler http.Handler, sessionPath string, waitForDialog func()) {
