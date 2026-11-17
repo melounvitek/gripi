@@ -670,6 +670,17 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		writeText(response, http.StatusBadRequest, "Session name is too long")
 		return
 	}
+	model, thinking := strings.TrimSpace(request.FormValue("model")), strings.TrimSpace(request.FormValue("thinking"))
+	provider, modelID, _ := strings.Cut(model, "/")
+	if model != "" && (provider == "" || modelID == "" || len(provider) > providerIDBytes || len(modelID) > modelIDBytes) {
+		writeText(response, http.StatusBadRequest, "Model must be given as provider/id")
+		return
+	}
+	// The new session runs the first agent, whose composer a key of no agent gets.
+	if levels := app.adapter.Composer("").ThinkingLevels(); thinking != "" && !slices.Contains(levels, thinking) {
+		writeText(response, http.StatusBadRequest, "Thinking level must be one of "+strings.Join(levels, ", "))
+		return
+	}
 	parent, status := "", agent.Status{}
 	if raw := request.FormValue("parent"); raw != "" {
 		var ok bool
@@ -709,10 +720,23 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		app.writeActionRPCError(response, err)
 		return
 	}
-	if parent != "" || name != "" {
+	if parent != "" || name != "" || model != "" || thinking != "" {
 		// Pi saves a new session only once it replies, so its client takes the name and model before the first prompt.
 		chosen := agent.LiveStatus{Provider: status.Provider, ModelID: status.ModelID, ThinkingLevel: status.ThinkingLevel}
 		err = app.withSynchronizedClient(request, newPath, func(client agent.Client) error {
+			// Without a parent, what isn't chosen stays as Pi started the session.
+			if parent == "" && (model != "" || thinking != "") {
+				var err error
+				if chosen, err = client.LiveStatus(request.Context()); err != nil {
+					return err
+				}
+			}
+			if model != "" {
+				chosen.Provider, chosen.ModelID = provider, modelID
+			}
+			if thinking != "" {
+				chosen.ThinkingLevel = thinking
+			}
 			return agent.ChooseForNewSession(request.Context(), client, chosen, name)
 		})
 		if err == nil && parent != "" {

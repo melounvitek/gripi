@@ -94,6 +94,55 @@ func TestNewTakesTheModelThatTheRunningParentUses(t *testing.T) {
 	}
 }
 
+func TestNewStartsWithTheChosenModelAndThinkingLevel(t *testing.T) {
+	_, beta := fakePiGateway(t)
+	outsideSessions(t)
+	chooseModel(t, beta, "contract-model", "high")
+	directory := t.TempDir()
+	start := func(flags ...string) gateway.LocalSession {
+		t.Helper()
+		code, stdout, stderr := runCLI(append([]string{"new", directory, "Show the deterministic browser response", "--id"}, flags...)...)
+		if code != 0 || stderr != "" {
+			t.Fatalf("gripi new %q = %d, stderr %q", flags, code, stderr)
+		}
+		return eventually(t, strings.TrimSpace(stdout), func(session gateway.LocalSession) bool { return session.State == "idle" })
+	}
+
+	if session := start("--model", "e2e/contract-model", "--thinking", "low"); !startsWithModel(t, session.Path, "contract-model", "low") {
+		t.Fatalf("session %+v did not start with the chosen model", session)
+	}
+	// What isn't chosen stays as Pi starts a session, or as the parent has it.
+	if session := start("--thinking", "high"); !startsWithModel(t, session.Path, "fixture-model", "high") {
+		t.Fatalf("session %+v did not keep Pi's model", session)
+	}
+	if session := start("--parent", "0a1-b", "--thinking", "off"); session.Parent != beta || !startsWithModel(t, session.Path, "contract-model", "off") {
+		t.Fatalf("sub-session %+v did not keep its parent's model", session)
+	}
+}
+
+func TestNewRefusesAModelOrThinkingLevelThatPiLacks(t *testing.T) {
+	fakePiGateway(t)
+	outsideSessions(t)
+	_, before, _ := runCLI("list", "--all", "--json")
+	directory := t.TempDir()
+
+	for flag, value := range map[string]string{"--model": "contract-model", "--thinking": "huge"} {
+		if code, stdout, stderr := runCLI("new", directory, "Run the tests", flag, value); code != 1 || stdout != "" || !strings.Contains(stderr, "answered 400") {
+			t.Fatalf("gripi new %s %s = %d, stdout %q, stderr %q", flag, value, code, stdout, stderr)
+		}
+	}
+	if _, err := os.Stat(os.Getenv("GRIPI_E2E_FAKE_PI_LOG")); !os.IsNotExist(err) {
+		t.Fatalf("a refused gripi new started Pi (%v)", err)
+	}
+	// Only Pi knows its models, so the session it started is deleted again.
+	if code, stdout, stderr := runCLI("new", directory, "Run the tests", "--model", "e2e/retired-model"); code != 1 || stdout != "" || !strings.Contains(stderr, "retired-model") {
+		t.Fatalf("gripi new with an unknown model = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, after, _ := runCLI("list", "--all", "--json"); after != before {
+		t.Fatalf("a refused gripi new left a session:\n%s", after)
+	}
+}
+
 func TestNewRefusesAParentThatCannotHaveSubSessions(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	outsideSessions(t)
