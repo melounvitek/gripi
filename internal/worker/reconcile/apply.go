@@ -219,6 +219,10 @@ func (r *reconciler) asideNow(u fileUpdate, current entry, reason string) error 
 // index.
 func (r *reconciler) applyWorktree(w worktree) error {
 	ctx := r.ctx
+	// Planned all the same, so that a worktree that it is in leaves its files out.
+	if inProgress(r.shadow.path(w.GitDir)) {
+		return r.keepWorktree(w, "made on the worker, which was in the middle of a merge, rebase, cherry-pick or revert there")
+	}
 	mRefs, err := r.main.refs(ctx)
 	if err != nil {
 		return err
@@ -238,8 +242,14 @@ func (r *reconciler) applyWorktree(w worktree) error {
 		if e, err := lstat(w.Root); err != nil || e.Type != "" || blocked("/", w.Root) {
 			return r.keepWorktree(w, "made on the worker, but main has something at its path")
 		}
-		args := []string{"worktree", "add", "--no-checkout", w.Root, strings.TrimPrefix(w.Head.Branch, "refs/heads/")}
-		if w.Head.Branch == "" {
+		name := strings.TrimPrefix(w.Head.Branch, "refs/heads/")
+		args := []string{"worktree", "add", "--no-checkout", w.Root, name}
+		switch {
+		case w.Head.OID == "" && w.Head.Branch == "":
+			return r.keepWorktree(w, "made on the worker on a branch without commits, whose name main has taken meanwhile")
+		case w.Head.OID == "": // it checks nothing out, and refuses --no-checkout
+			args = []string{"worktree", "add", "--orphan", "-b", name, w.Root}
+		case w.Head.Branch == "":
 			args = []string{"worktree", "add", "--no-checkout", "--detach", w.Root, w.Head.OID}
 		}
 		if _, err := r.main.git(ctx, nil, r.base.GitDir, "", args...); err != nil {
@@ -313,7 +323,7 @@ func (r *reconciler) setIndex(gitDir, root, index string) error {
 	if _, err := building.git(r.ctx, strings.NewReader(index), gitDir, root, "update-index", "-z", "--index-info"); err != nil {
 		return err
 	}
-	if _, err := building.git(r.ctx, nil, gitDir, root, "update-index", "-q", "--refresh"); err != nil {
+	if _, err := building.git(r.ctx, nil, gitDir, root, "update-index", "-q", "--unmerged", "--refresh"); err != nil {
 		return err
 	}
 	return os.Rename(built, live)
