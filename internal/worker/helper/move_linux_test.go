@@ -565,7 +565,7 @@ func TestAReleaseArchivesWhatTheSessionMadeOutsideTheRepository(t *testing.T) {
 	}
 	defer archive.Close()
 	main := t.TempDir()
-	if err := mirror.ReadOutside(archive, main); err != nil {
+	if err := mirror.ReadOutside(archive, main, filepath.Join(t.TempDir(), "file")); err != nil {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]string{

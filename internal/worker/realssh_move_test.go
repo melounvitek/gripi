@@ -182,7 +182,7 @@ func TestRealSSHMovesASessionOnACopyOfItsRepository(t *testing.T) {
 			t.Fatalf("a mirror ended with %v", err)
 		}
 	}
-	if err := conn.TakeOutside(ctx, "m1", shadow); err != nil {
+	if err := conn.TakeOutside(ctx, "m1", shadow, filepath.Join(t.TempDir(), "file")); err != nil {
 		t.Fatal(err)
 	}
 	counter := worker.direct("cat " + ShellQuote(copy+strings.TrimPrefix(filepath.Join(feature, "counter"), home)))

@@ -2,7 +2,6 @@ package mirror
 
 import (
 	"archive/tar"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // WriteOutside writes a tar archive of what the folders of unit.Within hold outside the unit's folders, also those of
@@ -89,9 +90,9 @@ func WriteOutside(unit Unit, w io.Writer) error {
 	return archive.Close()
 }
 
-// ReadOutside writes what an archive of WriteOutside holds into folder, at the same paths, durably, each file through a
-// temporary file next to it, and nothing outside folder.
-func ReadOutside(r io.Reader, folder string) error {
+// ReadOutside writes what an archive of WriteOutside holds into folder, at the same paths, durably, and nothing outside
+// folder. Each file arrives in the file temporary first, which it replaces, on folder's file system but outside it.
+func ReadOutside(r io.Reader, folder, temporary string) error {
 	root, err := os.OpenRoot(folder)
 	if err != nil {
 		return err
@@ -124,7 +125,7 @@ func ReadOutside(r io.Reader, folder string) error {
 				err = root.Symlink(header.Linkname, name)
 			}
 		case tar.TypeReg:
-			err = writeIn(root, name, archive, mode, header.ModTime)
+			err = place(root, name, temporary, archive, mode, header.ModTime)
 		default:
 			err = fmt.Errorf("mirror: the archive has %s, which is neither a folder, a file nor a link", header.Name)
 		}
@@ -134,10 +135,9 @@ func ReadOutside(r io.Reader, folder string) error {
 	}
 }
 
-// writeIn writes the file name in root with contents, through a new temporary file next to it.
-func writeIn(root *os.Root, name string, contents io.Reader, mode fs.FileMode, modified time.Time) error {
-	temporary := filepath.Join(filepath.Dir(name), ".gripi-"+rand.Text())
-	file, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+// place writes contents to the file temporary, then moves it to name in root, in place of a file or link there.
+func place(root *os.Root, name, temporary string, contents io.Reader, mode fs.FileMode, modified time.Time) error {
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -149,13 +149,16 @@ func writeIn(root *os.Root, name string, contents io.Reader, mode fs.FileMode, m
 		err = closed
 	}
 	if err == nil {
-		err = root.Chtimes(temporary, modified, modified)
-	}
-	if err == nil {
-		err = root.Rename(temporary, name)
+		err = os.Chtimes(temporary, modified, modified)
 	}
 	if err != nil {
-		root.Remove(temporary)
+		return err
 	}
-	return err
+	// The folder as root resolves it, so that the move never leaves root.
+	parent, err := root.Open(filepath.Dir(name))
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	return unix.Renameat(unix.AT_FDCWD, temporary, int(parent.Fd()), filepath.Base(name))
 }

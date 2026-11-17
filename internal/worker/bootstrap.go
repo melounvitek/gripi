@@ -151,8 +151,8 @@ func (conn *Conn) UploadSessionFile(ctx context.Context, file string) error {
 }
 
 // TakeOutside writes into folder, main's shadow of its home folder, what the copy of a move that the worker released held
-// outside the move's folders, which the release archived.
-func (conn *Conn) TakeOutside(ctx context.Context, id, folder string) error {
+// outside the move's folders, which the release archived, through the file temporary (mirror.ReadOutside).
+func (conn *Conn) TakeOutside(ctx context.Context, id, folder, temporary string) error {
 	command, release, err := conn.Command(ctx, ShellQuote("cat", helper.OutsideArchive(conn.installDir, id)))
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func (conn *Conn) TakeOutside(ctx context.Context, id, folder string) error {
 	}
 	stop := context.AfterFunc(ctx, func() { command.Process.Kill() })
 	defer stop()
-	err = mirror.ReadOutside(output, folder)
+	err = mirror.ReadOutside(output, folder, temporary)
 	if err == nil {
 		_, err = io.Copy(io.Discard, output)
 	} else {

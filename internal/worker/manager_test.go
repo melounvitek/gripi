@@ -244,7 +244,7 @@ func (link *fakeLink) ReleaseMove(_ context.Context, id string) (helper.Barriers
 }
 
 // TakeOutside writes the rig's outside files into folder, as if the worker's copy had them outside the move's folders.
-func (link *fakeLink) TakeOutside(_ context.Context, id, folder string) error {
+func (link *fakeLink) TakeOutside(_ context.Context, id, folder, _ string) error {
 	if err := link.call("take outside %s", id); err != nil {
 		return err
 	}

@@ -49,10 +49,10 @@ func TestWhatACopyHoldsOutsideItsFoldersTravelsInAnArchive(t *testing.T) {
 	if err := WriteOutside(unit, &archive); err != nil {
 		t.Fatal(err)
 	}
-	main := t.TempDir()
+	main, temporary := t.TempDir(), filepath.Join(t.TempDir(), "file")
 	// Again, as a return that runs again does.
 	for range 2 {
-		if err := ReadOutside(bytes.NewReader(archive.Bytes()), main); err != nil {
+		if err := ReadOutside(bytes.NewReader(archive.Bytes()), main, temporary); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -85,7 +85,7 @@ func TestWhatACopyHoldsOutsideItsFoldersTravelsInAnArchive(t *testing.T) {
 	writer.Close()
 	into := filepath.Join(t.TempDir(), "into")
 	os.Mkdir(into, 0o700)
-	if err := ReadOutside(&hostile, into); err == nil {
+	if err := ReadOutside(&hostile, into, temporary); err == nil {
 		t.Error("ReadOutside took a path outside its folder")
 	}
 	if _, err := os.Lstat(filepath.Join(filepath.Dir(into), "escaped")); err == nil {

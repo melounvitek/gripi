@@ -479,7 +479,8 @@ func (manager *Manager) release(ctx context.Context, worker *remote, placement P
 			return fmt.Errorf("main's copy of the session on worker %s has barrier %d, not its last one %d: %v", placement.Worker, got, last.barrier, last.live.err)
 		}
 	}
-	if err := conn.TakeOutside(ctx, placement.Move, filepath.Join(manager.moveFolder(placement.Move), "shadow")); err != nil {
+	folder := manager.moveFolder(placement.Move)
+	if err := conn.TakeOutside(ctx, placement.Move, filepath.Join(folder, "shadow"), filepath.Join(folder, "taking")); err != nil {
 		return fmt.Errorf("take what the session made outside the repository's worktrees from worker %s: %w", placement.Worker, err)
 	}
 	return nil
