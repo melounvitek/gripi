@@ -849,14 +849,16 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 		return
 	}
 	app.pendingRemapMu.Lock()
-	defer app.pendingRemapMu.Unlock()
 	path, ok = app.resolveActionPendingPath(response, request, path)
 	if !ok {
+		app.pendingRemapMu.Unlock()
 		return
 	}
 	unlock := app.sessionMutationLocks.Lock(path)
 	defer unlock()
 	_, releaseDeletion, err := app.promptAdmissions.navigate(func() (string, error) { return path, nil })
+	// From here the locks keep remaps from and to the session away, so the others need not wait for Pi or the trash.
+	app.pendingRemapMu.Unlock()
 	if app.writeRPCError(response, err) {
 		return
 	}
@@ -1456,8 +1458,6 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 			return
 		}
 	}
-	app.pendingRemapMu.Lock()
-	defer app.pendingRemapMu.Unlock()
 	previous = resolved
 	cwd := app.currentSessionCWD(previous)
 	_, wasPending := app.pendingSessions.CWD(previous)
@@ -1465,6 +1465,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	if app.sessionStore.Exists(previous) {
 		mover = app.guard
 	}
+	unlockRemaps := func() {}
 	newPath, branch, err := agent.BranchSession(request.Context(), previous, cwd, mover, app.sessionStore, app.pendingSessions, func(client agent.Client) (agent.Branch, error) {
 		switch operation {
 		case "new":
@@ -1483,6 +1484,9 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 			return forker.Fork(request.Context(), entryID)
 		}
 	}, func(from, to string) (func() error, error) {
+		// Held until the move commits or rolls back, but not while Pi branches, which can take minutes.
+		app.pendingRemapMu.Lock()
+		unlockRemaps = app.pendingRemapMu.Unlock
 		if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
 			return nil, os.ErrNotExist
 		}
@@ -1546,6 +1550,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		}
 		return rollback, nil
 	})
+	unlockRemaps()
 	if refused := refusal(err); refused != nil {
 		app.writeRPCFailure(response, request, refused.Message, true)
 		return

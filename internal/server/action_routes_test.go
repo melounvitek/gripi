@@ -561,6 +561,81 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 	}
 }
 
+func TestDeletingASessionDoesNotWaitForACloneThatWaitsOnADialog(t *testing.T) {
+	handler, sessionPath := startConfirmCloneGateway(t)
+	created := serveAction(handler, formActionRequest("/sessions/new", map[string]string{"session": sessionPath}, true))
+	if created.Code != http.StatusOK {
+		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
+	}
+	var newSession struct{ Session string }
+	decodeActionJSON(t, created, &newSession)
+	go serveAction(handler, formActionRequest("/sessions/clone", map[string]string{"session": sessionPath}, true))
+	waitForFakePiDialog(t, handler, sessionPath, "e2e-confirm-clone")
+
+	deleted := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		deleted <- serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": newSession.Session}, true))
+	}()
+	select {
+	case response := <-deleted:
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"deleted":true`) {
+			t.Fatalf("delete = %d %s", response.Code, response.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("deleting another session waited for the clone")
+	}
+}
+
+// startConfirmCloneGateway serves a saved session through the fake Pi, which asks before it clones a session, as an
+// extension can.
+func startConfirmCloneGateway(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	sessionsRoot := filepath.Join(home, ".pi", "agent", "sessions")
+	project := filepath.Join(root, "project")
+	for _, directory := range []string{sessionsRoot, project} {
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionPath := filepath.Join(sessionsRoot, "fixture.jsonl")
+	writeActionSession(t, sessionPath, project)
+	_, file, _, _ := runtime.Caller(0)
+	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
+	t.Setenv("GRIPI_E2E_CONFIRM_CLONE", "1")
+	cfg := config.Config{
+		Address: "127.0.0.1:4567", Environment: "test", Home: home,
+		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(home, ".pi", "gripi", "attachments"),
+		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
+		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
+		PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")}, RPCIdleTimeout: time.Hour,
+	}
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
+			_ = closer.Close(context.Background())
+		}
+	})
+	return handler, sessionPath
+}
+
+func waitForFakePiDialog(t *testing.T, handler http.Handler, sessionPath, id string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		response := serveAction(handler, getActionRequest("/events?session="+url.QueryEscape(sessionPath)))
+		if response.Code == http.StatusOK && strings.Contains(response.Body.String(), `"id":"`+id+`"`) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("fake Pi did not show dialog %s", id)
+}
+
 func waitForDeferredSidebar(t *testing.T, handler http.Handler) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

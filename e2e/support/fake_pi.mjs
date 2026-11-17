@@ -204,7 +204,11 @@ function handleCommand(command) {
       branchSession(command, command.entryId);
       break;
     case "clone":
-      branchSession(command, leafId);
+      // Like an extension that asks before the session switches, which Pi awaits before it answers.
+      if (process.env.GRIPI_E2E_CONFIRM_CLONE === "1") {
+        liveGate = { id: "e2e-confirm-clone", next: () => branchSession(command, leafId) };
+        emit({ type: "extension_ui_request", id: liveGate.id, method: "confirm", title: "Clone this session?" });
+      } else branchSession(command, leafId);
       break;
     case "prompt":
       acceptPrompt(command);
