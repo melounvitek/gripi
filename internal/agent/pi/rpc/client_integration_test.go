@@ -270,11 +270,18 @@ func TestCompactionRetryQueuesNativeSteeringAndFollowUps(t *testing.T) {
 	}
 }
 
-func TestARefusedCompactionPromptFailsAndTheNextOneIsSent(t *testing.T) {
+func TestARefusedCompactionPromptComesBackAndTheNextOneIsSent(t *testing.T) {
 	client, stdout, commands := queueTestClient(t, time.Second)
 	writeRecord(t, stdout, map[string]any{"type": "compaction_start"})
 	waitSequence(t, client, 1)
-	queueDeferred(t, client, "refused", "steer")
+	imagePath := filepath.Join(t.TempDir(), "logs.png")
+	if err := os.WriteFile(imagePath, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	image := agent.PromptImage{Path: imagePath, MIMEType: "image/png", Size: 3, Src: "/attachments/session/logs.png"}
+	if _, queued, err := client.QueueCompactionPrompt(context.Background(), "refused", []agent.PromptImage{image}, "steer"); err != nil || !queued {
+		t.Fatalf("queue = %v, %v", queued, err)
+	}
 	queueDeferred(t, client, "next", "followUp")
 	cursor := client.EventSequence()
 	writeRecord(t, stdout, map[string]any{"type": "compaction_end"})
@@ -296,7 +303,9 @@ func TestARefusedCompactionPromptFailsAndTheNextOneIsSent(t *testing.T) {
 	if client.DeferringCompactionPrompts() || len(client.LiveSnapshot().QueuedMessages) != 0 {
 		t.Fatalf("queue after the flush = %#v", client.LiveSnapshot().QueuedMessages)
 	}
-	if failure := eventOfType(t, client.EventsAfter(cursor).Events, "queued_message_error"); failure["error"] != "Failed to send queued message: No model selected" {
+	// Like a message that Stop hands back, it goes back to the editor, with its images.
+	failure := eventOfType(t, client.EventsAfter(cursor).Events, "prompt_refused")
+	if failure["error"] != "Failed to send queued message: No model selected" || failure["editorText"] != "refused" || !reflect.DeepEqual(failure["images"], []map[string]any{{"src": image.Src, "mimeType": "image/png"}}) {
 		t.Fatalf("failure = %#v", failure)
 	}
 }

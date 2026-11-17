@@ -179,6 +179,9 @@ type Client struct {
 	requestSequence int64
 	pending         map[string]chan responseResult
 	bridgePending   map[string]chan string
+	// unansweredPrompts holds the prompts that Pi has not answered yet, by request ID, including those that it answers
+	// only after the gateway stops waiting.
+	unansweredPrompts map[string]map[string]any
 
 	events               []replayEntry
 	eventBufferSize      int
@@ -357,7 +360,7 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser,
 		requestTimeout: options.RequestTimeout, abortTimeout: options.AbortTimeout, fallbackRPCLineBytes: options.FallbackRPCLineBytes, treeBridgeTimeout: options.TreeBridgeTimeout,
 		clock: options.Clock, now: options.Now, diagnostics: options.Diagnostics, eventObserver: options.EventObserver,
 		writeLane: make(chan struct{}, 1), queueLane: make(chan struct{}, 1), readerDone: make(chan struct{}), stderrDone: make(chan struct{}),
-		pending: make(map[string]chan responseResult), bridgePending: make(map[string]chan string),
+		pending: make(map[string]chan responseResult), bridgePending: make(map[string]chan string), unansweredPrompts: make(map[string]map[string]any),
 		eventBufferLimit: options.EventBufferLimit, eventBufferBytes: options.EventBufferBytes, coalesced: make(map[string]*replayEntry),
 		activeToolEvents: make(map[string]map[string]any), queuedMessages: map[string][]string{"steering": {}, "followUp": {}},
 		pendingDialogs: make(map[string]*extensionDialog), extensionStatuses: make(map[string]map[string]any), extensionWidgets: make(map[string]map[string]any),
@@ -467,17 +470,45 @@ func (client *Client) Prompt(ctx context.Context, message string, images []agent
 	if remaining <= 0 {
 		return nil, &agent.RequestTimeoutError{Command: "prompt"}
 	}
-	return softTimeout(client.request(ctx, "prompt", client.nextID("prompt"), payload, remaining, nil))
+	return taken(client.promptRequest(ctx, "prompt", payload, remaining))
 }
 func (client *Client) PromptWithBehavior(ctx context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, error) {
 	payload := promptPayload(message, images)
 	payload["streamingBehavior"] = behavior
-	return softTimeout(client.request(ctx, "prompt", client.nextID("prompt"), payload, client.requestTimeout, nil))
+	return taken(client.promptRequest(ctx, "prompt", payload, client.requestTimeout))
 }
 
-// softTimeout turns the timeout of a command that Pi took into a failed answer, which leaves Pi running. Pi answers a
-// prompt only once an extension's command or a compaction before it is over, and /compact, new, fork and clone once
-// they are done, which may wait on the user to answer a dialog.
+// promptRequest sends a prompt, a steer or a follow-up. Pi answers a prompt only once an extension's command or a
+// compaction before it is over, which may wait on the user to answer a dialog, so the answer may come after the
+// gateway stops waiting. storeResponse then puts a prompt that Pi refuses back in the editor.
+func (client *Client) promptRequest(ctx context.Context, command string, payload map[string]any, timeout time.Duration) (map[string]any, error) {
+	id := client.nextID(command)
+	// Before the request, so that an answer that comes as it times out is not missed.
+	client.mu.Lock()
+	client.unansweredPrompts[id] = payload
+	client.mu.Unlock()
+	response, err := client.request(ctx, command, id, payload, timeout, nil)
+	var timedOut *agent.RequestTimeoutError
+	if !errors.As(err, &timedOut) || !timedOut.Accepted {
+		client.mu.Lock()
+		delete(client.unansweredPrompts, id)
+		client.mu.Unlock()
+	}
+	return response, err
+}
+
+// taken counts a prompt that Pi took but has not answered in time as sent, as Pi CLI waits for it, so that sending it
+// again cannot run it twice.
+func taken(response map[string]any, err error) (map[string]any, error) {
+	var timeout *agent.RequestTimeoutError
+	if errors.As(err, &timeout) && timeout.Accepted {
+		return map[string]any{"type": "response", "command": "prompt", "success": true}, nil
+	}
+	return response, err
+}
+
+// softTimeout turns the timeout of a command that Pi took into a failed answer, which leaves Pi running. Pi answers
+// /compact, new, fork and clone only once they are done, which may wait on the user to answer a dialog.
 func softTimeout(response map[string]any, err error) (map[string]any, error) {
 	var timeout *agent.RequestTimeoutError
 	if errors.As(err, &timeout) && timeout.Accepted {
@@ -1121,6 +1152,7 @@ func (client *Client) readerStopped() {
 	client.compactionFollowUpCount = 0
 	client.compactionFollowUpBytes = 0
 	client.flushingCompactionFollowUps = false
+	client.unansweredPrompts = make(map[string]map[string]any)
 	client.reloading = false
 	client.activeToolEvents = make(map[string]map[string]any)
 	client.activeToolOrder = nil
@@ -1179,9 +1211,19 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		target := client.pending[id]
 		delete(client.pending, id)
 		target <- responseResult{value: response}
-	} else if typeName == "response" && stringValue(response["id"]) != "" {
-		// A response whose request timed out is intentionally discarded. Pi that replaced its session since serves
-		// another session than the gateway expects it to, so it is closed.
+	} else if typeName == "response" && id != "" {
+		// A response whose request timed out is intentionally discarded, but for a prompt that Pi refuses only now,
+		// which goes back to the editor. Pi that replaced its session since serves another session than the gateway
+		// expects it to, so it is closed.
+		if payload := client.unansweredPrompts[id]; payload != nil {
+			delete(client.unansweredPrompts, id)
+			if response["success"] != true {
+				client.handBackLocked(payload, "Prompt failed to send: "+stringValue(response["error"]))
+			}
+			if client.eventObserver != nil {
+				observed = response
+			}
+		}
 		switch response["command"] {
 		case "new_session", "fork", "clone":
 			replacedLate = response["success"] == true && !responseCancelled(response)
@@ -1315,7 +1357,12 @@ func (client *Client) Exited() bool {
 func (client *Client) Busy() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	return client.busy || client.activeBashToken != nil
+	return client.busyLocked()
+}
+
+// busyLocked reports whether Pi runs, compacts, runs a shell command or works on a prompt that it has not answered.
+func (client *Client) busyLocked() bool {
+	return client.busy || client.activeBashToken != nil || len(client.unansweredPrompts) > 0
 }
 func (client *Client) AgentRunning() bool {
 	client.mu.Lock()
@@ -1370,7 +1417,7 @@ func (client *Client) LiveSnapshot() LiveSnapshot {
 	if client.activeAssistantEvent != nil {
 		result.ActiveAssistantEvent = client.eventForDeliveryLocked(client.activeAssistantEvent)
 	}
-	result.Busy = client.busy || client.activeBashToken != nil
+	result.Busy = client.busyLocked()
 	result.BusySince = copyTime(client.busySinceLocked())
 	result.AgentBusySince = copyTime(client.busySince)
 	result.AgentRunning = client.agentRunning
@@ -2389,6 +2436,18 @@ func (client *Client) appendGatewayEventLocked(event map[string]any) {
 	client.appendReplayLocked(event, jsonSize(event), "")
 }
 
+// handBackLocked shows that Pi refused a prompt that has left the editor, and puts it back there with its images, as
+// Stop does with the messages queued behind a turn.
+func (client *Client) handBackLocked(payload map[string]any, message string) {
+	images := []map[string]any{}
+	if attached, ok := payload["images"].([]agent.PromptImage); ok {
+		for _, image := range attached {
+			images = append(images, map[string]any{"src": image.Src, "mimeType": image.MIMEType})
+		}
+	}
+	client.appendGatewayEventLocked(map[string]any{"type": "prompt_refused", "error": message, "editorText": payload["message"], "images": images, "agentRunning": client.agentRunning, "gatewayTimestamp": client.clock().UnixMilli()})
+}
+
 func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.Time) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -2471,12 +2530,12 @@ func (client *Client) flushCompactionPrompts(compactionWillRetry bool) {
 		var response map[string]any
 		var err error
 		if remaining := deadline.Sub(client.now()); remaining > 0 {
-			response, err = client.request(context.Background(), command, client.nextID(command), value, remaining, nil)
+			response, err = client.promptRequest(context.Background(), command, value, remaining)
 		} else {
 			err = &agent.RequestTimeoutError{Command: command}
 		}
 		var timeout *agent.RequestTimeoutError
-		// A prompt that Pi refuses leaves the queue, as one sent at once would fail, and the user sees why.
+		// A prompt that Pi refuses leaves the queue, as one sent at once would fail, and goes back to the editor.
 		drop := err == nil || (errors.As(err, &timeout) && timeout.Accepted)
 		client.mu.Lock()
 		// readerStopped may already have discarded the queue and its counters.
@@ -2485,7 +2544,7 @@ func (client *Client) flushCompactionPrompts(compactionWillRetry bool) {
 				client.compactionFollowUpCount--
 				client.compactionFollowUpBytes -= promptPayloadSize(payload)
 				if err == nil && response["success"] != true {
-					client.appendGatewayEventLocked(map[string]any{"type": "queued_message_error", "error": "Failed to send queued message: " + stringValue(response["error"]), "gatewayTimestamp": client.clock().UnixMilli()})
+					client.handBackLocked(payload, "Failed to send queued message: "+stringValue(response["error"]))
 				}
 			} else {
 				client.compactionFollowUps = append([]map[string]any{payload}, client.compactionFollowUps...)
@@ -2498,6 +2557,10 @@ func (client *Client) flushCompactionPrompts(compactionWillRetry bool) {
 		}
 		client.mu.Unlock()
 		client.queueLane <- struct{}{}
+		// After the flush has moved on, so that the observer sees whether Pi still has prompts to take.
+		if err == nil && client.eventObserver != nil {
+			client.eventObserver(client, response)
+		}
 		if stop {
 			return
 		}

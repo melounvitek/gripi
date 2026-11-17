@@ -575,6 +575,12 @@ While Pi is working, the message is queued and delivered once the agent has
 finished. With --steer it is delivered sooner: after the tool calls of the
 current step and before Pi's next request to the model.
 
+Pi may answer only after the gateway has stopped waiting, 30 seconds, such as
+when it compacts the session first or an extension asks a question. The
+message then counts as taken, as in Pi CLI, and the session isn't idle until
+Pi answers. If Pi refuses it then, the browser shows why and puts the message
+back in the composer.
+
 The text only ever reaches Pi as a prompt. A leading "!" does not run a shell
 command, and the composer's own commands (/new, /compact, /name, /model,
 /fork, /tree, /clone, /reload, /login, /logout) are refused rather than run.
@@ -585,7 +591,8 @@ A session in state external or conflict accepts no messages until it is
 taken over, in the browser or with 'gripi takeover'.
 
 Run in a session's parent (see 'gripi new --parent'), such as by Pi's bash
-tool there, gripi send gets the parent a report once the turn is over. It
+tool there, gripi send gets the parent a report once the turn is over, or once
+Pi has refused the message. It
 finds the session that it runs in by PI_SESSION_FILE, which Pi's bash tool
 sets, or by HERMES_SESSION_ID, which Hermes's terminal sets.
 

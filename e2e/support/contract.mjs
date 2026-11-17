@@ -37,6 +37,7 @@ export const sessions = {
   controlsSteer: "E2E Steer Desktop",
   controlsFollowUp: "E2E Follow-up Desktop",
   compactionFollowUp: "E2E Compaction Follow-up Desktop",
+  compactionRefusal: "E2E Compaction Refusal Desktop",
   sleepRecovery: "E2E Sleep Recovery Desktop",
   controlsAbort: "E2E Abort Desktop",
   parallelSubagents: "E2E Parallel Subagents Desktop",
@@ -77,6 +78,8 @@ export const sessions = {
   worker: "E2E Worker Desktop",
   workerMobile: "E2E Worker Mobile"
 };
+
+export const refusal = "No API key found for e2e.";
 
 export const footerModel = {
   id: `claude-opus-${"long-model-name-".repeat(15)}`,
@@ -121,6 +124,8 @@ export const prompts = {
   imageHover: "Keep the attached image neutral on hover",
   imageRead: "Read a large image without refreshing the conversation",
   newSession: "Create the first deterministic response",
+  // Pi refuses this one, like a prompt without an API key for its model.
+  refused: "Send this when the provider has no key",
   realPiPrefix: "Reply with exactly this token and nothing else:"
 };
 

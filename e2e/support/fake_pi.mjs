@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { activeRecovery, footerModel, footerStatus, live, mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
+import { activeRecovery, footerModel, footerStatus, live, mobileSubagents, nativeBash, paginatedSubagent, prompts, refusal, replies, subagents, tool, writeTool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -303,6 +303,10 @@ function acceptPrompt(command) {
   if (acceptReloadBridge(command) || acceptTreeBridge(command)) return;
   if (command.message === "/immediate-command") {
     respond(command, true, { data: { disposition: "handled" } });
+    return;
+  }
+  if (command.message === prompts.refused) {
+    respond(command, false, { error: refusal });
     return;
   }
   if (busy && command.streamingBehavior === "steer") {
