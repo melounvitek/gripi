@@ -1298,7 +1298,7 @@ function completeCompaction(summary) {
 
 function startFinishedThinking() {
   const scenario = live.thinking;
-  const started = startThinking();
+  const started = startThinking(scenario.thought);
   holdLiveScenario(scenario.gates.thinking, () => {
     emit({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: scenario.thought } });
     holdLiveScenario(scenario.gates.ended, () => {
@@ -1312,23 +1312,24 @@ function startFinishedThinking() {
 
 function startFailedThinking() {
   const scenario = live.thinking;
-  const started = startThinking();
+  const started = startThinking(scenario.errorThought);
   holdLiveScenario(scenario.gates.failing, () => {
-    finishAssistant({ ...started, content: [{ type: "thinking", thinking: scenario.thought }], stopReason: "error", errorMessage: scenario.error });
+    finishAssistant({ ...started, content: [{ type: "thinking", thinking: scenario.errorThought }], stopReason: "error", errorMessage: scenario.error });
   });
 }
 
 function startAbortedThinking() {
-  const started = startThinking();
-  liveAbort = () => finishAssistant({ ...started, content: [{ type: "thinking", thinking: live.thinking.thought }], stopReason: "aborted" });
+  const thought = live.thinking.abortThought;
+  const started = startThinking(thought);
+  liveAbort = () => finishAssistant({ ...started, content: [{ type: "thinking", thinking: thought }], stopReason: "aborted" });
 }
 
 // Delta-only, like native Pi, so the gateway rebuilds the partial message.
-function startThinking() {
+function startThinking(thought) {
   const started = assistantMessage([], "stop");
   emit({ type: "message_start", message: started });
   emit({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } });
-  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: live.thinking.thought } });
+  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: thought } });
   return started;
 }
 
