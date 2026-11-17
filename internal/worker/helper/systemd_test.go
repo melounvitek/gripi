@@ -112,6 +112,11 @@ func startUnitHelperWith(t *testing.T, lease time.Duration, env []string, flags 
 	runtimeDir := filepath.Join(folder, "run")
 	arguments := []string{"--user", "--pipe", "--quiet", "--collect", "--unit", "gripi-test-" + hex.EncodeToString(unit),
 		"-p", "Delegate=yes", "-p", "KillMode=control-group", "-p", "WatchdogSec=10s", "-p", "WatchdogSignal=SIGKILL", "-p", "NotifyAccess=all"}
+	// Without DOCKER_HOST, the helper asks the docker CLI where Docker is before it says hello, and on a busy machine the
+	// CLI's first start can take longer than the fake main waits for a message. This is where the CLI points by default.
+	if !slices.ContainsFunc(env, func(variable string) bool { return strings.HasPrefix(variable, "DOCKER_HOST=") }) {
+		arguments = append(arguments, "--setenv=DOCKER_HOST=unix:///var/run/docker.sock")
+	}
 	for _, variable := range env {
 		arguments = append(arguments, "--setenv="+variable)
 	}
