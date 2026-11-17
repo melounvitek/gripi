@@ -2556,10 +2556,15 @@ async function submitAbort(event) {
 async function handBackToComposer(text, images = []) {
   const session = currentSessionPath();
   const files = await Promise.all(images.map(async (image) => {
-    const response = await fetch(image.src).catch(() => null);
-    if (!response?.ok) return null;
-    // The gateway's file name means nothing to the user, so the tray numbers it instead.
-    return new File([await response.blob()], "", { type: image.mimeType });
+    // An image that cannot be loaded must not take the text with it.
+    try {
+      const response = await fetch(image.src);
+      if (!response.ok) return null;
+      // The gateway's file name means nothing to the user, so the tray numbers it instead.
+      return new File([await response.blob()], "", { type: image.mimeType });
+    } catch {
+      return null;
+    }
   }));
   if (!promptTextarea || session !== currentSessionPath()) return;
   if (text) {

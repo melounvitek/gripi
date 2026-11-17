@@ -38,6 +38,7 @@ export const sessions = {
   controlsFollowUp: "E2E Follow-up Desktop",
   compactionFollowUp: "E2E Compaction Follow-up Desktop",
   compactionRefusal: "E2E Compaction Refusal Desktop",
+  compactionRefusalLostImage: "E2E Compaction Refusal Lost Image Desktop",
   sleepRecovery: "E2E Sleep Recovery Desktop",
   controlsAbort: "E2E Abort Desktop",
   parallelSubagents: "E2E Parallel Subagents Desktop",
