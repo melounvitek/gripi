@@ -86,12 +86,16 @@ func (reports *subSessionReports) forget(client agent.Client) {
 // Observe sends the report that a client owes once its run settles. It runs on the agent's reader, so the report goes
 // from a goroutine of its own.
 func (reports *subSessionReports) Observe(client agent.Client, lifecycle agent.Lifecycle) {
-	if lifecycle.Step != agent.RunEnded && lifecycle.Step != agent.RunSettled {
+	if lifecycle.Step != agent.RunEnded && lifecycle.Step != agent.RunSettled && lifecycle.Step != agent.PromptEnded {
 		return
 	}
 	// A prompt that waits for a compaction to end runs only after this run settles.
 	deferrer, defers := client.(agent.CompactionPromptDeferrer)
-	if lifecycle.Step == agent.RunSettled && defers && deferrer.DeferringCompactionPrompts() {
+	if lifecycle.Step != agent.RunEnded && defers && deferrer.DeferringCompactionPrompts() {
+		return
+	}
+	// A run that goes on reports once it settles.
+	if lifecycle.Step == agent.PromptEnded && client.AgentRunning() {
 		return
 	}
 	reports.mu.Lock()
@@ -107,6 +111,13 @@ func (reports *subSessionReports) Observe(client agent.Client, lifecycle agent.L
 	}
 	delete(reports.due, client)
 	reports.mu.Unlock()
+	if lifecycle.Step == agent.PromptEnded {
+		// As for a prompt that the agent handles at once, such as an extension's command, only a refusal is reported.
+		if lifecycle.Error == "" {
+			return
+		}
+		due.failure = lifecycle.Error
+	}
 	go reports.send(client, *due, lifecycle.Aborted)
 }
 

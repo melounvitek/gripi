@@ -38,6 +38,18 @@ func Lifecycle(event map[string]any) (agent.Lifecycle, bool) {
 		return agent.Lifecycle{Step: agent.RunEnded}, true
 	case "agent_settled":
 		return agent.Lifecycle{Step: agent.RunSettled, Aborted: event["aborted"] == true}, true
+	case "response":
+		// The RPC client passes on only its answers to the prompts that nobody waits for any longer.
+		if event["success"] != true {
+			message, _ := event["error"].(string)
+			if message == "" {
+				message = "unknown error"
+			}
+			return agent.Lifecycle{Step: agent.PromptEnded, Error: message}, true
+		}
+		if data, _ := event["data"].(map[string]any); data["disposition"] == "handled" {
+			return agent.Lifecycle{Step: agent.PromptEnded}, true
+		}
 	}
 	return agent.Lifecycle{}, false
 }

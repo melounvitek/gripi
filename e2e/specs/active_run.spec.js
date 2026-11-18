@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { prompts, replies, sessions } from "../support/contract.mjs";
-import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
+import { prompts, refusal, replies, sessions } from "../support/contract.mjs";
+import { expectRunFinished, liveMessage, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
 test("steer an active run", async ({ page }) => {
   await page.goto("/");
@@ -203,6 +203,55 @@ test("runs extension commands and queues steering during compaction", async ({ p
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
   await expect(queuedSteer).toHaveCount(0);
   await expectRunFinished(page);
+});
+
+// Sends a message with an image during a compaction, which Pi refuses once the compaction is over, and types a draft
+// meanwhile. The gateway serves the image back to the page only with deliverImage.
+async function refuseAfterCompaction(page, title, deliverImage) {
+  await page.goto("/");
+  await selectSession(page, title);
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/compact");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(page.locator(".composer-state")).toContainText("Compacting…");
+
+  await page.locator("#image-input").setInputFiles({ name: "refused.png", mimeType: "image/png", buffer: await page.screenshot() });
+  await expect(page.locator(".attachment-tray")).toContainText("refused.png");
+  await sendPrompt(page, prompts.refused);
+  await expect(page.locator(".pending-message--steering")).toHaveText(`Steering: ${prompts.refused}`);
+  await expect(page.locator(".attachment-tray img")).toHaveCount(0);
+  // As with Stop, the message comes back before what was typed meanwhile.
+  await composer.fill("Keep this draft");
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  await page.route("**/attachments/**", async (route) => {
+    await released;
+    await (deliverImage ? route.continue() : route.abort());
+  });
+
+  await expect(liveMessage(page, "error", `Failed to send queued message: ${refusal}`)).toBeVisible();
+  // The text waits for its image, so that it cannot be sent without it.
+  await expect(composer).toHaveValue("Keep this draft");
+  release();
+  await expect(composer).toHaveValue(`${prompts.refused}\n\nKeep this draft`);
+  await expect(page.locator(".pending-message")).toHaveCount(0);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "error");
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+}
+
+test("a message that Pi refuses after a compaction comes back to the composer with its image", async ({ page }) => {
+  await refuseAfterCompaction(page, sessions.compactionRefusal, true);
+  const restored = page.locator(".attachment-tray img");
+  await expect(restored).toHaveCount(1);
+  await expect(page.locator(".attachment-tray")).toContainText("Image 1");
+  // The page's screenshot that was attached.
+  await expect.poll(() => restored.evaluate((element) => [element.naturalWidth, element.naturalHeight])).toEqual([1440, 900]);
+});
+
+test("a refused message comes back to the composer though its image cannot be loaded", async ({ page }) => {
+  await refuseAfterCompaction(page, sessions.compactionRefusalLostImage, false);
+  await expect(page.locator(".attachment-tray img")).toHaveCount(0);
 });
 
 test("abort an active run before navigating the session tree", async ({ page }) => {

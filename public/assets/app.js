@@ -1702,6 +1702,15 @@ function renderEvent(event) {
     return;
   }
 
+  if (event.type === "prompt_refused") {
+    // The prompt's run never started, though the page may have taken it for started.
+    liveAgentRunning = event.agentRunning === true;
+    liveMessageRenderer.markOptimisticUserMessageFailed(event.editorText);
+    renderErrorEvent(event);
+    handBackToComposer(event.editorText, event.images);
+    return;
+  }
+
   if (event.type === "agent_settled") {
     liveMessageRenderer.settleUnfinishedTools();
     const reply = pendingFinalAssistantReply;
@@ -1974,7 +1983,11 @@ async function pollEvents() {
     lastSessionSyncAt = Date.now();
     pollSucceeded = true;
     hideReconnectBanner();
-    if (refreshRequired) return;
+    if (refreshRequired) {
+      // The refreshed page doesn't have the messages that Pi refused, which only their events put back in the composer.
+      payload.events.filter((event) => event.type === "prompt_refused").forEach(renderEvent);
+      return;
+    }
     sudoPromptController.update(payload.sudo_requests);
     workerController.update(payload.worker, payload.worker_notices);
     if (Number.isInteger(payload.last_seq)) {
@@ -2522,10 +2535,7 @@ async function submitAbort(event) {
       liveMessageRenderer.renderQueuedMessages({ steering: [], followUp: [] });
       liveMessageRenderer.removePendingCompactionMessage();
       setComposerState("done", "Done");
-      if (payload.editorText && promptTextarea) {
-        promptTextarea.value = [payload.editorText, promptTextarea.value].filter((text) => text.trim()).join("\n\n");
-        promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+      handBackToComposer(payload.editorText);
     }
   } catch (_error) {
     stoppingSessionPaths.delete(submittedSession);
@@ -2539,6 +2549,29 @@ async function submitAbort(event) {
     scheduleNextEventPoll(0);
     sidebarController.refresh().catch(() => {});
   }
+}
+
+// Puts messages that Pi did not run back in the composer, before the draft, with their images. The text waits for the
+// images, so that it cannot be sent without them.
+async function handBackToComposer(text, images = []) {
+  const session = currentSessionPath();
+  const files = await Promise.all(images.map(async (image) => {
+    // An image that cannot be loaded must not take the text with it.
+    try {
+      const response = await fetch(image.src);
+      if (!response.ok) return null;
+      // The gateway's file name means nothing to the user, so the tray numbers it instead.
+      return new File([await response.blob()], "", { type: image.mimeType });
+    } catch {
+      return null;
+    }
+  }));
+  if (!promptTextarea || session !== currentSessionPath()) return;
+  if (text) {
+    promptTextarea.value = [text, promptTextarea.value].filter((part) => part.trim()).join("\n\n");
+    promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  addImageFiles(files.filter(Boolean), { restore: true });
 }
 
 function confirmOrStopRunningTask(event) {

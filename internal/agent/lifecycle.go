@@ -6,7 +6,7 @@ type Lifecycle struct {
 	// Reply is the reply that ReplyEnded reports, or the last reply of the run that RunEnded reports. It is empty when
 	// the run has no reply.
 	Reply Reply
-	// Error is why the run that RunEnded reports failed, when it did.
+	// Error is why the run that RunEnded reports failed, or why the agent refused the prompt that PromptEnded reports.
 	Error string
 	// Aborted says that the run that RunSettled reports was stopped.
 	Aborted bool
@@ -20,6 +20,9 @@ const (
 	RunEnded
 	// RunSettled follows the end of a run once the agent has nothing left to do for it, such as a retry.
 	RunSettled
+	// PromptEnded reports a prompt that started no run, because the agent refused it or handled it itself, when the
+	// agent answered only after the gateway had stopped waiting, or answered a prompt that a compaction held back.
+	PromptEnded
 )
 
 // Reply is an assistant message that ended.

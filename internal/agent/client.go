@@ -95,6 +95,8 @@ type PromptImage struct {
 	Path     string
 	MIMEType string
 	Size     int64
+	// Src is where the browser loads the image from, to put it back in the editor when the agent refuses the prompt.
+	Src string
 }
 
 type PromptResult struct {

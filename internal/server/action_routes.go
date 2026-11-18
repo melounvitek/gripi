@@ -178,7 +178,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		if len(promptImages) > 0 {
 			return promptImages, nil
 		}
-		images, cleanup, err := prompts.PersistUploadedImages(imageFiles, filepath.Join(app.config.AttachmentsRoot, sessions.SessionHash(path)))
+		hash := sessions.SessionHash(path)
+		images, cleanup, err := prompts.PersistUploadedImages(imageFiles, filepath.Join(app.config.AttachmentsRoot, hash))
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +189,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			request.MultipartForm = nil
 		}
 		for _, image := range images {
-			promptImages = append(promptImages, agent.PromptImage{Path: image.Path, MIMEType: image.MIMEType, Size: image.Size})
+			promptImages = append(promptImages, agent.PromptImage{Path: image.Path, MIMEType: image.MIMEType, Size: image.Size, Src: "/attachments/" + hash + "/" + filepath.Base(image.Path)})
 			attachmentPaths = append(attachmentPaths, image.Path)
 			mimeTypes = append(mimeTypes, image.MIMEType)
 		}
