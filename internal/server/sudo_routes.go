@@ -427,8 +427,6 @@ func (app *application) notifySudo(view sudoRequestView) {
 		"tag":   "gripi-sudo:" + hex.EncodeToString(digest[:16]),
 		"url":   completedReplyURL(view.Session, app.agentOf(view.Session)),
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
-	defer cancel()
 	for _, owner := range owners {
 		presenceOwner := singleUserOwner
 		if app.config.MultiUserMode {
@@ -437,9 +435,14 @@ func (app *application) notifySudo(view sudoRequestView) {
 		if app.notificationPresence.Focused(presenceOwner, view.Session) {
 			continue
 		}
-		if err := app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
-			log.Printf("deliver a sudo request's notification: %v", err)
-		}
+		// Each browser is an owner of its own, which a slow one mustn't hold up.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+			defer cancel()
+			if err := app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
+				log.Printf("deliver a sudo request's notification: %v", err)
+			}
+		}()
 	}
 }
 

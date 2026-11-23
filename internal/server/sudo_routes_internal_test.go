@@ -91,6 +91,38 @@ func TestSudoRequestNotifiesAtOnceUnlessTheSessionIsFocused(t *testing.T) {
 	}
 }
 
+func TestSudoRequestNotifiesEachBrowserWithoutWaitingForAnother(t *testing.T) {
+	root := t.TempDir()
+	path := writeNotificationSession(t, root, "Fan-out")
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	defer close(release)
+	app := notificationTestApplication(t, root, false, false, pushNotifierFunc(func(_ context.Context, owner string, _ []byte) error {
+		started <- owner
+		<-release
+		return nil
+	}))
+	app.completionNotifications = newCompletionNotifier(app)
+	for _, token := range []string{"desktop", "phone"} {
+		if _, err := app.browserStore.ApproveCurrentBrowser(token, "test"); err != nil {
+			t.Fatal(err)
+		}
+		owner, _ := app.pushOwner(requestWithCookie("gripi_browser=" + token))
+		if err := app.pushSubscriptions.Upsert(owner, pushRouteSubscription(token)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	go app.notifySudo(sudoRequestView{ID: "request", Session: path, Display: "true"})
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("one browser held up the notification of another")
+		}
+	}
+}
+
 // An answer to sudo's asking again that comes as the run ends neither reaches askpass nor stays remembered.
 func TestSudoRunTakesNoAnswerThatComesAsItEnds(t *testing.T) {
 	var requests sudoRequests
