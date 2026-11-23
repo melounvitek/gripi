@@ -181,7 +181,7 @@ func (workers *fakeWorkers) Notices(string) []gateway.WorkerNotice {
 	return workers.notices
 }
 
-func (workers *fakeWorkers) Sudo(context.Context, string, string, []string, []byte, io.Writer, io.Writer) (int, error) {
+func (workers *fakeWorkers) Sudo(context.Context, string, string, string, []string, func(context.Context) []byte, io.Writer, io.Writer) (int, error) {
 	return 0, errors.New("the fake worker runs no sudo")
 }
 

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -55,7 +58,10 @@ type linkedHelper struct {
 
 func linkHelper(t *testing.T, version string, lease time.Duration, options helper.Options) (*linkedHelper, error) {
 	t.Helper()
-	options.RuntimeDir, options.Lease = t.TempDir(), lease
+	if options.RuntimeDir == "" {
+		options.RuntimeDir = t.TempDir()
+	}
+	options.Lease = lease
 	helperInput, mainOutput := io.Pipe()
 	mainInput, helperOutput := io.Pipe()
 	link := &linkedHelper{toHelper: &valve{writer: mainOutput}, toMain: &valve{reader: mainInput}, served: make(chan error, 1)}
@@ -116,6 +122,54 @@ func TestControlCallsTheHelper(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("closing the control channel did not stop the helper")
+	}
+}
+
+// sudo's askpass program on the worker asks the helper for the password each time that sudo asks, and the helper
+// asks main, which may ask the user again.
+func TestControlGivesSudoOnTheWorkerThePasswordEachTimeItAsks(t *testing.T) {
+	runtimeDir := t.TempDir()
+	link, err := linkHelper(t, "v1", helper.DefaultLease, helper.Options{Version: "v1", RuntimeDir: runtimeDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	askpass := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(runtimeDir, "askpass.sock"))
+	}}}
+	ask := func(token string) (int, string) {
+		t.Helper()
+		response, err := askpass.PostForm("http://gripi/sudo/askpass", url.Values{"token": {token}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response.StatusCode, string(body)
+	}
+
+	answers := []string{"wrong", "right", ""}
+	stop := link.control.Askpass("t1", func() []byte {
+		answer := answers[0]
+		answers = answers[1:]
+		if answer == "" {
+			return nil
+		}
+		return []byte(answer)
+	})
+	for _, want := range []string{"wrong", "right"} {
+		if code, body := ask("t1"); code != http.StatusOK || body != want {
+			t.Fatalf("askpass = %d %q, want %q", code, body, want)
+		}
+	}
+	if code, _ := ask("t1"); code != http.StatusNotFound {
+		t.Fatalf("askpass that the user refused = %d", code)
+	}
+	if code, _ := ask("t2"); code != http.StatusNotFound {
+		t.Fatalf("askpass of a command that main doesn't run = %d", code)
+	}
+	stop()
+	if code, _ := ask("t1"); code != http.StatusNotFound {
+		t.Fatalf("askpass after the command ended = %d", code)
 	}
 }
 

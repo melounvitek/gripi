@@ -288,7 +288,7 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 		t.Fatalf("gripi sudo replied %q", got[before:])
 	}
 	if fakeSudo != "" {
-		if answers, _ := onWorker("cat " + realWorkerRoot + "/askpass"); !strings.HasPrefix(answers, sha256Hex(sudoPassword+"\n")+"\n") {
+		if answers, _ := onWorker("cat " + realWorkerRoot + "/askpass"); answers != sha256Hex(sudoPassword+"\n")+"\n" {
 			t.Fatalf("askpass answered %q", answers)
 		}
 	}
@@ -485,16 +485,13 @@ func TestRealWorkerRunsMovedSessionsOnCopiesOfTheirRepository(t *testing.T) {
 }
 
 // fakeSudoOnWorker stands in for the worker's sudo, which needs a password and root. Named sudo, it is a parent that
-// gripi's askpass program accepts. It asks askpass for the password twice, as classic sudo does after a wrong one,
-// with the -p prompt, and records a hash of each answer in askpass next to itself. Then it runs the command as the
-// worker's user, who can enter the namespaces of the session's view only through their user namespace, which root
-// doesn't need.
+// gripi's askpass program accepts. It asks askpass for the password, as classic sudo does, with the -p prompt, and
+// records a hash of the answer in askpass next to itself. Then it runs the command as the worker's user, who can enter
+// the namespaces of the session's view only through their user namespace, which root doesn't need.
 const fakeSudoOnWorker = `#!/bin/sh
 [ "$1 $2 $3 $4 $5" = "-A -k -p gripi --" ] || { echo "fake sudo: unexpected arguments $*" >&2; exit 99; }
 shift 5
-for call in 1 2; do
-	"$SUDO_ASKPASS" gripi | sha256sum | cut -d ' ' -f 1 >> "${0%/*}/askpass"
-done
+"$SUDO_ASKPASS" gripi | sha256sum | cut -d ' ' -f 1 >> "${0%/*}/askpass"
 [ "$1" = nsenter ] && shift && set -- nsenter --user --preserve-credentials "$@"
 exec "$@"
 `

@@ -19,14 +19,15 @@ import (
 )
 
 // fakeSudo stands in for sudo, which needs a password and root. Named sudo, it is a parent that gripi's askpass
-// program accepts. It asks askpass for the password twice, as sudo does after a wrong one, and records a hash of each
-// answer in askpass next to itself. Then it runs the command as this user, who can enter the namespaces of its own
-// views only through their user namespace, which root doesn't need. Like classic sudo 1.9.5p2 to 1.9.12, it passes
-// SIGTERM on to the command, but drops one from its own process group, such as from its parent, gripi.
+// program accepts. It asks askpass for the password as often as ASKS says, such as again, as sudo does after a wrong
+// one, and records a hash of each answer in askpass next to itself. Then it runs the command as this user, who can
+// enter the namespaces of its own views only through their user namespace, which root doesn't need. Like classic sudo
+// 1.9.5p2 to 1.9.12, it passes SIGTERM on to the command, but drops one from its own process group, such as from its
+// parent, gripi.
 const fakeSudo = `#!/bin/sh
 [ "$1 $2 $3 $4 $5" = "-A -k -p gripi --" ] || { echo "fake sudo: unexpected arguments $*" >&2; exit 99; }
 shift 5
-for call in 1 2; do
+for call in ASKS; do
 	"$SUDO_ASKPASS" "[sudo: gripi] Password: " | sha256sum | cut -d ' ' -f 1 >> "${0%/*}/askpass"
 done
 [ "$1" = nsenter ] && shift && set -- nsenter --user --preserve-credentials "$@"
@@ -68,32 +69,43 @@ func (rig *moveHelper) sudoRun(sudo string, offer helper.Message, token string) 
 	return command, input, bufio.NewReader(output), stderr
 }
 
-// offerSudo has the helper prepare a command of a session to run with sudo, whose askpass gets password.
-func (rig *moveHelper) offerSudo(session, token, password, cwd string, argv ...string) helper.Message {
+// offerSudo has the helper prepare a command of a session to run with sudo.
+func (rig *moveHelper) offerSudo(session, cwd string, argv ...string) helper.Message {
 	rig.t.Helper()
-	return rig.request(map[string]any{"type": "sudo.offer", "session": session, "token": token, "password": password, "cwd": cwd, "args": argv})
+	return rig.request(map[string]any{"type": "sudo.offer", "session": session, "cwd": cwd, "args": argv})
 }
 
-func TestSudoRunsTheCommandInTheSessionsViewAndCgroupWithTheOfferedPassword(t *testing.T) {
+func TestSudoRunsTheCommandInTheSessionsViewAndCgroupWithThePasswordFromMain(t *testing.T) {
 	rig := startMoveHelper(t, helper.DefaultLease)
 	private := rig.privateRoot()
 	shadow, repository := rig.shadow(private, "main's\n")
 	rig.move("m1", private, shadow, repository)
 	pi := rig.session("s1", "m1", repository)
 	pi("mkdir sub")
-	sudo := filepath.Join(t.TempDir(), "sudo")
-	if err := os.WriteFile(sudo, []byte(fakeSudo), 0700); err != nil {
+	sudo, quiet := filepath.Join(t.TempDir(), "sudo"), filepath.Join(t.TempDir(), "sudo")
+	if err := os.WriteFile(sudo, []byte(strings.Replace(fakeSudo, "ASKS", "1 2", 1)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(quiet, []byte(strings.Replace(fakeSudo, "ASKS", "", 1)), 0700); err != nil {
 		t.Fatal(err)
 	}
 
-	if refused := rig.offerSudo("s9", "t0", "secret", repository, "true"); refused.OK || !strings.Contains(refused.Error, "Pi") {
+	if refused := rig.offerSudo("s9", repository, "true"); refused.OK || !strings.Contains(refused.Error, "Pi") {
 		t.Fatalf("sudo.offer for a session that doesn't run = %+v", refused)
 	}
-	offer := rig.offerSudo("s1", "t1", "secret", filepath.Join(repository, "sub"), "sh", "-c", "pwd; cat ../README; cat /proc/self/cgroup; echo err >&2; exit 3")
+	offer := rig.offerSudo("s1", filepath.Join(repository, "sub"), "sh", "-c", "pwd; cat ../README; cat /proc/self/cgroup; echo err >&2; exit 3")
 	if !offer.OK {
 		t.Fatalf("sudo.offer = %+v", offer)
 	}
 	command, _, output, stderr := rig.sudoRun(sudo, offer, "t1")
+	// Each time that sudo asks, the helper asks main for the password, which may ask the user again.
+	for _, password := range []string{"secret", ""} {
+		for asked := rig.next(); asked.Type != "sudo.askpass" || asked.Token != "t1"; asked = rig.next() {
+		}
+		if given := rig.request(map[string]any{"type": "sudo.password", "token": "t1", "password": password}); !given.OK {
+			t.Fatalf("sudo.password = %+v", given)
+		}
+	}
 	var stdout strings.Builder
 	output.WriteTo(&stdout)
 	command.Wait()
@@ -101,7 +113,7 @@ func TestSudoRunsTheCommandInTheSessionsViewAndCgroupWithTheOfferedPassword(t *t
 	if len(lines) != 4 || lines[0] != filepath.Join(repository, "sub") || lines[1] != "main's" || !strings.HasSuffix(lines[2], ".service/session-s1.m1") || !strings.HasSuffix(stderr.String(), "err\n") || command.ProcessState.ExitCode() != 3 {
 		t.Fatalf("the command printed %q and %q, and exited with %d", stdout.String(), stderr, command.ProcessState.ExitCode())
 	}
-	// A second prompt, as after a wrong password, gets nothing.
+	// Main refused the second time, as when the user cancels.
 	hash := func(text string) string {
 		sum := sha256.Sum256([]byte(text))
 		return hex.EncodeToString(sum[:])
@@ -111,7 +123,7 @@ func TestSudoRunsTheCommandInTheSessionsViewAndCgroupWithTheOfferedPassword(t *t
 	}
 
 	// What the command leaves running keeps main waiting at most a few seconds, as on main.
-	command, _, output, _ = rig.sudoRun(sudo, rig.offerSudo("s1", "t4", "secret", repository, "sh", "-c", "sleep 1000 & echo started"), "t4")
+	command, _, output, _ = rig.sudoRun(quiet, rig.offerSudo("s1", repository, "sh", "-c", "sleep 1000 & echo started"), "t4")
 	ended := make(chan string, 1)
 	go func() {
 		var printed strings.Builder
@@ -131,7 +143,7 @@ func TestSudoRunsTheCommandInTheSessionsViewAndCgroupWithTheOfferedPassword(t *t
 	// The command stops when main stops waiting for it, and with the session.
 	stopped := func(token string, stop func(input *os.File)) {
 		t.Helper()
-		_, input, output, _ := rig.sudoRun(sudo, rig.offerSudo("s1", token, "secret", repository, "sh", "-c", "echo $$; exec sleep 1000"), token)
+		_, input, output, _ := rig.sudoRun(quiet, rig.offerSudo("s1", repository, "sh", "-c", "echo $$; exec sleep 1000"), token)
 		line, _ := output.ReadString('\n')
 		pid, err := strconv.Atoi(strings.TrimSpace(line))
 		if err != nil {

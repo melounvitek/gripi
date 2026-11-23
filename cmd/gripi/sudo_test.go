@@ -441,7 +441,7 @@ func canaryForms(canary string) []string {
 }
 
 func TestSudoRunsTheCommandWithThePasswordFromTheBrowserAndShowsItNowhere(t *testing.T) {
-	record := fakeSudo(t, "password password")
+	record := fakeSudo(t, "password")
 	alpha, _ := fakePiGateway(t)
 	outsideSessions(t)
 	t.Setenv("PI_SESSION_FILE", alpha)
@@ -455,8 +455,7 @@ func TestSudoRunsTheCommandWithThePasswordFromTheBrowserAndShowsItNowhere(t *tes
 	if answered.code != 7 || answered.stdout != "out\n" || !strings.HasSuffix(answered.stderr, "err\n") {
 		t.Fatalf("gripi sudo = %+v", answered)
 	}
-	// A second prompt, as after a wrong password, gets nothing, so sudo gives up.
-	if answers := askpassAnswers(t, record, canary); !slices.Equal(answers, []string{"password", "nothing"}) {
+	if answers := askpassAnswers(t, record, canary); !slices.Equal(answers, []string{"password"}) {
 		t.Fatalf("askpass answered %v", answers)
 	}
 	if argv := recorded(t, record, "argv"); argv != "sh\n-c\necho out; echo err >&2; exit 7\n" {
@@ -505,7 +504,7 @@ func TestSudoGivesThePasswordOnlyToThePasswordPromptOfSudo(t *testing.T) {
 
 // Classic sudo passes askpass its -p prompt in place of pam_unix's password prompt, and PAM's own prompt for any other.
 func TestSudoGivesThePasswordOnlyToThePasswordPromptOfClassicSudo(t *testing.T) {
-	record := fakeSudo(t, "classic-otp classic-unparented classic classic")
+	record := fakeSudo(t, "classic-otp classic-unparented classic")
 	alpha, _ := fakePiGateway(t)
 	outsideSessions(t)
 	t.Setenv("PI_SESSION_FILE", alpha)
@@ -513,7 +512,194 @@ func TestSudoGivesThePasswordOnlyToThePasswordPromptOfClassicSudo(t *testing.T) 
 	if answered := sudoWithPassword(t, alpha, "secret", "sh", "-c", "echo ran"); answered.code != 0 || answered.stdout != "ran\n" {
 		t.Fatalf("gripi sudo = %+v", answered)
 	}
-	if answers := askpassAnswers(t, record, "secret"); !slices.Equal(answers, []string{"nothing", "nothing", "password", "nothing"}) {
+	if answers := askpassAnswers(t, record, "secret"); !slices.Equal(answers, []string{"nothing", "nothing", "password"}) {
+		t.Fatalf("askpass answered %v", answers)
+	}
+}
+
+// sudo asks for the password again only after it rejected one, as a wrong one, before the command runs.
+func TestSudoAsksAgainInTheBrowserWhenSudoAsksAgain(t *testing.T) {
+	record := fakeSudo(t, "password password")
+	alpha, _ := fakePiGateway(t)
+	outsideSessions(t)
+	t.Setenv("PI_SESSION_FILE", alpha)
+
+	result := startCLI("sudo", "--", "sh", "-c", "echo ran")
+	first := sudoRequestsUntil(t, alpha, "", 1)[0]
+	if _, again := first["again"]; again {
+		t.Fatalf("the first request = %v", first)
+	}
+	if code := answerSudo(first["id"].(string), "wrong", ""); code != http.StatusOK {
+		t.Fatalf("answer = %d", code)
+	}
+	second := sudoRequestsUntil(t, alpha, "", 1)[0]
+	if second["again"] != true || second["id"] == first["id"] || second["display"] != first["display"] || second["cwd"] != first["cwd"] {
+		t.Fatalf("the request after a wrong password = %v", second)
+	}
+	if code := answerSudo(second["id"].(string), "right", ""); code != http.StatusOK {
+		t.Fatalf("second answer = %d", code)
+	}
+	if answered := <-result; answered.code != 0 || answered.stdout != "ran\n" {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	if answers := strings.Fields(recorded(t, record, "askpass")); !slices.Equal(answers, []string{sha256Hex("wrong\n"), sha256Hex("right\n")}) {
+		t.Fatalf("askpass answered %v", answers)
+	}
+	sudoRequestsUntil(t, alpha, "", 0)
+}
+
+func TestSudoStopsAskingAgainWhenGripiSudoEnds(t *testing.T) {
+	fakeSudo(t, "password password")
+	alpha, _ := fakePiGateway(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := sudoUntil(ctx, alpha, "true")
+	if code := answerSudo(sudoRequestsUntil(t, alpha, "", 1)[0]["id"].(string), "wrong", ""); code != http.StatusOK {
+		t.Fatalf("answer = %d", code)
+	}
+	if again := sudoRequestsUntil(t, alpha, "", 1)[0]; again["again"] != true {
+		t.Fatalf("the request after a wrong password = %v", again)
+	}
+	cancel()
+	<-done
+	sudoRequestsUntil(t, alpha, "", 0)
+}
+
+func rememberSudo(id, password, cookie string) int {
+	return browserRequest(http.MethodPost, "/sudo/answer", url.Values{"id": {id}, "password": {password}, "remember": {"1"}}, cookie).Code
+}
+
+// sudoAnsweredBy runs gripi sudo and answers its request with answer, once the request is shown.
+func sudoAnsweredBy(t *testing.T, session string, answer func(request map[string]any) int, command ...string) cliResult {
+	t.Helper()
+	result := startCLI(append([]string{"sudo", "--"}, command...)...)
+	if code := answer(sudoRequestsUntil(t, session, "", 1)[0]); code != http.StatusOK {
+		t.Fatalf("answer = %d", code)
+	}
+	return <-result
+}
+
+// Each command needs the user's approval, but only the password that they asked Gripi to remember, once a command of
+// the session ran with it.
+func TestSudoRemembersThePasswordForTheSessionWhenAsked(t *testing.T) {
+	record := fakeSudo(t, "password")
+	alpha, beta := fakePiGateway(t)
+	outsideSessions(t)
+	t.Setenv("PI_SESSION_FILE", alpha)
+	approve := func(request map[string]any) int { return answerSudo(request["id"].(string), "", "") }
+	refusesApproval := func(session string) {
+		t.Helper()
+		t.Setenv("PI_SESSION_FILE", session)
+		result := startCLI("sudo", "--", "true")
+		request := sudoRequestsUntil(t, session, "", 1)[0]
+		if _, remembered := request["remembered"]; remembered {
+			t.Fatalf("the request = %v", request)
+		}
+		if code := approve(request); code != http.StatusBadRequest {
+			t.Fatalf("approval without a remembered password = %d", code)
+		}
+		cancelSudo(request["id"].(string), "")
+		<-result
+		t.Setenv("PI_SESSION_FILE", alpha)
+	}
+
+	if answered := sudoWithPassword(t, alpha, "secret", "true"); answered.code != 0 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	refusesApproval(alpha)
+	// Not before a command ran with it.
+	remember := func(password string) func(map[string]any) int {
+		return func(request map[string]any) int { return rememberSudo(request["id"].(string), password, "") }
+	}
+	if answered := sudoAnsweredBy(t, alpha, remember("secret"), "false"); answered.code != 1 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	refusesApproval(alpha)
+
+	if answered := sudoAnsweredBy(t, alpha, remember("secret"), "true"); answered.code != 0 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	result := startCLI("sudo", "--", "sh", "-c", "echo approved")
+	request := sudoRequestsUntil(t, alpha, "", 1)[0]
+	if request["remembered"] != true {
+		t.Fatalf("the request after a remembered password = %v", request)
+	}
+	if code := approve(request); code != http.StatusOK {
+		t.Fatalf("approval = %d", code)
+	}
+	if answered := <-result; answered.code != 0 || answered.stdout != "approved\n" {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	if answers := askpassAnswers(t, record, "secret"); !slices.Equal(answers, []string{"password", "password", "password", "password"}) {
+		t.Fatalf("askpass answered %v", answers)
+	}
+	// Only for the session.
+	refusesApproval(beta)
+}
+
+func TestSudoForgetsARememberedPasswordAfterFiveMinutes(t *testing.T) {
+	fakeSudo(t, "password")
+	alpha, _ := fakePiGateway(t)
+	outsideSessions(t)
+	t.Setenv("PI_SESSION_FILE", alpha)
+	defer func(remember time.Duration) { gateway.SudoRememberFor = remember }(gateway.SudoRememberFor)
+	gateway.SudoRememberFor = 2 * time.Second
+
+	if answered := sudoAnsweredBy(t, alpha, func(request map[string]any) int { return rememberSudo(request["id"].(string), "secret", "") }, "true"); answered.code != 0 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	remembered := time.Now()
+	approve := func(request map[string]any) int {
+		if request["remembered"] != true {
+			t.Fatalf("the request = %v", request)
+		}
+		return answerSudo(request["id"].(string), "", "")
+	}
+	if answered := sudoAnsweredBy(t, alpha, approve, "true"); answered.code != 0 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	// Using it doesn't keep it longer.
+	time.Sleep(time.Until(remembered.Add(gateway.SudoRememberFor)))
+	result := startCLI("sudo", "--", "true")
+	request := sudoRequestsUntil(t, alpha, "", 1)[0]
+	if _, remembered := request["remembered"]; remembered {
+		t.Fatalf("the request after five minutes = %v", request)
+	}
+	if code := answerSudo(request["id"].(string), "", ""); code != http.StatusBadRequest {
+		t.Fatalf("approval after five minutes = %d", code)
+	}
+	cancelSudo(request["id"].(string), "")
+	<-result
+}
+
+func TestSudoForgetsARememberedPasswordThatSudoRejects(t *testing.T) {
+	record := fakeSudo(t, "password")
+	alpha, _ := fakePiGateway(t)
+	outsideSessions(t)
+	t.Setenv("PI_SESSION_FILE", alpha)
+	if answered := sudoAnsweredBy(t, alpha, func(request map[string]any) int { return rememberSudo(request["id"].(string), "old", "") }, "true"); answered.code != 0 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+
+	t.Setenv("FAKE_SUDO_ASKPASS", "password password")
+	result := startCLI("sudo", "--", "true")
+	if code := answerSudo(sudoRequestsUntil(t, alpha, "", 1)[0]["id"].(string), "", ""); code != http.StatusOK {
+		t.Fatalf("approval = %d", code)
+	}
+	again := sudoRequestsUntil(t, alpha, "", 1)[0]
+	if _, remembered := again["remembered"]; remembered || again["again"] != true {
+		t.Fatalf("the request after sudo rejected the remembered password = %v", again)
+	}
+	if code := answerSudo(again["id"].(string), "", ""); code != http.StatusBadRequest {
+		t.Fatalf("approval without the forgotten password = %d", code)
+	}
+	if code := answerSudo(again["id"].(string), "new", ""); code != http.StatusOK {
+		t.Fatalf("answer = %d", code)
+	}
+	if answered := <-result; answered.code != 0 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+	if answers := strings.Fields(recorded(t, record, "askpass")); !slices.Equal(answers, []string{sha256Hex("old\n"), sha256Hex("old\n"), sha256Hex("new\n")}) {
 		t.Fatalf("askpass answered %v", answers)
 	}
 }

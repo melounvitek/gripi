@@ -199,8 +199,8 @@ func TestGripiOnAWorkerReachesOnlyTheSessionsOnTheWorker(t *testing.T) {
 	}
 }
 
-// gripi sudo in a session on a worker asks as on main, for the password of the worker's user, and runs the command as
-// root there.
+// gripi sudo in a session on a worker asks as on main, for the password of the worker's user, also again when sudo
+// asks again, and runs the command as root there.
 func TestSudoInASessionOnAWorkerRunsTheCommandThere(t *testing.T) {
 	state := filepath.Dir(socketPath(t))
 	if err := os.MkdirAll(state, 0700); err != nil {
@@ -214,8 +214,8 @@ func TestSudoInASessionOnAWorkerRunsTheCommandThere(t *testing.T) {
 	var ran []string
 	workers := &recordedWorkers{
 		location: gateway.WorkerLocation{Worker: "beelink", State: "connected", User: "gripi"},
-		sudo: func(key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
-			ran = append(ran, key, cwd, strings.Join(argv, " "), string(password))
+		sudo: func(key, worker, cwd string, argv []string, password func() []byte, stdout, stderr io.Writer) (int, error) {
+			ran = append(ran, key, worker, cwd, strings.Join(argv, " "), string(password()), string(password()))
 			io.WriteString(stdout, "out\n")
 			io.WriteString(stderr, "err\n")
 			return 7, nil
@@ -227,9 +227,14 @@ func TestSudoInASessionOnAWorkerRunsTheCommandThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stop()
-	t.Setenv("GRIPI_SOCKET_PATH", socket)
 	outsideSessions(t)
 	t.Setenv("PI_SESSION_FILE", alpha)
+	// A password that Gripi remembers for the session on main is main's user's, which the worker doesn't get.
+	fakeSudo(t, "password")
+	if answered := sudoAnsweredBy(t, alpha, func(request map[string]any) int { return rememberSudo(request["id"].(string), "main's password", "") }, "true"); answered.code != 0 {
+		t.Fatalf("gripi sudo on main = %+v", answered)
+	}
+	t.Setenv("GRIPI_SOCKET_PATH", socket)
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -237,20 +242,30 @@ func TestSudoInASessionOnAWorkerRunsTheCommandThere(t *testing.T) {
 
 	result := startCLI("sudo", "--", "apt-get", "install", "-y", "ripgrep")
 	request := sudoRequestsUntil(t, alpha, "", 1)[0]
-	if request["worker"] != "beelink" || request["user"] != "gripi" || request["display"] != "apt-get install -y ripgrep" || request["cwd"] != cwd {
+	if request["worker"] != "beelink" || request["user"] != "gripi" || request["display"] != "apt-get install -y ripgrep" || request["cwd"] != cwd || request["remembered"] != nil {
 		t.Fatalf("the request = %v", request)
 	}
-	if code := answerSudo(request["id"].(string), "the worker's password", ""); code != http.StatusOK {
+	if code := answerSudo(request["id"].(string), "", ""); code != http.StatusBadRequest {
+		t.Fatalf("approval with main's remembered password = %d", code)
+	}
+	if code := answerSudo(request["id"].(string), "a wrong password", ""); code != http.StatusOK {
 		t.Fatalf("answer = %d", code)
+	}
+	again := sudoRequestsUntil(t, alpha, "", 1)[0]
+	if again["again"] != true || again["worker"] != "beelink" || again["user"] != "gripi" {
+		t.Fatalf("the request after a wrong password = %v", again)
+	}
+	if code := answerSudo(again["id"].(string), "the worker's password", ""); code != http.StatusOK {
+		t.Fatalf("second answer = %d", code)
 	}
 	if answered := <-result; answered.code != 7 || answered.stdout != "out\n" || !strings.HasSuffix(answered.stderr, "err\n") {
 		t.Fatalf("gripi sudo = %+v", answered)
 	}
-	if want := []string{alpha, cwd, "apt-get install -y ripgrep", "the worker's password"}; !slices.Equal(ran, want) {
+	if want := []string{alpha, "beelink", cwd, "apt-get install -y ripgrep", "a wrong password", "the worker's password"}; !slices.Equal(ran, want) {
 		t.Fatalf("the worker ran %q, want %q", ran, want)
 	}
 
-	workers.sudo = func(string, string, []string, []byte, io.Writer, io.Writer) (int, error) {
+	workers.sudo = func(string, string, string, []string, func() []byte, io.Writer, io.Writer) (int, error) {
 		return 0, refusal{errors.New("the session is coming back from its worker")}
 	}
 	result = startCLI("sudo", "--", "true")

@@ -20,10 +20,14 @@ Asks the user to run a command as root and waits up to 2 minutes for them to
 answer in Gripi, where the request takes the editor's place in the
 conversation of the Pi or Hermes session that runs gripi sudo. Once they enter
 their password, Gripi runs the command with sudo and passes on its output and
-exit code. The password goes only to sudo, never to the agent.
+exit code. The password goes only to sudo, never to the agent. When sudo
+rejects it, as a wrong one, Gripi asks the user again, as sudo would in a
+terminal.
 
-Each command needs the user's password again. The command reads no input, and
-Gripi keeps only the first 16 MiB of each of its outputs.
+Each command needs the user's approval, and their password again, unless they
+asked Gripi to remember it for 5 minutes for an earlier command of the session
+that succeeded. The command reads no input, and Gripi keeps only the first
+16 MiB of each of its outputs.
 
 In a session on a worker, the command runs as root on the worker, in the
 session's folders as the session sees them, and sudo there asks for the
@@ -90,7 +94,8 @@ func runningSession() string {
 }
 
 // answerSudoPrompt is gripi as the askpass program of a sudo that the gateway runs. It prints the user's password
-// only for sudo's password prompt, once, and otherwise prints nothing at all, after which sudo gives up.
+// only for sudo's password prompt, and otherwise, or when the user doesn't enter it again after sudo rejected it,
+// prints nothing at all, after which sudo gives up.
 func answerSudoPrompt(arguments []string, stdout, stderr io.Writer) int {
 	// Where sudoers keeps the environment, a command that sudo runs has the token too, and may run gripi.
 	parent, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", os.Getppid()))
@@ -109,7 +114,7 @@ func answerSudoPrompt(arguments []string, stdout, stderr io.Writer) int {
 	defer response.Body.Close()
 	password, err := io.ReadAll(response.Body)
 	if err != nil || response.StatusCode != http.StatusOK {
-		fmt.Fprintln(stderr, "gripi sudo: Gripi gives sudo the password only once")
+		fmt.Fprintln(stderr, "gripi sudo: Gripi has no password for this sudo")
 		return exitFailure
 	}
 	stdout.Write(append(password, '\n'))

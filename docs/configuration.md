@@ -165,7 +165,7 @@ If `GH_TOKEN` is saved without the rest, the dialog warns that commits and `git 
 
 ## Running commands as root
 
-Agents in Gripi can’t use `sudo` when it asks for a password, because nothing can type it. Instead, an agent in a Pi or Hermes session can run `gripi sudo -- <command>`. Gripi then shows the exact command and its directory in place of that conversation’s editor and asks for your password. **run as root** runs the command with sudo, and the agent gets only its output and exit code. **cancel**, or 2 minutes without an answer, refuses it. The password goes from the browser to the gateway’s memory and, only if sudo asks for it, to sudo. It never reaches the agent, the model, or any file.
+Agents in Gripi can’t use `sudo` when it asks for a password, because nothing can type it. Instead, an agent in a Pi or Hermes session can run `gripi sudo -- <command>`. Gripi then shows the exact command and its directory in place of that conversation’s editor and asks for your password. **run as root** runs the command with sudo, and the agent gets only its output and exit code. **cancel**, or 2 minutes without an answer, refuses it. When sudo rejects the password, such as a wrong one, the prompt comes back with **Wrong password. Try again.**, as sudo would ask again in a terminal, until sudo gives up. The password goes from the browser to the gateway’s memory and, only if sudo asks for it, to sudo. It never reaches the agent, the model, or any file.
 
 Gripi leaves plain `sudo` as it is, so it still fails there. `gripi sudo` is Gripi’s own: Pi CLI in a terminal shows no prompt for it.
 
@@ -186,7 +186,7 @@ Requirements and limits:
 
 - Linux only, with [sudo-rs](https://github.com/trifectatechfoundation/sudo-rs) or classic [sudo](https://www.sudo.ws/). Gripi answers only pam_unix’s password prompt: with sudo-rs, its untranslated `Password: `, and with classic sudo, `Password: ` or its translation. If PAM asks for anything else, such as a one-time code, sudo fails without running the command. With classic sudo, sudoers must not set `passprompt_override`, which would show Gripi every prompt of PAM as the password prompt.
 - sudoers must not keep `SUDO_ASKPASS` or `GRIPI_SUDO_TOKEN` with `env_keep`, which would pass them on to the command.
-- Every command needs your approval and your password. Gripi runs sudo with `-k`, so an earlier sudo login doesn’t count.
+- Every command needs your approval, and your password, unless you ticked **remember for 5 minutes** for an earlier command of the same conversation that succeeded. The gateway then keeps the password in its memory for 5 minutes from when you entered it, for that conversation only, and on a worker, only for that worker’s user; using it doesn’t make it last longer. It forgets the password once sudo rejects it, and when it restarts. Gripi runs sudo with `-k`, so a sudo login outside Gripi doesn’t count.
 - `!` commands and nested subagents can’t use it. Gripi can’t tell which conversation they belong to, so `gripi sudo` fails at once.
 - When `gripi sudo` ends before the command, such as when you stop the agent, sudo passes SIGTERM on to the command’s first process only. Processes that it started, such as the step in progress of `sh -c 'a; b'`, may keep running as root. On a [worker](#on-a-worker), they stop with the session.
 - Hermes stops a terminal command after 180 seconds unless its model sets a longer timeout, and the wait for your answer counts.
@@ -196,7 +196,7 @@ This keeps the password from leaking by accident. It doesn’t protect against a
 
 ### On a worker
 
-In a session on a [worker](#workers), `gripi sudo` asks the same way, and runs the command as root on the worker, where the session runs. The command sees the session’s folders as the session does, such as its copy of the repository at main’s paths, starts in the same folder, and runs in the session’s cgroup, so stopping the session, its return or losing the worker stop it too. sudo there asks for the password of the worker’s user, so the request says so, such as `on  worker beelink, as root with gripi's password`. The password goes from the browser to the gateway, then over the gateway’s SSH connection to Gripi’s helper on the worker, which gives it to sudo’s askpass program once; it never reaches a command line, a log or a file.
+In a session on a [worker](#workers), `gripi sudo` asks the same way, and runs the command as root on the worker, where the session runs. The command sees the session’s folders as the session does, such as its copy of the repository at main’s paths, starts in the same folder, and runs in the session’s cgroup, so stopping the session, its return or losing the worker stop it too. sudo there asks for the password of the worker’s user, so the request says so, such as `on  worker beelink, as root with gripi's password`. The password goes from the browser to the gateway, then over the gateway’s SSH connection to Gripi’s helper on the worker, which passes it on to sudo’s askpass program each time that sudo asks for it; it never reaches a command line, a log or a file.
 
 The worker needs, once, its user allowed to use sudo with a password, a sudo that meets the requirements above, and `nsenter` from util-linux 2.38 or later. For example, on the worker, as an admin:
 

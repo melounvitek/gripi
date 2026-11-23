@@ -72,6 +72,8 @@ type Control struct {
 	lastID     uint64
 	pending    map[uint64]chan helper.Message
 	lastAnswer time.Time
+	// askpasses give the askpass programs of the commands that sudo runs on the worker their password, by token.
+	askpasses map[string]func() []byte
 }
 
 // NewControl runs the control protocol on a helper's output and input. It returns once the helper has said hello with
@@ -80,6 +82,7 @@ func NewControl(ctx context.Context, output io.Reader, input io.WriteCloser, ver
 	control := &Control{
 		lease: lease, input: input, answers: make(chan uint64, 16), requests: make(chan helper.Message),
 		closing: make(chan struct{}), closed: make(chan struct{}), lost: make(chan struct{}), gone: make(chan struct{}), pending: map[uint64]chan helper.Message{},
+		askpasses: map[string]func() []byte{},
 	}
 	hello := make(chan helper.Message, 1)
 	answered := make(chan struct{})
@@ -145,6 +148,8 @@ func (control *Control) read(output io.Reader, hello chan<- helper.Message) {
 			case control.answers <- message.ID:
 			default:
 			}
+		case "sudo.askpass":
+			go control.answerAskpass(message.Token)
 		case "":
 			control.mu.Lock()
 			if reply := control.pending[message.ID]; reply != nil {
@@ -263,6 +268,32 @@ func (control *Control) request(ctx context.Context, request helper.Message) (he
 		forget()
 		return helper.Message{}, ctx.Err()
 	}
+}
+
+// Askpass lets the askpass program of a command that sudo runs on the worker with token get its password from
+// password each time that sudo asks for it, until stop. password returns nil to refuse it.
+func (control *Control) Askpass(token string, password func() []byte) (stop func()) {
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	control.askpasses[token] = password
+	return func() {
+		control.mu.Lock()
+		defer control.mu.Unlock()
+		delete(control.askpasses, token)
+	}
+}
+
+// answerAskpass gives an askpass program on the worker its password, or refuses it.
+func (control *Control) answerAskpass(token string) {
+	control.mu.Lock()
+	password := control.askpasses[token]
+	control.mu.Unlock()
+	var answer []byte
+	if password != nil {
+		answer = password()
+		defer clear(answer)
+	}
+	control.call(context.Background(), helper.Message{Type: "sudo.password", Token: token, Password: string(answer)})
 }
 
 // Instance names the helper, so that streams reach only this one.

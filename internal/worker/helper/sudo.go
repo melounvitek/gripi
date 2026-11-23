@@ -18,10 +18,11 @@ import (
 )
 
 // A session's command that `gripi sudo` asks for runs as root on the worker, and sees the session's paths: the helper
-// keeps the password that main offers for it (sudo.offer), and `gripi worker sudo`, which main runs under the
-// user's systemd, outside every view, where setuid works, starts sudo in the session's cgroup. sudo runs nsenter,
-// which enters the mount namespace of the session's Pi, its view, and runs the command there. sudo's askpass program,
-// gripi, gets the password from the helper on askpassSocket.
+// prepares it (sudo.offer), and `gripi worker sudo`, which main runs under the user's systemd, outside every view,
+// where setuid works, starts sudo in the session's cgroup. sudo runs nsenter, which enters the mount namespace of the
+// session's Pi, its view, and runs the command there. Each time that sudo asks for the password, its askpass program,
+// gripi, asks the helper on askpassSocket, which asks main (sudo.askpass). The first time, main gives the password
+// that the user entered, and after sudo rejected it, the one that the user enters again (sudo.password).
 
 // askpassSocket is where sudo's askpass program, gripi, takes the password, in the runtime folder. It answers as the
 // gateway's socket does, so gripi needs nothing else there.
@@ -30,23 +31,22 @@ const askpassSocket = "askpass.sock"
 // sudoPrompt is the prompt that gripi sudo gives sudo, which gripi, as askpass, answers (server.SudoAskpassPrompts).
 const sudoPrompt = "gripi"
 
-// passwordLifetime bounds how long the helper keeps a password that sudo's askpass program hasn't taken.
-const passwordLifetime = time.Minute
+// askpassTimeout bounds how long sudo's askpass program waits for main, which waits at most 2 minutes for the user.
+const askpassTimeout = 5 * time.Minute
 
 // SudoRun is what `gripi worker sudo` gets from main on the first line of its input.
 type SudoRun struct {
 	Sudo   string   `json:"sudo,omitempty"` // /usr/bin/sudo when empty; tests use a fake one
-	Token  string   `json:"token"`          // for the password that the helper keeps
+	Token  string   `json:"token"`          // with which sudo's askpass program asks main for the password
 	Cgroup string   `json:"cgroup"`         // the session's
 	Args   []string `json:"args"`           // what sudo runs as root
 }
 
-// offerSudo keeps the password of a command that main runs as root for a session, until sudo's askpass program takes
-// it, and returns the session's cgroup and what sudo runs: nsenter, which runs the command at cwd in the mount
-// namespace of the session's Pi.
+// offerSudo returns the cgroup of a session for which main runs a command as root, and what sudo runs: nsenter, which
+// runs the command at cwd in the mount namespace of the session's Pi.
 func (s *server) offerSudo(request Message) (cgroup string, args []string, err error) {
-	if request.Token == "" || len(request.Args) == 0 || !filepath.IsAbs(request.Cwd) {
-		return "", nil, errors.New("sudo.offer needs a token, a command and an absolute folder")
+	if len(request.Args) == 0 || !filepath.IsAbs(request.Cwd) {
+		return "", nil, errors.New("sudo.offer needs a command and an absolute folder")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -54,30 +54,67 @@ func (s *server) offerSudo(request Message) (cgroup string, args []string, err e
 	if current == nil || current.pi == nil {
 		return "", nil, errors.New("the session's Pi doesn't run on the worker")
 	}
-	s.passwords[request.Token] = []byte(request.Password)
-	time.AfterFunc(passwordLifetime, func() { clear(s.takePassword(request.Token)) })
 	nsenter := []string{"nsenter", "--target", strconv.Itoa(current.pi.Process.Pid), "--mount", "--wdns=" + request.Cwd, "--"}
 	return current.cgroup, append(nsenter, request.Args...), nil
 }
 
-// takePassword hands out the password for a token once, to a caller that then owns it.
-func (s *server) takePassword(token string) []byte {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	password := s.passwords[token]
-	delete(s.passwords, token)
-	return password
-}
-
-// answerAskpass gives sudo's askpass program, gripi, the password for its token.
+// answerAskpass asks main for the password of sudo's askpass program, gripi, by its token, and gives it what main
+// answers, or nothing when main refuses.
 func (s *server) answerAskpass(response http.ResponseWriter, request *http.Request) {
-	password := s.takePassword(request.PostFormValue("token"))
-	if password == nil {
+	token := request.PostFormValue("token")
+	answer := make(chan []byte, 1)
+	s.mu.Lock()
+	_, asking := s.askpasses[token]
+	if !asking {
+		s.askpasses[token] = answer
+	}
+	s.mu.Unlock()
+	if asking {
+		http.NotFound(response, request)
+		return
+	}
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.askpasses[token] == answer {
+			delete(s.askpasses, token)
+		}
+		// An answer that came as the wait ended.
+		select {
+		case password := <-answer:
+			clear(password)
+		default:
+		}
+	}()
+	s.send(Message{Type: "sudo.askpass", Token: token})
+	timeout := time.NewTimer(askpassTimeout)
+	defer timeout.Stop()
+	var password []byte
+	select {
+	case password = <-answer:
+	case <-timeout.C:
+	case <-request.Context().Done():
+	case <-s.done:
+	}
+	if len(password) == 0 {
 		http.NotFound(response, request)
 		return
 	}
 	defer clear(password)
 	response.Write(password)
+}
+
+// givePassword passes main's answer on to the askpass program that asked for it.
+func (s *server) givePassword(request Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	answer, asking := s.askpasses[request.Token]
+	if !asking {
+		return errors.New("no askpass program waits for this token")
+	}
+	delete(s.askpasses, request.Token)
+	answer <- []byte(request.Password)
+	return nil
 }
 
 // Sudo runs sudo for the helper whose runtime folder is runtimeDir as the first line of input says, as

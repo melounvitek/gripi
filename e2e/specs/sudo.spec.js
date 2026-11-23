@@ -100,6 +100,41 @@ test("the prompt takes the editor's place, runs the approved command, and keeps 
   }
 });
 
+test("a wrong password asks again, as sudo does in a terminal", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  const session = await openSession(page, "sudo", sessions.sudo);
+  const { ended } = gripiSudo(session, ["echo", "retried"]);
+  const prompt = sudoPrompt(page);
+  const password = prompt.getByLabel("password");
+  await expect(password).toBeFocused();
+  await expect(prompt.getByRole("alert")).toBeHidden();
+
+  await password.fill("wrong password");
+  await password.press("Enter");
+  await expect(prompt.getByRole("alert")).toHaveText("Wrong password. Try again.");
+  await expect(prompt.getByRole("definition").first()).toHaveText("echo retried");
+  await expect(password).toBeFocused();
+  await expect(password).toHaveValue("");
+
+  await password.fill("right password");
+  await password.press("Enter");
+  await expect(prompt).toBeHidden();
+  expect(await ended).toMatchObject({ code: 0, stdout: "retried\n" });
+});
+
+test("cancelling after a wrong password makes sudo give up without running the command", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  const session = await openSession(page, "sudo", sessions.sudo);
+  const { ended } = gripiSudo(session, ["echo", "never"]);
+  const prompt = sudoPrompt(page);
+  await prompt.getByLabel("password").fill("wrong password");
+  await prompt.getByLabel("password").press("Enter");
+  await expect(prompt.getByRole("alert")).toHaveText("Wrong password. Try again.");
+  await prompt.getByLabel("password").press("Escape");
+  await expect(prompt).toBeHidden();
+  expect(await ended).toMatchObject({ code: 1, stdout: "", stderr: expect.stringContaining("gripi sudo: Gripi has no password for this sudo") });
+});
+
 test("a reload brings the oldest pending request back from the page, and the next one shows after it", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   const session = await openSession(page, "sudo", sessions.sudo);
@@ -186,6 +221,36 @@ test("a prompt that goes away as the run ends keeps the rest of the password out
   expect(storage).not.toContain("word-canary");
 });
 
+// Last of the session's, which the gateway remembers the password for afterwards.
+test("a remembered password needs only approval for the session's next command", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  const session = await openSession(page, "sudo", sessions.sudo);
+  const prompt = sudoPrompt(page);
+  const first = gripiSudo(session, ["echo", "first"]);
+  const password = prompt.getByLabel("password");
+  await password.fill("remembered password");
+  await password.press("Tab");
+  const remember = prompt.getByLabel("remember for 5 minutes");
+  await expect(remember).toBeFocused();
+  await remember.press("Space");
+  await remember.press("Enter");
+  await expect(prompt).toBeHidden();
+  expect(await first.ended).toMatchObject({ code: 0, stdout: "first\n" });
+
+  const second = gripiSudo(session, ["echo", "second"]);
+  await expect(prompt.getByRole("definition").first()).toHaveText("echo second");
+  await expect(prompt.locator("[data-sudo-remembered]")).toHaveText("passwordremembered");
+  await expect(passwordField(page)).toBeHidden();
+  await expect(remember).toBeHidden();
+  const run = prompt.getByRole("button", { name: "run as root" });
+  await expect(run).toBeFocused();
+  await run.press("Enter");
+  await expect(prompt).toBeHidden();
+  expect(await second.ended).toMatchObject({ code: 0, stdout: "second\n" });
+  const hash = createHash("sha256").update("remembered password").digest("hex");
+  expect((await readFile(process.env.GRIPI_E2E_SUDO_HASHES, "utf8")).split("\n").filter((line) => line === hash)).toHaveLength(2);
+});
+
 test("a phone cancels with one tap on actions big enough to tap", async ({ page, isMobile }) => {
   test.skip(!isMobile, "Touch flow");
   const session = await openSession(page, "sudo-mobile", sessions.sudoMobile);
@@ -193,7 +258,7 @@ test("a phone cancels with one tap on actions big enough to tap", async ({ page,
   const prompt = sudoPrompt(page);
   await expect(prompt).toBeVisible();
   const cancel = prompt.getByRole("button", { name: "cancel" });
-  for (const control of [prompt.getByLabel("password"), prompt.getByRole("button", { name: "run as root" }), cancel]) {
+  for (const control of [prompt.getByLabel("password"), prompt.locator(".sudo-prompt-remember"), prompt.getByRole("button", { name: "run as root" }), cancel]) {
     const box = await control.boundingBox();
     expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
   }
