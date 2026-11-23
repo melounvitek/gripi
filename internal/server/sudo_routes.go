@@ -22,6 +22,10 @@ import (
 // SudoTimeout is how long a command of 'gripi sudo' waits for the user's answer. Tests shorten it.
 var SudoTimeout = 2 * time.Minute
 
+// SudoRememberFor is how long Gripi remembers a password that the user asked it to remember, from when they entered
+// it. Tests shorten it.
+var SudoRememberFor = 5 * time.Minute
+
 // SudoPath is the sudo that runs the commands. Tests use a fake one.
 var SudoPath = "/usr/bin/sudo"
 
@@ -52,6 +56,8 @@ type sudoRequest struct {
 	// answered closes when the user answers, with the password or, when they cancel, without one.
 	answered chan struct{}
 	password []byte
+	// remembered is the remembered password that the answer took, or that the user asked Gripi to remember with it.
+	remembered *rememberedPassword
 }
 
 // sudoRequestView is all of a sudo request that the browser gets.
@@ -68,6 +74,25 @@ type sudoRequestView struct {
 	User   string `json:"user,omitempty"`
 	// Again says that sudo asks for the password again, which it does after it rejected one, such as a wrong one.
 	Again bool `json:"again,omitempty"`
+	// Remembered says that Gripi remembers the password, so the user only approves the command.
+	Remembered bool `json:"remembered,omitempty"`
+}
+
+// sudoTarget is where a request's command runs as root, which takes one password: on main, the session's, or on a
+// worker as its user.
+type sudoTarget struct{ session, worker, user string }
+
+func (view sudoRequestView) target() sudoTarget {
+	return sudoTarget{view.Session, view.Worker, view.User}
+}
+
+// rememberedPassword is a password that the user asked Gripi to remember for a target. Their approval of the target's
+// requests takes it once a command ran with it, until SudoRememberFor has passed since they entered it.
+type rememberedPassword struct {
+	target    sudoTarget
+	password  []byte
+	until     time.Time
+	confirmed bool // a command ran with it
 }
 
 // sudoRequests holds the pending requests only in memory. A request leaves as it is answered, so it is never shown again.
@@ -75,7 +100,8 @@ type sudoRequests struct {
 	mu      sync.Mutex
 	pending map[string]*sudoRequest
 	// runs are the commands that sudo runs on main, by the token that their askpass program gets.
-	runs map[string]*sudoRun
+	runs       map[string]*sudoRun
+	remembered map[sudoTarget]*rememberedPassword
 }
 
 // sudoRun is a command that sudo runs for an answered request, until it ends.
@@ -86,11 +112,56 @@ type sudoRun struct {
 	delivered bool
 }
 
-// end clears the password of a run that has ended, unless sudo's askpass program took it.
-func (requests *sudoRequests) end(run *sudoRun) {
+// end clears the password of a run that has ended, unless sudo's askpass program took it. A password that the user
+// asked Gripi to remember for the run is remembered only once the command succeeded, which it can't unless sudo took
+// the last password that it got.
+func (requests *sudoRequests) end(run *sudoRun, succeeded bool) {
 	requests.mu.Lock()
 	defer requests.mu.Unlock()
 	clear(run.request.password)
+	entry := run.request.remembered
+	if entry == nil || entry.confirmed {
+		return
+	}
+	if succeeded && run.delivered && requests.remembered[entry.target] == entry && time.Now().Before(entry.until) {
+		entry.confirmed = true
+		return
+	}
+	requests.forget(entry)
+}
+
+// remember keeps a copy of a password for a target until SudoRememberFor has passed. Callers hold mu.
+func (requests *sudoRequests) remember(target sudoTarget, password []byte) *rememberedPassword {
+	if requests.remembered == nil {
+		requests.remembered = make(map[sudoTarget]*rememberedPassword)
+	}
+	if previous := requests.remembered[target]; previous != nil {
+		clear(previous.password)
+	}
+	entry := &rememberedPassword{target: target, password: bytes.Clone(password), until: time.Now().Add(SudoRememberFor)}
+	requests.remembered[target] = entry
+	time.AfterFunc(SudoRememberFor, func() {
+		requests.mu.Lock()
+		defer requests.mu.Unlock()
+		requests.forget(entry)
+	})
+	return entry
+}
+
+// recall returns the password that Gripi remembers for a target, if a command ran with it. Callers hold mu.
+func (requests *sudoRequests) recall(target sudoTarget) *rememberedPassword {
+	if entry := requests.remembered[target]; entry != nil && entry.confirmed && time.Now().Before(entry.until) {
+		return entry
+	}
+	return nil
+}
+
+// forget clears a remembered password. Callers hold mu.
+func (requests *sudoRequests) forget(entry *rememberedPassword) {
+	if requests.remembered[entry.target] == entry {
+		delete(requests.remembered, entry.target)
+	}
+	clear(entry.password)
 }
 
 // add shows a request, which gets an ID and expires after SudoTimeout.
@@ -119,9 +190,9 @@ func (requests *sudoRequests) remove(id string) bool {
 	return pending
 }
 
-// answer ends the request if it is pending and allowed accepts its session, and reports whether it did. A nil password
-// cancels the request.
-func (requests *sudoRequests) answer(id string, allowed func(session string) bool, password []byte) bool {
+// cancel ends the request without a password if it is pending and allowed accepts its session, and reports whether it
+// did.
+func (requests *sudoRequests) cancel(id string, allowed func(session string) bool) bool {
 	requests.mu.Lock()
 	defer requests.mu.Unlock()
 	request, pending := requests.pending[id]
@@ -129,9 +200,34 @@ func (requests *sudoRequests) answer(id string, allowed func(session string) boo
 		return false
 	}
 	delete(requests.pending, id)
-	request.password = password
 	close(request.answered)
 	return true
+}
+
+// approve answers the request with password if it is pending and allowed accepts its session, or, with an empty one,
+// with the password that Gripi remembers for the request's target. With remember, Gripi remembers password for the
+// target. It returns http.StatusConflict when the request isn't pending, and http.StatusBadRequest when it has no
+// password, which leaves it pending.
+func (requests *sudoRequests) approve(id string, allowed func(session string) bool, password []byte, remember bool) int {
+	requests.mu.Lock()
+	defer requests.mu.Unlock()
+	request, pending := requests.pending[id]
+	if !pending || !allowed(request.view.Session) {
+		return http.StatusConflict
+	}
+	switch {
+	case len(password) == 0:
+		if request.remembered = requests.recall(request.view.target()); request.remembered == nil {
+			return http.StatusBadRequest
+		}
+		password = bytes.Clone(request.remembered.password)
+	case remember:
+		request.remembered = requests.remember(request.view.target(), password)
+	}
+	delete(requests.pending, id)
+	request.password = password
+	close(request.answered)
+	return http.StatusOK
 }
 
 // ask shows a request until the user answers it, which it returns, or until it expires or ctx ends, when it returns nil.
@@ -168,6 +264,9 @@ func (requests *sudoRequests) password(ctx context.Context, run *sudoRun) []byte
 		return password
 	}
 	view := run.request.view
+	if entry := run.request.remembered; entry != nil {
+		requests.forget(entry)
+	}
 	requests.mu.Unlock()
 	view.Again = true
 	answer, err := requests.ask(ctx, view)
@@ -192,9 +291,8 @@ func (requests *sudoRequests) start(token string, run *sudoRun) (end func()) {
 	requests.runs[token] = run
 	return func() {
 		requests.mu.Lock()
+		defer requests.mu.Unlock()
 		delete(requests.runs, token)
-		requests.mu.Unlock()
-		requests.end(run)
 	}
 }
 
@@ -210,7 +308,9 @@ func (requests *sudoRequests) of(session string) []sudoRequestView {
 	views := []sudoRequestView{}
 	for _, request := range requests.pending {
 		if request.view.Session == session {
-			views = append(views, request.view)
+			view := request.view
+			view.Remembered = requests.recall(view.target()) != nil
+			views = append(views, view)
 		}
 	}
 	slices.SortFunc(views, func(left, right sudoRequestView) int { return left.ExpiresAt.Compare(right.ExpiresAt) })
@@ -288,7 +388,8 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 
 // runSudoOnWorker runs the command with sudo on the worker that runs the session, as the request said.
 func (app *application) runSudoOnWorker(response http.ResponseWriter, request *http.Request, session, worker, cwd string, argv []string, run *sudoRun) {
-	defer app.sudoRequests.end(run)
+	succeeded := false
+	defer func() { app.sudoRequests.end(run, succeeded) }()
 	password := func(ctx context.Context) []byte { return app.sudoRequests.password(ctx, run) }
 	var stdout, stderr cappedBuffer
 	code, err := app.workers.Sudo(request.Context(), session, worker, cwd, argv, password, &stdout, &stderr)
@@ -299,15 +400,17 @@ func (app *application) runSudoOnWorker(response http.ResponseWriter, request *h
 		writeWorkersError(response, "run sudo on a worker", err)
 		return
 	}
+	succeeded = code == 0
 	writeJSON(response, SudoResult{ExitCode: code, Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Truncated: stdout.dropped || stderr.dropped})
 }
 
 // runSudo runs the command with sudo, which runs gripi as its askpass program. gripi takes the password from the
 // gateway with a token that works only while sudo runs.
 func (app *application) runSudo(response http.ResponseWriter, request *http.Request, cwd string, argv []string, run *sudoRun) {
+	succeeded := false
+	defer func() { app.sudoRequests.end(run, succeeded) }()
 	token, err := randomBrowserToken()
 	if err != nil {
-		clear(run.request.password)
 		writeInternalError(response, "create a sudo token", err)
 		return
 	}
@@ -341,6 +444,7 @@ func (app *application) runSudo(response http.ResponseWriter, request *http.Requ
 	if status.Signaled() {
 		code = 128 + int(status.Signal())
 	}
+	succeeded = code == 0
 	writeJSON(response, SudoResult{ExitCode: code, Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Truncated: stdout.dropped || stderr.dropped})
 }
 
@@ -386,15 +490,16 @@ func (app *application) cancelSudo(response http.ResponseWriter, request *http.R
 		return
 	}
 	owned := func(session string) bool { return app.validOwnedSessionPath(request, session) }
-	if !app.sudoRequests.answer(request.PostFormValue("id"), owned, nil) {
+	if !app.sudoRequests.cancel(request.PostFormValue("id"), owned) {
 		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": sudoRequestGone})
 		return
 	}
 	writeJSON(response, map[string]bool{"ok": true})
 }
 
-// answerSudo takes the user's password for a sudo request. Only a form body may carry it, never a URL, and
-// limitRequestBody refuses a body of unknown length, which it would write to a file.
+// answerSudo takes the user's password for a sudo request, or their approval, when Gripi remembers the password. Only
+// a form body may carry it, never a URL, and limitRequestBody refuses a body of unknown length, which it would write to
+// a file.
 func (app *application) answerSudo(response http.ResponseWriter, request *http.Request) {
 	if mediaType, _, _ := mime.ParseMediaType(request.Header.Get("Content-Type")); mediaType != "application/x-www-form-urlencoded" {
 		writeJSONStatus(response, http.StatusUnsupportedMediaType, map[string]string{"error": "Send the password as a URL-encoded form."})
@@ -405,14 +510,18 @@ func (app *application) answerSudo(response http.ResponseWriter, request *http.R
 		return
 	}
 	password := request.PostForm.Get("password")
-	if password == "" || strings.ContainsAny(password, "\r\n") {
-		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "Enter the password on one line."})
+	refused := map[string]string{"error": "Enter the password on one line."}
+	if strings.ContainsAny(password, "\r\n") {
+		writeJSONStatus(response, http.StatusBadRequest, refused)
 		return
 	}
 	owned := func(session string) bool { return app.validOwnedSessionPath(request, session) }
-	if !app.sudoRequests.answer(request.PostForm.Get("id"), owned, []byte(password)) {
-		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": sudoRequestGone})
-		return
+	switch status := app.sudoRequests.approve(request.PostForm.Get("id"), owned, []byte(password), request.PostForm.Get("remember") != ""); status {
+	case http.StatusConflict:
+		writeJSONStatus(response, status, map[string]string{"error": sudoRequestGone})
+	case http.StatusBadRequest:
+		writeJSONStatus(response, status, refused)
+	default:
+		writeJSON(response, map[string]bool{"ok": true})
 	}
-	writeJSON(response, map[string]bool{"ok": true})
 }

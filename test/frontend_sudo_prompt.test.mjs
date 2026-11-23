@@ -18,7 +18,7 @@ function promptFixture({ replies = [] } = {}) {
   const form = new FakeElement("form");
   const prompt = new FakeElement("section");
   prompt.hidden = true;
-  const parts = Object.fromEntries(["expiry", "command", "cwd", "worker-term", "worker", "password", "error", "run", "cancel"].map((name) => [name, new FakeElement("span", [`[data-sudo-${name}]`])]));
+  const parts = Object.fromEntries(["expiry", "command", "cwd", "worker-term", "worker", "password-field", "password", "remember-field", "remember", "remembered", "error", "run", "cancel"].map((name) => [name, new FakeElement("span", [`[data-sudo-${name}]`])]));
   prompt.append(...Object.values(parts));
   const window = new FakeEventTarget();
   const sent = [];
@@ -130,6 +130,45 @@ test("a request that sudo asks again after a wrong password says so and takes th
   assert.equal(error.hidden, false);
   controller.update([request("next")]);
   assert.equal(error.hidden, true);
+});
+
+test("the user may ask Gripi to remember the password, which a remembered password needs no field for", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
+  const parts = promptFixture({ replies: [reply(200, { ok: true }), reply(200, { ok: true }), reply(400, { error: "Enter the password on one line." })] });
+  const { controller, password, remember, run, sent, key, fire } = parts;
+  const field = parts["password-field"];
+  const rememberField = parts["remember-field"];
+  controller.update([request("first")]);
+  assert.equal(rememberField.hidden, false);
+  assert.equal(parts.remembered.hidden, true);
+
+  password.value = "secret";
+  remember.checked = true;
+  key("Enter", remember);
+  await flush();
+  assert.equal(sent[0].body, "id=first&password=secret&remember=1");
+
+  controller.update([{ ...request("second"), remembered: true }]);
+  assert.equal(field.hidden, true);
+  assert.equal(rememberField.hidden, true);
+  assert.equal(parts.remembered.hidden, false);
+  assert.equal(remember.checked, false);
+  // Enter on the focused button runs it.
+  assert.equal(run.focused, true);
+  fire(run, "click");
+  await flush();
+  assert.equal(sent[1].body, "id=second&password=");
+
+  // Gripi forgot the password while the prompt showed.
+  controller.update([{ ...request("third"), remembered: true }]);
+  controller.update([request("third")]);
+  assert.equal(field.hidden, false);
+  assert.equal(parts.remembered.hidden, true);
+  controller.update([{ ...request("third"), remembered: true }]);
+  fire(run, "click");
+  await flush();
+  assert.equal(field.hidden, false);
+  assert.equal(parts.error.textContent, "Enter the password on one line.");
 });
 
 test("Escape cancels, and a request that is gone says so before the next one shows", async (t) => {

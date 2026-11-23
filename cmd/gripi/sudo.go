@@ -24,8 +24,10 @@ exit code. The password goes only to sudo, never to the agent. When sudo
 rejects it, as a wrong one, Gripi asks the user again, as sudo would in a
 terminal.
 
-Each command needs the user's password again. The command reads no input, and
-Gripi keeps only the first 16 MiB of each of its outputs.
+Each command needs the user's approval, and their password again, unless they
+asked Gripi to remember it for 5 minutes for an earlier command of the session
+that succeeded. The command reads no input, and Gripi keeps only the first
+16 MiB of each of its outputs.
 
 In a session on a worker, the command runs as root on the worker, in the
 session's folders as the session sees them, and sudo there asks for the

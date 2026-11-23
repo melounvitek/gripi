@@ -227,9 +227,14 @@ func TestSudoInASessionOnAWorkerRunsTheCommandThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stop()
-	t.Setenv("GRIPI_SOCKET_PATH", socket)
 	outsideSessions(t)
 	t.Setenv("PI_SESSION_FILE", alpha)
+	// A password that Gripi remembers for the session on main is main's user's, which the worker doesn't get.
+	fakeSudo(t, "password")
+	if answered := sudoAnsweredBy(t, alpha, func(request map[string]any) int { return rememberSudo(request["id"].(string), "main's password", "") }, "true"); answered.code != 0 {
+		t.Fatalf("gripi sudo on main = %+v", answered)
+	}
+	t.Setenv("GRIPI_SOCKET_PATH", socket)
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -237,8 +242,11 @@ func TestSudoInASessionOnAWorkerRunsTheCommandThere(t *testing.T) {
 
 	result := startCLI("sudo", "--", "apt-get", "install", "-y", "ripgrep")
 	request := sudoRequestsUntil(t, alpha, "", 1)[0]
-	if request["worker"] != "beelink" || request["user"] != "gripi" || request["display"] != "apt-get install -y ripgrep" || request["cwd"] != cwd {
+	if request["worker"] != "beelink" || request["user"] != "gripi" || request["display"] != "apt-get install -y ripgrep" || request["cwd"] != cwd || request["remembered"] != nil {
 		t.Fatalf("the request = %v", request)
+	}
+	if code := answerSudo(request["id"].(string), "", ""); code != http.StatusBadRequest {
+		t.Fatalf("approval with main's remembered password = %d", code)
 	}
 	if code := answerSudo(request["id"].(string), "a wrong password", ""); code != http.StatusOK {
 		t.Fatalf("answer = %d", code)

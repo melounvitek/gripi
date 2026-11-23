@@ -282,11 +282,13 @@
     .sudo-prompt-field { align-items: center; }
     .sudo-prompt-field input, .sudo-prompt-field input:focus { min-width: 0; padding: 0.45rem 0; border: 0; border-bottom: 1px solid var(--border-strong); border-radius: 0; background: transparent; box-shadow: none; font-size: inherit; outline: none; }
     .sudo-prompt-field input:focus { border-bottom-color: var(--gold); }
+    .sudo-prompt-remember { display: flex; align-items: center; gap: 0.5rem; margin-left: calc(8ch + 1rem); color: var(--muted); }
+    .sudo-prompt-remember input { margin: 0; accent-color: var(--gold); }
     .sudo-prompt-error { margin: 0; color: var(--danger); }
     .sudo-prompt-actions { padding-left: var(--text-inset); }
     .sudo-prompt-actions .sudo-prompt-run { color: var(--gold); font-weight: 700; }
     /* 16px keeps iOS from zooming into the field. */
-    @media (max-width: 760px), (pointer: coarse) { .sudo-prompt-field input { min-height: 2.75rem; font-size: 16px; } }
+    @media (max-width: 760px), (pointer: coarse) { .sudo-prompt-field input { min-height: 2.75rem; font-size: 16px; } .sudo-prompt-remember { min-height: 2.75rem; } }
     /* Like the sudo prompt, moving to a worker or back, or losing it, takes the editor's place: gold rules while it moves, red when it needs an answer. */
     .prompt-form[data-worker] > :not(.composer-controls) { display: none; }
     .worker-prompt { display: grid; gap: 0.5rem; font: 0.86rem/1.45 var(--mono); }

@@ -33,12 +33,17 @@ export class SudoPromptController {
       cwd: prompt.querySelector("[data-sudo-cwd]"),
       workerTerm: prompt.querySelector("[data-sudo-worker-term]"),
       worker: prompt.querySelector("[data-sudo-worker]"),
+      passwordField: prompt.querySelector("[data-sudo-password-field]"),
       password: prompt.querySelector("[data-sudo-password]"),
-      error: prompt.querySelector("[data-sudo-error]")
+      rememberField: prompt.querySelector("[data-sudo-remember-field]"),
+      remember: prompt.querySelector("[data-sudo-remember]"),
+      remembered: prompt.querySelector("[data-sudo-remembered]"),
+      error: prompt.querySelector("[data-sudo-error]"),
+      run: prompt.querySelector("[data-sudo-run]")
     } : null;
     if (!this.elements) return;
     prompt.addEventListener("keydown", (event) => this.keydown(event));
-    prompt.querySelector("[data-sudo-run]").addEventListener("click", () => this.answer());
+    this.elements.run.addEventListener("click", () => this.answer());
     prompt.querySelector("[data-sudo-cancel]").addEventListener("click", () => this.cancel());
   }
 
@@ -71,8 +76,12 @@ export class SudoPromptController {
     if (!this.elements || this.closing) return;
     const now = Date.now();
     const request = this.requests.find((each) => !this.finished.has(each.id) && Date.parse(each.expires_at) > now) || null;
-    if (request?.id === this.request?.id) return;
-    const { prompt, form, command, cwd, workerTerm, worker, password, error } = this.elements;
+    if (request?.id === this.request?.id) {
+      // Gripi may forget the password while its request shows.
+      if (request) this.showRemembered(!!request.remembered);
+      return;
+    }
+    const { prompt, form, command, cwd, workerTerm, worker, password, remember, run, error } = this.elements;
     // Decided before the editor goes, so that a message being typed doesn't go on in the password field.
     const focus = request && !this.request && this.canFocus();
     this.clearPassword();
@@ -95,10 +104,20 @@ export class SudoPromptController {
     // sudo on a worker asks for the password of the worker's user.
     workerTerm.hidden = worker.hidden = !request.worker;
     worker.textContent = request.worker ? `worker ${request.worker}, as root with ${request.user || "its user"}'s password` : "";
+    remember.checked = false;
+    this.showRemembered(!!request.remembered);
     this.ticker = setInterval(() => this.tick(), 1000);
     this.tick();
     // The first tick may already find it expired and show the next one.
-    if (focus && this.request === request) password.focus({ preventScroll: true });
+    if (focus && this.request === request) (request.remembered ? run : password).focus({ preventScroll: true });
+  }
+
+  // With a password that Gripi remembers, the user only approves the command.
+  showRemembered(remembered) {
+    const { passwordField, rememberField, remembered: note } = this.elements;
+    if (remembered) this.clearPassword();
+    passwordField.hidden = rememberField.hidden = remembered;
+    note.hidden = !remembered;
   }
 
   tick() {
@@ -117,7 +136,7 @@ export class SudoPromptController {
       // Also keeps Escape from stopping the agent.
       event.preventDefault();
       this.cancel();
-    } else if (event.key === "Enter" && event.target === this.elements.password) {
+    } else if (event.key === "Enter" && (event.target === this.elements.password || event.target === this.elements.remember)) {
       event.preventDefault();
       this.answer();
     }
@@ -126,7 +145,7 @@ export class SudoPromptController {
   answer() {
     const password = this.elements.password.value;
     this.clearPassword();
-    return this.send("/sudo/answer", { password });
+    return this.send("/sudo/answer", this.elements.remember.checked ? { password, remember: "1" } : { password });
   }
 
   cancel() {
@@ -157,6 +176,8 @@ export class SudoPromptController {
     const { error } = this.elements;
     error.textContent = message || "Could not answer. Try again.";
     error.hidden = false;
+    // Without a password, as when Gripi has just forgotten it.
+    if (response?.status === 400) this.showRemembered(false);
     // Answered elsewhere, cancelled by its command, or expired: the prompt says so before it closes.
     if (response?.status === 409) {
       this.finished.add(request.id);
