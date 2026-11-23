@@ -63,6 +63,9 @@ export class ImageViewerController {
     this.stage = this.viewer?.querySelector("[data-image-viewer-stage]");
     this.image = this.viewer?.querySelector("[data-image-viewer-image]");
     this.closeButton = this.viewer?.querySelector("[data-image-viewer-close]");
+    this.previousButton = this.viewer?.querySelector("[data-image-viewer-previous]");
+    this.nextButton = this.viewer?.querySelector("[data-image-viewer-next]");
+    this.position = this.viewer?.querySelector("[data-image-viewer-position]");
     this.zoomOutButton = this.viewer?.querySelector("[data-image-viewer-zoom-out]");
     this.zoomValue = this.viewer?.querySelector("[data-image-viewer-zoom-value]");
     this.zoomInButton = this.viewer?.querySelector("[data-image-viewer-zoom-in]");
@@ -84,6 +87,8 @@ export class ImageViewerController {
     this.stage.addEventListener("pointerup", (event) => this.handlePointerUp(event));
     this.stage.addEventListener("pointercancel", (event) => this.handlePointerUp(event));
     this.closeButton?.addEventListener("click", () => this.close());
+    this.previousButton?.addEventListener("click", () => this.showAdjacent(-1));
+    this.nextButton?.addEventListener("click", () => this.showAdjacent(1));
     this.zoomOutButton?.addEventListener("click", () => this.zoomBy(1 / ZOOM_STEP));
     this.zoomInButton?.addEventListener("click", () => this.zoomBy(ZOOM_STEP));
     this.actualSizeButton?.addEventListener("click", () => this.showActualSize());
@@ -103,6 +108,8 @@ export class ImageViewerController {
   open(source, opener = null) {
     if (!this.viewer || !this.image || !source) return false;
 
+    const wasOpen = this.isOpen;
+    this.releaseObjectURL();
     this.opener = opener || this.document.activeElement;
     this.openerArticle = this.opener?.closest?.("article") || null;
     this.openerIndex = Math.max(0, [...(this.openerArticle?.querySelectorAll("[data-image-viewer-open]") || [])].indexOf(this.opener));
@@ -118,27 +125,60 @@ export class ImageViewerController {
     this.image.src = sourceURL;
     this.downloadLink?.setAttribute("href", sourceURL);
     this.downloadLink?.setAttribute("download", imageDownloadFilename(source));
-    this.closeButton?.focus({ preventScroll: true });
+    if (!wasOpen) {
+      this.closeButton?.focus({ preventScroll: true });
+      // Images can keep arriving while the viewer is open.
+      const conversation = this.document.querySelector("#conversation-scroll");
+      this.conversationObserver ||= new this.window.MutationObserver(() => this.updateNavigation());
+      if (conversation) this.conversationObserver.observe(conversation, { childList: true, subtree: true });
+    }
+    this.updateNavigation();
 
     if (this.image.complete && this.image.naturalWidth > 0) this.initializeImage();
     return true;
   }
 
+  // A live message can be re-rendered while its image is open, so find the opener's replacement.
+  currentOpener() {
+    if (this.opener?.isConnected !== false) return this.opener;
+
+    let article = this.openerArticle;
+    if (article?.isConnected === false && this.openerMessageFingerprint) {
+      article = [...this.document.querySelectorAll("article")]
+        .find((candidate) => candidate.dataset.messageFingerprint === this.openerMessageFingerprint);
+    }
+    const opener = article?.querySelectorAll("[data-image-viewer-open]")[this.openerIndex];
+    return opener?.isConnected === false ? null : opener;
+  }
+
+  updateNavigation() {
+    if (!this.isOpen || !this.previousButton || !this.nextButton || !this.position) return;
+
+    const openers = [...this.document.querySelectorAll("[data-image-viewer-open]")];
+    const index = openers.indexOf(this.currentOpener());
+    const navigable = openers.length > 1 && index !== -1;
+    for (const control of [this.previousButton, this.nextButton, this.position]) control.hidden = !navigable;
+    this.previousButton.disabled = index === 0;
+    this.nextButton.disabled = index === openers.length - 1;
+    this.position.textContent = `${index + 1} / ${openers.length}`;
+  }
+
+  showAdjacent(step) {
+    if (!this.isOpen) return;
+
+    const openers = [...this.document.querySelectorAll("[data-image-viewer-open]")];
+    const index = openers.indexOf(this.currentOpener());
+    const opener = index === -1 ? null : openers[index + step];
+    const source = opener?.querySelector("img");
+    if (source) this.open(source, opener);
+  }
+
   close() {
     if (!this.isOpen) return;
 
-    let opener = this.opener;
-    if (opener?.isConnected === false) {
-      let article = this.openerArticle;
-      if (article?.isConnected === false && this.openerMessageFingerprint) {
-        article = [...this.document.querySelectorAll("article")]
-          .find((candidate) => candidate.dataset.messageFingerprint === this.openerMessageFingerprint);
-      }
-      opener = article?.querySelectorAll("[data-image-viewer-open]")[this.openerIndex] || this.document.querySelector("#conversation-scroll");
-      if (opener?.isConnected === false) opener = null;
-    }
-
+    const opener = this.currentOpener() || this.document.querySelector("#conversation-scroll");
     this.isOpen = false;
+    this.conversationObserver?.disconnect();
     this.viewer.hidden = true;
     this.pointers.clear();
     this.pointerStartedOnBackdrop = null;
@@ -147,8 +187,7 @@ export class ImageViewerController {
     this.image.removeAttribute("src");
     this.downloadLink?.removeAttribute("href");
     this.downloadLink?.removeAttribute("download");
-    if (this.retainedObjectURL) this.window.URL?.revokeObjectURL(this.retainedObjectURL);
-    this.retainedObjectURL = null;
+    this.releaseObjectURL();
     this.sourceURL = null;
     this.opener = null;
     this.openerArticle = null;
@@ -162,6 +201,11 @@ export class ImageViewerController {
 
     this.retainedObjectURL = url;
     return true;
+  }
+
+  releaseObjectURL() {
+    if (this.retainedObjectURL) this.window.URL?.revokeObjectURL(this.retainedObjectURL);
+    this.retainedObjectURL = null;
   }
 
   initializeImage() {
@@ -371,6 +415,9 @@ export class ImageViewerController {
     } else if (["+", "="].includes(event.key)) {
       event.preventDefault();
       this.zoomBy(ZOOM_STEP);
+    } else if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
+      event.preventDefault();
+      this.showAdjacent(event.key === "ArrowLeft" ? -1 : 1);
     } else if (event.key === "-") {
       event.preventDefault();
       this.zoomBy(1 / ZOOM_STEP);
@@ -386,8 +433,8 @@ export class ImageViewerController {
   }
 
   trapFocus(event) {
-    const controls = [this.closeButton, this.zoomOutButton, this.zoomInButton, this.actualSizeButton, this.fitButton, this.downloadLink]
-      .filter((control) => control && !control.disabled);
+    const controls = [this.closeButton, this.previousButton, this.nextButton, this.zoomOutButton, this.zoomInButton, this.actualSizeButton, this.fitButton, this.downloadLink]
+      .filter((control) => control && !control.disabled && !control.hidden);
     if (controls.length === 0) return;
 
     const current = controls.indexOf(this.document.activeElement);

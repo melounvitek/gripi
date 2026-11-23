@@ -179,7 +179,7 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
   await expect(viewer).toBeVisible();
   await expect(viewer).not.toHaveAttribute("data-load-error", "true");
-  const controls = viewer.locator("button, [data-image-viewer-download]");
+  const controls = viewer.locator("button:visible, [data-image-viewer-download]");
   const sizes = await controls.evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect()).map(({ width, height }) => ({ width, height })));
   expect(sizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
 
@@ -230,6 +230,46 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   await expect(viewer).toBeVisible();
   await viewer.locator("[data-image-viewer-stage]").tap({ position: { x: 10, y: 10 } });
   await expect(viewer).toBeHidden();
+});
+
+test("step between conversation images on the first mobile tap and with arrow keys", async ({ page }) => {
+  await page.goto("/?show_all_sessions=1");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("link", { name: new RegExp(sessions.imageViewer) }).tap();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.imageViewer })).toBeVisible();
+
+  const files = [];
+  for (const [index, name] of ["first-image.png", "second-image.png"].entries()) {
+    files.push({ name, mimeType: "image/png", buffer: await page.screenshot({ clip: { x: 0, y: 0, width: 100 + index * 50, height: 100 } }) });
+  }
+  await page.locator("#image-input").setInputFiles(files);
+  const prompt = "Compare these mobile images";
+  await sendPrompt(page, prompt);
+  await expectRunFinished(page);
+
+  const thumbnails = message(page, "user", prompt).getByRole("button", { name: /full size/ });
+  await expect(thumbnails).toHaveCount(2);
+  const sources = await thumbnails.locator("img").evaluateAll((images) => images.map((image) => image.src));
+  await thumbnails.first().tap();
+
+  const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
+  const shown = viewer.locator("[data-image-viewer-image]");
+  const position = viewer.locator("[data-image-viewer-position]");
+  const next = viewer.getByRole("button", { name: "Next image" });
+  await expect.poll(() => shown.evaluate((image) => image.src)).toBe(sources[0]);
+  await expect(next).toBeEnabled();
+
+  await next.tap();
+  await expect.poll(() => shown.evaluate((image) => image.src)).toBe(sources[1]);
+  await expect.poll(() => shown.evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(next).toBeDisabled();
+  await expect(position).toHaveText(/^(\d+) \/ \1$/);
+
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(() => shown.evaluate((image) => image.src)).toBe(sources[0]);
+  await viewer.getByRole("button", { name: "Close image viewer" }).tap();
+  await expect(viewer).toBeHidden();
+  await expect(thumbnails.first()).toBeFocused();
 });
 
 test("do not highlight unopened sessions on coarse pointers", async ({ page }) => {
