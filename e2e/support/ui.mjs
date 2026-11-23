@@ -39,7 +39,8 @@ const stopLabel = /^Abort running (Pi|Hermes)$/;
 export async function sendPrompt(page, text) {
   const composer = page.getByLabel(composerLabel);
   await composer.fill(text);
-  const sendButton = page.getByRole("button", { name: /Send$/ });
+  // The page names the button "Send", and its script renames it "Send message" once it updates the composer.
+  const sendButton = page.getByRole("button", { name: /Send( message)?$/ });
   if (await sendButton.isVisible()) await sendButton.click();
   else await composer.press("Enter");
 }
