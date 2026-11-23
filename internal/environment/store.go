@@ -61,15 +61,20 @@ func (store *Store) ChangedAt(userID string) time.Time {
 	return store.changedAt[userID]
 }
 
-// Save replaces the value of a saved name in place and appends a new name. A previousName renames in place.
+// Save replaces the value of a saved name in place and appends a new name. A previousName renames in place, and
+// an empty value keeps its saved value, which the browser never gets.
 func (store *Store) Save(userID, previousName string, variable Variable) ([]Variable, error) {
 	return store.update(userID, func(variables []Variable) ([]Variable, error) {
+		previous := indexOf(variables, previousName)
+		if variable.Value == "" && previous >= 0 {
+			variable.Value = variables[previous].Value
+		}
 		if previousName != "" && previousName != variable.Name {
 			if indexOf(variables, variable.Name) >= 0 {
 				return nil, &InvalidError{variable.Name + " is already set."}
 			}
-			if index := indexOf(variables, previousName); index >= 0 {
-				variables[index].Name = variable.Name
+			if previous >= 0 {
+				variables[previous].Name = variable.Name
 			}
 		}
 		return save(variables, variable)

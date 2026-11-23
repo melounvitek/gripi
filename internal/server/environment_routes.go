@@ -11,7 +11,6 @@ import (
 
 func (app *application) registerEnvironmentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /environment", app.environmentVariables)
-	mux.HandleFunc("GET /environment/value", app.environmentValue)
 	mux.HandleFunc("POST /environment/variable", app.saveEnvironmentVariable)
 	mux.HandleFunc("POST /environment/variables", app.saveEnvironmentVariables)
 	mux.HandleFunc("POST /environment/variable/delete", app.deleteEnvironmentVariable)
@@ -51,21 +50,6 @@ func (app *application) environmentVariables(response http.ResponseWriter, reque
 	writeEnvironmentVariables(response, variables, nil, err)
 }
 
-func (app *application) environmentValue(response http.ResponseWriter, request *http.Request) {
-	variables, err := app.environment.Variables(app.environmentUser(request))
-	if err != nil {
-		writeEnvironmentError(response, err)
-		return
-	}
-	for _, variable := range variables {
-		if variable.Name == request.URL.Query().Get("name") {
-			writeJSON(response, map[string]string{"value": variable.Value})
-			return
-		}
-	}
-	http.NotFound(response, request)
-}
-
 func (app *application) saveEnvironmentVariable(response http.ResponseWriter, request *http.Request) {
 	if !parseForm(response, request) {
 		return
@@ -92,15 +76,25 @@ func (app *application) deleteEnvironmentVariable(response http.ResponseWriter, 
 	writeEnvironmentVariables(response, variables, nil, err)
 }
 
+type listedVariable struct {
+	Name   string `json:"name"`
+	Ending string `json:"ending,omitempty"`
+}
+
 // writeEnvironmentVariables answers with the names in saved order, never the values, and the extra fields.
 func writeEnvironmentVariables(response http.ResponseWriter, variables []environment.Variable, extra map[string]any, err error) {
 	if err != nil {
 		writeEnvironmentError(response, err)
 		return
 	}
-	names := make([]map[string]string, 0, len(variables))
+	names := make([]listedVariable, 0, len(variables))
 	for _, variable := range variables {
-		names = append(names, map[string]string{"name": variable.Name})
+		listed := listedVariable{Name: variable.Name}
+		// The last two characters tell long values apart; a short value would give too much of itself away.
+		if characters := []rune(variable.Value); len(characters) >= 8 {
+			listed.Ending = string(characters[len(characters)-2:])
+		}
+		names = append(names, listed)
 	}
 	payload := map[string]any{"variables": names}
 	maps.Copy(payload, extra)

@@ -19,7 +19,8 @@ const GITHUB_LINES = [
 ];
 // Every row starts with the cursor glyph, which shows on the selected one only.
 const ADD = "→+ add variable";
-const variable = (name) => `→${name}••••••••`;
+// Only the last two characters of a long value show.
+const variable = (name, ending) => `→${name}••••••${ending}`;
 const DANGER = "rgb(204, 102, 102)";
 
 const sidebar = (page) => page.getByRole("complementary", { name: "Sessions" });
@@ -92,51 +93,46 @@ test("the key button and the Ctrl+K command open the dialog", async ({ page, isM
   await expect(rows(page).first()).toBeFocused();
 });
 
-test("a variable is added, changed, renamed and removed, and its value stays out of the page", async ({ page, isMobile }) => {
+test("a variable is added, changed, renamed and removed, and its value never reaches the browser", async ({ page, isMobile }) => {
+  const answers = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname.startsWith("/environment")) answers.push(response.text().catch(() => ""));
+  });
   await open(page, isMobile);
   await activate(row(page, "+ add variable"), isMobile);
   await expect(dialog(page)).toContainText("enter save · esc cancel");
-  // There is nothing to remove yet.
+  // There is nothing to remove or keep yet.
   await expect(button(page, "remove")).toBeHidden();
+  await expect(valueInput(page)).toHaveAttribute("placeholder", "");
   await nameInput(page).fill("E2E_TOKEN");
   await valueInput(page).fill("fake-first-value");
   await activate(button(page, "save"), isMobile);
   await expect(status(page)).toHaveText("Saved · used from your next message.");
-  await expect(rows(page)).toHaveText([variable("E2E_TOKEN"), ADD, /GitHub/]);
-  expect(await pageHolds(page, "fake-first-value")).toBe(false);
+  await expect(rows(page)).toHaveText([variable("E2E_TOKEN", "ue"), ADD, /GitHub/]);
 
-  // Only the form of the opened row gets the value.
+  // The form gets no value: a new one replaces the saved value, and an empty one keeps it.
   await activate(row(page, "E2E_TOKEN"), isMobile);
   await expect(nameInput(page)).toHaveValue("E2E_TOKEN");
-  await expect(valueInput(page)).toHaveValue("fake-first-value");
-  await valueInput(page).fill("fake-second-value");
+  await expect(valueInput(page)).toHaveValue("");
+  await expect(valueInput(page)).toHaveAttribute("placeholder", "••••••ue · leave empty to keep");
+  expect(await pageHolds(page, "fake-first-value")).toBe(false);
+  await valueInput(page).fill("fake-second-token");
   await activate(button(page, "save"), isMobile);
-  await expect(valueInput(page)).toBeHidden();
+  await expect(rows(page)).toHaveText([variable("E2E_TOKEN", "en"), ADD, /GitHub/]);
 
   await activate(row(page, "E2E_TOKEN"), isMobile);
-  await expect(valueInput(page)).toHaveValue("fake-second-value");
   await nameInput(page).fill("E2E_RENAMED");
   await activate(button(page, "save"), isMobile);
-  await expect(rows(page)).toHaveText([variable("E2E_RENAMED"), ADD, /GitHub/]);
+  await expect(rows(page)).toHaveText([variable("E2E_RENAMED", "en"), ADD, /GitHub/]);
 
-  // Cancelling the form and closing the dialog both drop the value.
-  await activate(row(page, "E2E_RENAMED"), isMobile);
-  await expect(valueInput(page)).toHaveValue("fake-second-value");
-  await activate(button(page, "cancel"), isMobile);
-  await expect(valueInput(page)).toBeHidden();
-  expect(await pageHolds(page, "fake-second-value")).toBe(false);
-  await activate(row(page, "E2E_RENAMED"), isMobile);
-  await expect(valueInput(page)).toHaveValue("fake-second-value");
-  await activate(button(page, "Close"), isMobile);
-  await expect(dialog(page)).toBeHidden();
-  expect(await pageHolds(page, "fake-second-value")).toBe(false);
-
-  await activate(key(page), isMobile);
   await activate(row(page, "E2E_RENAMED"), isMobile);
   await activate(button(page, "remove"), isMobile);
   await expect(status(page)).toHaveText("Removed · applies from your next message.");
   await expect(rows(page)).toHaveText([ADD, /GitHub/]);
   expect(await savedNames(page)).toEqual([]);
+  const answered = (await Promise.all(answers)).join("\n");
+  expect(answered).toContain("E2E_RENAMED");
+  expect(answered).not.toMatch(/fake-first-value|fake-second-token/);
 });
 
 test("what the gateway rejects is shown in its own words and the form stays open", async ({ page, isMobile }) => {
@@ -191,7 +187,7 @@ test("lines pasted into Name are saved as a block, or not at all", async ({ page
   if (isMobile) await button(page, "save").tap();
   else await page.keyboard.press("Control+Enter");
   await expect(status(page)).toHaveText("Saved 2 variables · used from your next message.");
-  await expect(rows(page)).toHaveText([variable("E2E_ONE"), variable("E2E_TWO"), ADD, /GitHub/]);
+  await expect(rows(page)).toHaveText([variable("E2E_ONE", "ne"), variable("E2E_TWO", "wo"), ADD, /GitHub/]);
 });
 
 test("the GitHub row offers the lines that are still missing", async ({ page, isMobile }) => {
@@ -207,7 +203,7 @@ test("the GitHub row offers the lines that are still missing", async ({ page, is
   await add(page, isMobile, "GH_TOKEN", "fake-github-token");
   const warning = dialog(page).getByText("GH_TOKEN covers gh only. Commits and git push still use the gateway's identity.");
   await expect(warning).toHaveCSS("color", "rgb(240, 198, 116)");
-  await expect(rows(page)).toHaveText([variable("GH_TOKEN"), ADD, "→+ add the rest for GitHub"]);
+  await expect(rows(page)).toHaveText([variable("GH_TOKEN", "en"), ADD, "→+ add the rest for GitHub"]);
   await activate(row(page, "+ add the rest for GitHub"), isMobile);
   const missing = GITHUB_LINES.slice(2);
   await expect(block(page)).toHaveValue(missing.join("\n"));
@@ -255,7 +251,6 @@ test("arrows move the cursor, Enter opens a row, and Escape closes the form befo
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await expect(valueInput(page)).toBeFocused();
-  await expect(valueInput(page)).toHaveValue("fake-value");
   // The arrows belong to the field while the form is open.
   await page.keyboard.press("ArrowDown");
   await expect(valueInput(page)).toBeFocused();
@@ -288,7 +283,7 @@ test("on a phone the first tap opens the dialog and a row, and every target is t
   await valueInput(page).fill("fake-value");
   await button(page, "save").tap();
   await row(page, "E2E_TOKEN").tap();
-  await expect(valueInput(page)).toHaveValue("fake-value");
+  await expect(valueInput(page)).toBeVisible();
 
   for (const target of await dialog(page).locator("button:visible").all()) {
     expect((await target.boundingBox()).height, await target.textContent()).toBeGreaterThanOrEqual(44);

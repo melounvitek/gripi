@@ -19,6 +19,7 @@ import (
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/config"
+	"github.com/melounvitek/gripi/internal/environment"
 	"github.com/melounvitek/gripi/internal/server"
 )
 
@@ -56,15 +57,9 @@ func TestMultiUserVariablesStayWithTheirOwner(t *testing.T) {
 	if names := fixture.names(t, other); len(names) != 0 {
 		t.Fatalf("another user lists %v", names)
 	}
-	if value := fixture.get("/environment/value?name=ENVTEST_TOKEN", other); value.Code != http.StatusNotFound {
-		t.Fatalf("another user reads the value: %d %s", value.Code, value.Body.String())
-	}
 	fixture.save(t, other, "ENVTEST_TOKEN", "other token")
 	if removed := fixture.post("/environment/variable/delete", url.Values{"name": {"ENVTEST_TOKEN"}}, other); removed.Code != http.StatusOK {
 		t.Fatalf("delete = %d %s", removed.Code, removed.Body.String())
-	}
-	if value := fixture.value(t, owner, "ENVTEST_TOKEN"); value != "owner token" {
-		t.Fatalf("owner's value after another user saved and deleted the same name = %q", value)
 	}
 
 	fixture.startPi(t, ownerSession, owner)
@@ -134,7 +129,7 @@ func TestEnvironmentSavingRules(t *testing.T) {
 	}
 	assertValue := func(name, expected string) {
 		t.Helper()
-		if value := fixture.value(t, "", name); value != expected {
+		if value := fixture.value(t, name); value != expected {
 			t.Fatalf("%s = %q, want %q", name, value, expected)
 		}
 	}
@@ -152,7 +147,7 @@ func TestEnvironmentSavingRules(t *testing.T) {
 	fixture.save(t, "", "SECOND", "two")
 	fixture.save(t, "", "THIRD", "three")
 	list := fixture.get("/environment", "")
-	if list.Code != http.StatusOK || list.Body.String() != `{"variables":[{"name":"FIRST"},{"name":"SECOND"},{"name":"THIRD"}]}` {
+	if list.Code != http.StatusOK || list.Body.String() != `{"variables":[{"name":"FIRST","ending":"ne"},{"name":"SECOND"},{"name":"THIRD"}]}` {
 		t.Fatalf("list = %d %s", list.Code, list.Body.String())
 	}
 	if !strings.Contains(list.Header().Get("Cache-Control"), "no-store") || list.Header().Get("Content-Type") != "application/json" {
@@ -171,7 +166,12 @@ func TestEnvironmentSavingRules(t *testing.T) {
 	assertNames("append", "FIRST", "SECOND", "THIRD", "FOURTH")
 	assertValue("FOURTH", "four")
 
-	renamed := fixture.post("/environment/variable", url.Values{"name": {"RENAMED"}, "value": {"second"}, "previous_name": {"SECOND"}}, "")
+	// The browser never gets a value, so an empty one keeps the saved value, also through a rename.
+	if kept := fixture.post("/environment/variable", url.Values{"name": {"FOURTH"}, "value": {" "}, "previous_name": {"FOURTH"}}, ""); kept.Code != http.StatusOK {
+		t.Fatalf("keep = %d %s", kept.Code, kept.Body.String())
+	}
+	assertValue("FOURTH", "four")
+	renamed := fixture.post("/environment/variable", url.Values{"name": {"RENAMED"}, "value": {""}, "previous_name": {"SECOND"}}, "")
 	if renamed.Code != http.StatusOK {
 		t.Fatalf("rename = %d %s", renamed.Code, renamed.Body.String())
 	}
@@ -187,12 +187,11 @@ func TestEnvironmentSavingRules(t *testing.T) {
 	assertValue("FIRST", "secret one")
 
 	removed := fixture.post("/environment/variable/delete", url.Values{"name": {"THIRD"}}, "")
-	if removed.Code != http.StatusOK || removed.Body.String() != `{"variables":[{"name":"FIRST"},{"name":"RENAMED"},{"name":"FOURTH"}]}` {
+	if removed.Code != http.StatusOK || removed.Body.String() != `{"variables":[{"name":"FIRST","ending":"ne"},{"name":"RENAMED"},{"name":"FOURTH"}]}` {
 		t.Fatalf("delete = %d %s", removed.Code, removed.Body.String())
 	}
-	if value := fixture.get("/environment/value?name=THIRD", ""); value.Code != http.StatusNotFound {
-		t.Fatalf("deleted value = %d %s", value.Code, value.Body.String())
-	}
+	// With the variable removed in another tab, there is no value to keep.
+	assertRejected(fixture.post("/environment/variable", url.Values{"name": {"THIRD"}, "value": {""}, "previous_name": {"THIRD"}}, ""), "THIRD has no value.")
 
 	assertRejected(fixture.post("/environment/variables", url.Values{"text": {"FIRST=changed\nFIFTH=five\nnot a pair\n"}}, ""), "Line 3: expected NAME=value.")
 	assertNames("rejected block", "FIRST", "RENAMED", "FOURTH")
@@ -200,11 +199,26 @@ func TestEnvironmentSavingRules(t *testing.T) {
 
 	block := "  # a comment = ignored\r\n\r\n  FIFTH = five  \r\nFIRST='single quoted'\nSIXTH=\"double quoted\"\nSEVENTH=a=b\nEIGHTH='mismatched\"\n"
 	saved := fixture.post("/environment/variables", url.Values{"text": {block}}, "")
-	if saved.Code != http.StatusOK || saved.Body.String() != `{"saved":5,"variables":[{"name":"FIRST"},{"name":"RENAMED"},{"name":"FOURTH"},{"name":"FIFTH"},{"name":"SIXTH"},{"name":"SEVENTH"},{"name":"EIGHTH"}]}` {
+	if saved.Code != http.StatusOK || saved.Body.String() != `{"saved":5,"variables":[{"name":"FIRST","ending":"ed"},{"name":"RENAMED"},{"name":"FOURTH"},{"name":"FIFTH"},{"name":"SIXTH","ending":"ed"},{"name":"SEVENTH"},{"name":"EIGHTH","ending":"d\""}]}` {
 		t.Fatalf("block = %d %s", saved.Code, saved.Body.String())
 	}
 	for name, expected := range map[string]string{"FIFTH": "five", "FIRST": "single quoted", "SIXTH": "double quoted", "SEVENTH": "a=b", "EIGHTH": `'mismatched"`} {
 		assertValue(name, expected)
+	}
+}
+
+func TestEnvironmentRoutesSendOnlyTheEndingOfLongValues(t *testing.T) {
+	fixture := newEnvironmentFixture(t, false)
+	fixture.save(t, "", "SHORT", "1234567")
+	fixture.save(t, "", "LONG", "12345678")
+	fixture.save(t, "", "ACCENTED", "žluťoučký")
+	list := fixture.get("/environment", "")
+	if list.Code != http.StatusOK || list.Body.String() != `{"variables":[{"name":"SHORT"},{"name":"LONG","ending":"78"},{"name":"ACCENTED","ending":"ký"}]}` {
+		t.Fatalf("list = %d %s", list.Code, list.Body.String())
+	}
+	// The edit form once fetched the whole value from here.
+	if value := fixture.get("/environment/value?name=LONG", ""); value.Code != http.StatusNotFound || strings.Contains(value.Body.String(), "12345678") {
+		t.Fatalf("value route = %d %s", value.Code, value.Body.String())
 	}
 }
 
@@ -283,7 +297,6 @@ func TestMalformedEnvironmentStateIsLeftUntouchedAndStopsPi(t *testing.T) {
 
 	for _, response := range []*httptest.ResponseRecorder{
 		fixture.get("/environment", ""),
-		fixture.get("/environment/value?name=ENVTEST_TOKEN", ""),
 		fixture.post("/environment/variable", url.Values{"name": {"ENVTEST_TOKEN"}, "value": {"value"}}, ""),
 		fixture.post("/environment/variables", url.Values{"text": {"ENVTEST_TOKEN=value"}}, ""),
 		fixture.post("/environment/variable/delete", url.Values{"name": {"ENVTEST_TOKEN"}}, ""),
@@ -535,24 +548,28 @@ func (fixture *environmentFixture) names(t *testing.T, cookie string) []string {
 	}
 	names := []string{}
 	for _, variable := range payload.Variables {
-		if len(variable) != 1 {
-			t.Fatalf("listed variable = %v, want only its name", variable)
+		if _, found := variable["value"]; found {
+			t.Fatalf("listed variable = %v, want no value", variable)
 		}
 		names = append(names, variable["name"])
 	}
 	return names
 }
 
-func (fixture *environmentFixture) value(t *testing.T, cookie, name string) string {
+// value reads what the gateway saved, which no route gives the browser.
+func (fixture *environmentFixture) value(t *testing.T, name string) string {
 	t.Helper()
-	response := fixture.get("/environment/value?name="+url.QueryEscape(name), cookie)
-	var payload struct {
-		Value string `json:"value"`
+	variables, err := environment.NewStore(fixture.cfg.EnvironmentPath).Variables("")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Cache-Control"), "no-store") || json.Unmarshal(response.Body.Bytes(), &payload) != nil {
-		t.Fatalf("value of %s = %d %#v %s", name, response.Code, response.Header(), response.Body.String())
+	for _, variable := range variables {
+		if variable.Name == name {
+			return variable.Value
+		}
 	}
-	return payload.Value
+	t.Fatalf("%s is not saved", name)
+	return ""
 }
 
 // startPi makes the gateway start Pi for the session and waits until it answers.
