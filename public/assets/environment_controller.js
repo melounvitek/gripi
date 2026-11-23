@@ -34,7 +34,7 @@ export class EnvironmentController {
     this.warning = this.modal.querySelector("[data-environment-warning]");
     this.status = this.modal.querySelector("[data-environment-status]");
     this.keys = this.modal.querySelector("[data-environment-keys]");
-    // Null until the saved names arrive. Values are never kept: a row's value is fetched into its form.
+    // Null until the saved names arrive. The gateway never sends values, only the end of a long one.
     this.names = null;
     this.cursor = 0;
     this.operation = 0;
@@ -75,8 +75,9 @@ export class EnvironmentController {
       this.setStatus(payload?.error || "Could not read or save environment variables. Try again.", "error");
       return null;
     }
-    // Every answer but a value lists the saved names.
-    if (payload.variables) this.names = payload.variables.map(({ name }) => name);
+    // Every answer lists the saved names, with the last two characters of long values.
+    this.names = payload.variables.map(({ name }) => name);
+    this.masks = new Map(payload.variables.map(({ name, ending }) => [name, ending ? `••••••${ending}` : DOTS]));
     return payload;
   }
 
@@ -114,7 +115,7 @@ export class EnvironmentController {
     const github = this.names ? githubBlock(this.names) : "";
     if (this.names) {
       for (const name of this.names) {
-        const value = this.part("environment-value", DOTS);
+        const value = this.part("environment-value", this.masks.get(name));
         value.setAttribute("aria-hidden", "true");
         this.row(name, () => this.edit(name)).append(value);
       }
@@ -132,7 +133,7 @@ export class EnvironmentController {
     movePickerCursor(this.list, this.cursor);
   }
 
-  // Also runs when the dialog closes, so no value outlives the form that showed it.
+  // Also runs when the dialog closes, so no typed value outlives its form.
   closeForm() {
     this.operation += 1;
     this.form.hidden = this.block.hidden = true;
@@ -150,18 +151,13 @@ export class EnvironmentController {
     if (this.window.matchMedia?.("(pointer: fine)").matches !== false) field.focus();
   }
 
-  async edit(name) {
+  edit(name) {
     // Another row's form may still be open.
     this.showList();
-    let value = "";
-    if (name) {
-      const payload = await this.request(`/environment/value?name=${encodeURIComponent(name)}`);
-      if (!payload) return;
-      value = payload.value;
-    }
     this.previousName = name;
     this.nameInput.value = name;
-    this.valueInput.value = value;
+    // The form never gets the saved value; the gateway keeps it when the field stays empty.
+    this.valueInput.placeholder = name ? `${this.masks.get(name)} · leave empty to keep` : "";
     this.removeButton.hidden = this.removeButton.nextElementSibling.hidden = !name;
     this.showEditor(this.form, name ? this.valueInput : this.nameInput);
   }

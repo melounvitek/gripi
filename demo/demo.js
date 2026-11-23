@@ -1107,7 +1107,7 @@
     event.preventDefault();
   });
 
-  // The real Environment dialog, with this page in the gateway's place. A visitor may paste a real token here, so values live in this map only: never in storage, and in a field only while its form is open.
+  // The real Environment dialog, with this page in the gateway's place. A visitor may paste a real token here, so values live in this map only: never in storage, and in a field only while typed in.
   let environmentVariables = new Map();
   const environmentModal = document.querySelector('[data-modal="environment-modal"]');
   // The dialog's parts, each under the name its data-environment-… attribute ends with.
@@ -1117,9 +1117,16 @@
 
   function setEnvironmentStatus(text, state = "") { environment.status.textContent = text; environment.status.hidden = !text; environment.status.dataset.state = state; }
 
-  function environmentRow(label, run, add) {
-    const row = document.createElement("button"); row.type = "button"; row.className = `picker-row picker-option environment-row${add ? " environment-add" : ""}`; row.setAttribute("role", "option");
-    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["environment-name", label], ...(add ? [] : [["environment-value", "••••••••", true]])]) {
+  // What the gateway shows of a value: the last two characters of a long one.
+  function environmentMask(name) {
+    const characters = [...environmentVariables.get(name)];
+    return characters.length >= 8 ? `••••••${characters.slice(-2).join("")}` : "••••••••";
+  }
+
+  // A row with a mask is a saved variable's; one without adds variables.
+  function environmentRow(label, run, mask) {
+    const row = document.createElement("button"); row.type = "button"; row.className = `picker-row picker-option environment-row${mask ? "" : " environment-add"}`; row.setAttribute("role", "option");
+    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["environment-name", label], ...(mask ? [["environment-value", mask, true]] : [])]) {
       const part = document.createElement("span"); part.className = className; part.textContent = text; if (decorative) part.setAttribute("aria-hidden", "true"); row.append(part);
     }
     row.addEventListener("click", () => { environmentCursor = [...environment.list.children].indexOf(row); run(); });
@@ -1138,11 +1145,11 @@
     const names = [...environmentVariables.keys()];
     const github = githubBlock(names);
     environment.list.replaceChildren();
-    for (const name of names) environmentRow(name, () => editEnvironmentVariable(name));
-    environmentRow("+ add variable", () => editEnvironmentVariable(""), true);
+    for (const name of names) environmentRow(name, () => editEnvironmentVariable(name), environmentMask(name));
+    environmentRow("+ add variable", () => editEnvironmentVariable(""));
     if (github) {
       const none = github === githubBlock([]);
-      const row = environmentRow(none ? "+ add GitHub variables" : "+ add the rest for GitHub", () => openEnvironmentBlock(github, true), true);
+      const row = environmentRow(none ? "+ add GitHub variables" : "+ add the rest for GitHub", () => openEnvironmentBlock(github, true));
       if (none) { const detail = document.createElement("span"); detail.className = "environment-add-detail"; detail.textContent = "gh, commits and push as you"; row.lastChild.append(" ", detail); }
     }
     environment.description.hidden = environment.list.hidden = environment.keys.hidden = false;
@@ -1151,7 +1158,7 @@
     moveEnvironmentCursor();
   }
 
-  // Also runs when the dialog closes, so no value outlives the form that showed it.
+  // Also runs when the dialog closes, so no typed value outlives its form.
   function closeEnvironmentForm() { environment.form.hidden = environment.block.hidden = true; environment.form.reset(); environment.block.reset(); }
 
   // The form opens under the list; the block takes the list's place.
@@ -1169,7 +1176,8 @@
     showEnvironmentList();
     environmentPreviousName = name;
     environment.name.value = name;
-    environment.value.value = environmentVariables.get(name) || "";
+    // As on the gateway, the form never gets the saved value, which an empty field keeps.
+    environment.value.placeholder = name ? `${environmentMask(name)} · leave empty to keep` : "";
     environment.remove.hidden = environment.remove.nextElementSibling.hidden = !name;
     showEnvironmentEditor(environment.form, name ? environment.value : environment.name);
   }
@@ -1199,7 +1207,7 @@
       // A block leaves the cursor on "+ add variable"; a single variable keeps it on its row.
       environmentCursor = environmentVariables.size;
     } else {
-      const name = environment.name.value.trim(), value = environment.value.value.trim();
+      const name = environment.name.value.trim(), value = environment.value.value.trim() || environmentVariables.get(environmentPreviousName) || "";
       const renamed = environmentPreviousName && environmentPreviousName !== name;
       const error = renamed && environmentVariables.has(name) ? `${name} is already set.` : environmentError(name, value);
       if (error) return setEnvironmentStatus(error, "error");
