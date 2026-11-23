@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,9 +17,9 @@ import (
 func TestSudoRequestNotifiesAtOnceUnlessTheSessionIsFocused(t *testing.T) {
 	handler := newPushTestHandler(t, false, true)
 	path := writeNotificationSession(t, handler.app.config.SessionsRoot, "Server setup")
-	delivered := make(chan map[string]string, 10)
+	delivered := make(chan map[string]any, 10)
 	handler.app.pushNotifier = pushNotifierFunc(func(_ context.Context, owner string, payload []byte) error {
-		var notification map[string]string
+		var notification map[string]any
 		if err := json.Unmarshal(payload, &notification); err != nil {
 			return err
 		}
@@ -25,8 +27,13 @@ func TestSudoRequestNotifiesAtOnceUnlessTheSessionIsFocused(t *testing.T) {
 		delivered <- notification
 		return nil
 	})
-	// ask runs gripi sudo until the returned function stops it, once its request shows.
-	ask := func(argv ...string) (stop func()) {
+	other := filepath.Join(handler.app.config.SessionsRoot, "other")
+	if err := os.Mkdir(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	other = writeNotificationSession(t, other, "Other")
+	// ask runs gripi sudo in a session until the returned function stops it, once its request shows.
+	ask := func(path string, argv ...string) (stop func()) {
 		t.Helper()
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -46,7 +53,7 @@ func TestSudoRequestNotifiesAtOnceUnlessTheSessionIsFocused(t *testing.T) {
 			<-done
 		}
 	}
-	next := func() map[string]string {
+	next := func() map[string]any {
 		t.Helper()
 		select {
 		case notification := <-delivered:
@@ -56,25 +63,31 @@ func TestSudoRequestNotifiesAtOnceUnlessTheSessionIsFocused(t *testing.T) {
 			return nil
 		}
 	}
-	focus := func(focused bool, sequence int) {
-		t.Helper()
-		body := pushJSON(t, map[string]any{"client_id": "window", "session": path, "focused": focused, "sequence": sequence})
-		if response := pushRequest(handler, http.MethodPut, "/web-push/presence", body, ""); response.Code != http.StatusNoContent {
-			t.Fatalf("presence = %d %s", response.Code, response.Body)
-		}
-	}
 
-	ask("apt-get", "install", "-y", "two words")()
+	stop := ask(path, "apt-get", "install", "-y", "two words")
 	first := next()
-	if first["type"] != "gripi-notification" || first["owner"] != singleUserOwner || first["title"] != "Server setup" || first["body"] != `sudo: apt-get install -y "two words"` || first["url"] != "/?session="+url.QueryEscape(path) || !strings.HasPrefix(first["tag"], "gripi-sudo:") {
+	stop()
+	if first["type"] != "gripi-notification" || first["owner"] != singleUserOwner || first["title"] != "Server setup" || first["body"] != `sudo: apt-get install -y "two words"` || first["plain"] != true || first["url"] != "/?session="+url.QueryEscape(path) || !strings.HasPrefix(first["tag"].(string), "gripi-sudo:") {
 		t.Fatalf("notification = %v", first)
 	}
-	focus(true, 1)
-	ask("echo", "seen")()
-	focus(false, 2)
-	ask("echo", "unseen")()
-	if last := next(); last["body"] != "sudo: echo unseen" || last["tag"] == first["tag"] {
+	focus := pushJSON(t, map[string]any{"client_id": "window", "session": path, "focused": true, "sequence": 1})
+	if response := pushRequest(handler, http.MethodPut, "/web-push/presence", focus, ""); response.Code != http.StatusNoContent {
+		t.Fatalf("presence = %d %s", response.Code, response.Body)
+	}
+	ask(path, "echo", "seen")()
+	stop = ask(other, "echo", "unseen")
+	if last := next(); last["body"] != "sudo: echo unseen" || last["title"] != "Other" || last["tag"] == first["tag"] {
 		t.Fatalf("notification after one for a focused session = %v", last)
+	}
+	stop()
+
+	// sudo asking again after a wrong password notifies too.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &sudoRun{ctx: ctx, request: &sudoRequest{view: sudoRequestView{Session: other, Display: "echo again"}}, delivered: true}
+	go handler.app.sudoRequests.password(ctx, run)
+	if again := next(); again["body"] != "sudo: echo again" {
+		t.Fatalf("notification of asking again = %v", again)
 	}
 }
 

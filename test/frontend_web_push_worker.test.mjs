@@ -38,6 +38,19 @@ test("completed-reply pushes are suppressed only for the focused target session"
   }]);
 });
 
+test("a plain push shows its body as it is, such as the command of a sudo request", async () => {
+  const shown = [];
+  await globalThis.gripiDisplayPushNotification({
+    type: "gripi-notification",
+    title: "Server setup",
+    body: "sudo: find /srv -name \"*secret*\" -exec echo `id` <b> {} +",
+    plain: true,
+    url: "/?session=%2Fsessions%2Fsetup.jsonl"
+  }, fakeWorker(shown, []));
+
+  assert.equal(shown[0][1].body, "sudo: find /srv -name \"*secret*\" -exec echo `id` <b> {} +");
+});
+
 test("test pushes remain visible while the notification page is focused", async () => {
   const shown = [];
   const worker = fakeWorker(shown, [{ focused: true, url: "https://gripi.test/notification-test" }]);

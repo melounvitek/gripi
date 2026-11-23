@@ -21,7 +21,7 @@
 
     const test = data.type === "gripi-notification-test";
     await worker.registration.showNotification(data.title || "Gripi", {
-      body: scope.gripiNotificationReplyPreview(data.body || "Notifications are working."),
+      body: data.plain ? data.body : scope.gripiNotificationReplyPreview(data.body || "Notifications are working."),
       tag: data.tag || (test ? "gripi-notification-test" : "gripi-notification"),
       renotify: false,
       icon: "/app-icon.svg",

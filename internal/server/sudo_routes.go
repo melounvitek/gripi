@@ -245,7 +245,7 @@ func (requests *sudoRequests) ask(ctx context.Context, view sudoRequestView) (*s
 		return nil, err
 	}
 	if requests.notify != nil {
-		requests.notify(pending.view)
+		go requests.notify(pending.view)
 	}
 	timeout := time.NewTimer(time.Until(pending.view.ExpiresAt))
 	defer timeout.Stop()
@@ -418,13 +418,17 @@ func (app *application) notifySudo(view sudoRequestView) {
 		title = agent.NotificationPreview(session.DisplayName)
 	}
 	digest := sha256.Sum256([]byte(view.ID))
-	payload, _ := json.Marshal(map[string]string{
+	// The command shows as it is, without the Markdown of a reply.
+	payload, _ := json.Marshal(map[string]any{
 		"type":  "gripi-notification",
 		"title": title,
 		"body":  agent.NotificationBody("sudo: " + view.Display),
+		"plain": true,
 		"tag":   "gripi-sudo:" + hex.EncodeToString(digest[:16]),
 		"url":   completedReplyURL(view.Session, app.agentOf(view.Session)),
 	})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	defer cancel()
 	for _, owner := range owners {
 		presenceOwner := singleUserOwner
 		if app.config.MultiUserMode {
@@ -433,13 +437,9 @@ func (app *application) notifySudo(view sudoRequestView) {
 		if app.notificationPresence.Focused(presenceOwner, view.Session) {
 			continue
 		}
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
-			defer cancel()
-			if err := app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
-				log.Printf("deliver a sudo request's notification: %v", err)
-			}
-		}()
+		if err := app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
+			log.Printf("deliver a sudo request's notification: %v", err)
+		}
 	}
 }
 
