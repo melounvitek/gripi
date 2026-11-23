@@ -285,8 +285,8 @@ export class ImageViewerController {
 
     this.image.style.transform = `translate(calc(-50% + ${this.offsetX}px), calc(-50% + ${this.offsetY}px)) scale(${this.scale})`;
     if (this.zoomValue) this.zoomValue.textContent = `${Math.round(this.scale * 100)}%`;
-    if (this.zoomOutButton) this.zoomOutButton.disabled = this.scale <= this.fitScale + 0.0001;
-    if (this.zoomInButton) this.zoomInButton.disabled = this.scale >= MAX_SCALE - 0.0001;
+    this.zoomOutButton?.setAttribute("aria-disabled", this.scale <= this.fitScale + 0.0001);
+    this.zoomInButton?.setAttribute("aria-disabled", this.scale >= MAX_SCALE - 0.0001);
   }
 
   handleWheel(event) {
@@ -434,7 +434,7 @@ export class ImageViewerController {
 
   trapFocus(event) {
     const controls = [this.closeButton, this.previousButton, this.nextButton, this.zoomOutButton, this.zoomInButton, this.actualSizeButton, this.fitButton, this.downloadLink]
-      .filter((control) => control && !control.disabled && !control.hidden);
+      .filter((control) => control && !control.hidden);
     if (controls.length === 0) return;
 
     const current = controls.indexOf(this.document.activeElement);

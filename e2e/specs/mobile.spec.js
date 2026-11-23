@@ -190,10 +190,25 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   await expect(viewer).toBeVisible();
   await viewer.getByRole("button", { name: "Fit image to screen" }).tap();
   await expect(zoomValue).toHaveText(`${fittedZoom}%`);
-  await viewer.getByRole("button", { name: "Zoom in" }).tap();
+  const zoomIn = viewer.getByRole("button", { name: "Zoom in" });
+  const restingBackground = await zoomIn.evaluate((button) => getComputedStyle(button).backgroundColor);
+  await zoomIn.tap();
   await expect.poll(async () => Number.parseInt(await zoomValue.textContent(), 10)).toBeGreaterThan(fittedZoom);
+  // Phones keep :hover on a tapped button, which this emulation clears.
+  await zoomIn.hover();
+  expect(await zoomIn.evaluate((button) => {
+    button.getAnimations().forEach((transition) => transition.finish());
+    return getComputedStyle(button).backgroundColor;
+  })).toBe(restingBackground);
   await viewer.getByRole("button", { name: "Show actual size" }).tap();
   await expect(viewer.locator("[data-image-viewer-zoom-value]")).toHaveText("100%");
+
+  const zoomOut = viewer.getByRole("button", { name: "Zoom out" });
+  await zoomOut.focus();
+  for (let step = 0; step < 20 && await zoomOut.isEnabled(); step += 1) await page.keyboard.press("Enter");
+  await expect(zoomValue).toHaveText(`${fittedZoom}%`);
+  await expect(zoomOut).toBeDisabled();
+  await expect(zoomOut).toBeFocused();
 
   let downloadPromise = page.waitForEvent("download");
   await viewer.getByRole("link", { name: "Download image" }).tap();

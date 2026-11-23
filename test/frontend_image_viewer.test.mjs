@@ -43,7 +43,7 @@ function viewerFixture() {
 
   const controller = new ImageViewerController(document, window);
   controller.bind();
-  return { controller, document, window, overlay, stage, image, close, previous, next, position, zoomValue, download };
+  return { controller, document, window, overlay, stage, image, close, previous, next, position, zoomOut, zoomValue, zoomIn, download };
 }
 
 function conversationImages(document, sources) {
@@ -101,7 +101,7 @@ function pointer(pointerId, clientX, clientY, target = null) {
 }
 
 test("image viewer opens fitted, exposes actual size, and restores focus when closed", () => {
-  const { controller, document, overlay, close, zoomValue, download } = viewerFixture();
+  const { controller, document, overlay, close, zoomOut, zoomValue, zoomIn, download } = viewerFixture();
   const { article, button, image } = sourceImage();
   document.body.append(article);
 
@@ -114,6 +114,7 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   assert.equal(download.getAttribute("href"), "/attachments/image.png");
   assert.equal(download.getAttribute("download"), "image.png");
   assert.equal(close.focused, true);
+  assert.equal(zoomOut.getAttribute("aria-disabled"), "true");
   article.dataset.messageFingerprint = "user:image:acknowledged";
 
   close.focused = false;
@@ -126,6 +127,9 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   controller.showActualSize();
   assert.equal(controller.scale, 1);
   assert.equal(zoomValue.textContent, "100%");
+  assert.deepEqual([zoomOut.getAttribute("aria-disabled"), zoomIn.getAttribute("aria-disabled")], ["false", "false"]);
+  controller.zoomBy(4);
+  assert.equal(zoomIn.getAttribute("aria-disabled"), "true");
 
   const replacementArticle = new FakeElement("article");
   const firstReplacement = new FakeElement("button", ["[data-image-viewer-open]"]);
