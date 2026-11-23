@@ -113,7 +113,6 @@ export class ImageViewerController {
     this.opener = opener || this.document.activeElement;
     this.openerArticle = this.opener?.closest?.("article") || null;
     this.openerIndex = Math.max(0, [...(this.openerArticle?.querySelectorAll("[data-image-viewer-open]") || [])].indexOf(this.opener));
-    this.openerMessageFingerprint = this.openerArticle?.dataset.messageFingerprint || null;
     this.isOpen = true;
     this.viewer.hidden = false;
     this.viewer.dataset.loading = "true";
@@ -143,9 +142,10 @@ export class ImageViewerController {
     if (this.opener?.isConnected !== false) return this.opener;
 
     let article = this.openerArticle;
-    if (article?.isConnected === false && this.openerMessageFingerprint) {
+    const fingerprint = article?.dataset.messageFingerprint;
+    if (article?.isConnected === false && fingerprint) {
       article = [...this.document.querySelectorAll("article")]
-        .find((candidate) => candidate.dataset.messageFingerprint === this.openerMessageFingerprint);
+        .find((candidate) => candidate.dataset.messageFingerprint === fingerprint);
     }
     const opener = article?.querySelectorAll("[data-image-viewer-open]")[this.openerIndex];
     return opener?.isConnected === false ? null : opener;
@@ -158,8 +158,9 @@ export class ImageViewerController {
     const index = openers.indexOf(this.currentOpener());
     const navigable = openers.length > 1 && index !== -1;
     for (const control of [this.previousButton, this.nextButton, this.position]) control.hidden = !navigable;
-    this.previousButton.disabled = index === 0;
-    this.nextButton.disabled = index === openers.length - 1;
+    // aria-disabled keeps focus on an arrow that reaches the end; stepping past the end is a no-op anyway.
+    this.previousButton.setAttribute("aria-disabled", index === 0);
+    this.nextButton.setAttribute("aria-disabled", index === openers.length - 1);
     this.position.textContent = `${index + 1} / ${openers.length}`;
   }
 
@@ -192,7 +193,6 @@ export class ImageViewerController {
     this.opener = null;
     this.openerArticle = null;
     this.openerIndex = 0;
-    this.openerMessageFingerprint = null;
     opener?.focus({ preventScroll: true });
   }
 

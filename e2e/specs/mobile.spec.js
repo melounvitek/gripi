@@ -243,9 +243,12 @@ test("step between conversation images on the first mobile tap and with arrow ke
     files.push({ name, mimeType: "image/png", buffer: await page.screenshot({ clip: { x: 0, y: 0, width: 100 + index * 50, height: 100 } }) });
   }
   await page.locator("#image-input").setInputFiles(files);
+  await expect(page.getByAltText("Attached image preview")).toHaveCount(2);
   const prompt = "Compare these mobile images";
   await sendPrompt(page, prompt);
   await expectRunFinished(page);
+  // The fake Pi echoes the prompt without its images, so step through the persisted ones.
+  await page.reload();
 
   const thumbnails = message(page, "user", prompt).getByRole("button", { name: /full size/ });
   await expect(thumbnails).toHaveCount(2);
@@ -258,12 +261,16 @@ test("step between conversation images on the first mobile tap and with arrow ke
   const next = viewer.getByRole("button", { name: "Next image" });
   await expect.poll(() => shown.evaluate((image) => image.src)).toBe(sources[0]);
   await expect(next).toBeEnabled();
+  const restingBackground = await next.evaluate((button) => getComputedStyle(button).backgroundColor);
 
   await next.tap();
   await expect.poll(() => shown.evaluate((image) => image.src)).toBe(sources[1]);
   await expect.poll(() => shown.evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
   await expect(next).toBeDisabled();
+  await expect(next).toBeFocused();
   await expect(position).toHaveText(/^(\d+) \/ \1$/);
+  await next.hover();
+  expect(await next.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe(restingBackground);
 
   await page.keyboard.press("ArrowLeft");
   await expect.poll(() => shown.evaluate((image) => image.src)).toBe(sources[0]);

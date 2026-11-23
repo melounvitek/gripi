@@ -114,6 +114,7 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   assert.equal(download.getAttribute("href"), "/attachments/image.png");
   assert.equal(download.getAttribute("download"), "image.png");
   assert.equal(close.focused, true);
+  article.dataset.messageFingerprint = "user:image:acknowledged";
 
   close.focused = false;
   document.activeElement = download;
@@ -151,14 +152,16 @@ test("image viewer steps through the conversation images with arrow buttons and 
   controller.open(second.image, second.button);
   assert.equal(position.textContent, "2 / 3");
   assert.deepEqual([previous.hidden, next.hidden, position.hidden], [false, false, false]);
-  assert.deepEqual([previous.disabled, next.disabled], [false, false]);
+  assert.deepEqual([previous.getAttribute("aria-disabled"), next.getAttribute("aria-disabled")], ["false", "false"]);
 
   controller.showActualSize();
   close.focused = false;
   click(next);
   assert.equal(download.getAttribute("href"), "/three.png");
   assert.equal(position.textContent, "3 / 3");
-  assert.equal(next.disabled, true);
+  assert.equal(next.getAttribute("aria-disabled"), "true");
+  click(next);
+  assert.equal(download.getAttribute("href"), "/three.png");
   assert.equal(controller.scale, controller.fitScale);
   assert.equal(close.focused, false);
 
@@ -168,7 +171,7 @@ test("image viewer steps through the conversation images with arrow buttons and 
   pressKey(document, "ArrowLeft");
   assert.equal(download.getAttribute("href"), "/one.png");
   assert.equal(position.textContent, "1 / 3");
-  assert.equal(previous.disabled, true);
+  assert.equal(previous.getAttribute("aria-disabled"), "true");
 
   controller.close();
   assert.equal(first.button.focused, true);
@@ -186,7 +189,7 @@ test("image viewer offers navigation once another conversation image arrives", (
   conversationImages(document, ["/two.png"]);
   window.mutationObservers.filter((observer) => observer.target).forEach((observer) => observer.callback([]));
   assert.deepEqual([previous.hidden, next.hidden, position.hidden], [false, false, false]);
-  assert.equal(next.disabled, false);
+  assert.equal(next.getAttribute("aria-disabled"), "false");
   assert.equal(position.textContent, "1 / 2");
 });
 
