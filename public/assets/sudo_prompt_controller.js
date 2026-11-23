@@ -1,5 +1,6 @@
 // How long the prompt says that its request is gone before it closes.
 const GONE_NOTICE_MS = 3000;
+const REMEMBER_PASSWORD_KEY = "gripi:sudo-remember-password";
 
 // Owns Gripi's own prompt for the password of a 'gripi sudo' request, which takes the editor's place while the session
 // has a pending request. The password lives only in the prompt's field, which every way out of the prompt clears.
@@ -43,6 +44,13 @@ export class SudoPromptController {
     } : null;
     if (!this.elements) return;
     prompt.addEventListener("keydown", (event) => this.keydown(event));
+    const { remember } = this.elements;
+    remember.addEventListener("change", () => {
+      try {
+        if (remember.checked) this.window.localStorage.setItem(REMEMBER_PASSWORD_KEY, "true");
+        else this.window.localStorage.removeItem(REMEMBER_PASSWORD_KEY);
+      } catch (_error) {}
+    });
     this.elements.run.addEventListener("click", () => this.answer());
     prompt.querySelector("[data-sudo-cancel]").addEventListener("click", () => this.cancel());
   }
@@ -104,7 +112,9 @@ export class SudoPromptController {
     // sudo on a worker asks for the password of the worker's user.
     workerTerm.hidden = worker.hidden = !request.worker;
     worker.textContent = request.worker ? `worker ${request.worker}, as root with ${request.user || "its user"}'s password` : "";
+    // The box keeps the choice that the user last made in this browser.
     remember.checked = false;
+    try { remember.checked = this.window.localStorage.getItem(REMEMBER_PASSWORD_KEY) === "true"; } catch (_error) {}
     this.showRemembered(!!request.remembered);
     this.ticker = setInterval(() => this.tick(), 1000);
     this.tick();
