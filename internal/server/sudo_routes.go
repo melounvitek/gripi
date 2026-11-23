@@ -3,6 +3,10 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -102,6 +106,8 @@ type sudoRequests struct {
 	// runs are the commands that sudo runs on main, by the token that their askpass program gets.
 	runs       map[string]*sudoRun
 	remembered map[sudoTarget]*rememberedPassword
+	// notify tells the user of each request that shows.
+	notify func(view sudoRequestView)
 }
 
 // sudoRun is a command that sudo runs for an answered request, until it ends.
@@ -237,6 +243,9 @@ func (requests *sudoRequests) ask(ctx context.Context, view sudoRequestView) (*s
 	pending, err := requests.add(view)
 	if err != nil {
 		return nil, err
+	}
+	if requests.notify != nil {
+		requests.notify(pending.view)
 	}
 	timeout := time.NewTimer(time.Until(pending.view.ExpiresAt))
 	defer timeout.Stop()
@@ -394,6 +403,44 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		return
 	}
 	app.runSudo(response, request, cwd, argv, run)
+}
+
+// notifySudo sends the owners of a request's session a notification of it at once, unlike of a reply, unless a
+// Gripi client of theirs shows the session, and with it the request.
+func (app *application) notifySudo(view sudoRequestView) {
+	owners, err := app.completionNotifications.owners(view.Session)
+	if err != nil {
+		log.Printf("find whom to notify of a sudo request: %v", err)
+		return
+	}
+	title := "current session"
+	if session, found := app.sessionStore.Session(view.Session); found && strings.TrimSpace(session.DisplayName) != "" {
+		title = agent.NotificationPreview(session.DisplayName)
+	}
+	digest := sha256.Sum256([]byte(view.ID))
+	payload, _ := json.Marshal(map[string]string{
+		"type":  "gripi-notification",
+		"title": title,
+		"body":  agent.NotificationBody("sudo: " + view.Display),
+		"tag":   "gripi-sudo:" + hex.EncodeToString(digest[:16]),
+		"url":   completedReplyURL(view.Session, app.agentOf(view.Session)),
+	})
+	for _, owner := range owners {
+		presenceOwner := singleUserOwner
+		if app.config.MultiUserMode {
+			presenceOwner = owner
+		}
+		if app.notificationPresence.Focused(presenceOwner, view.Session) {
+			continue
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+			defer cancel()
+			if err := app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
+				log.Printf("deliver a sudo request's notification: %v", err)
+			}
+		}()
+	}
 }
 
 // runSudoOnWorker runs the command with sudo on the worker that runs the session, as the request said.
