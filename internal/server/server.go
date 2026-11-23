@@ -255,6 +255,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	diagnostics := &agent.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)
+	app.sudoRequests.notify = app.notifySudo
 	app.subSessionReports.app = app
 	observe := func(client agent.Client, lifecycle agent.Lifecycle) {
 		// The notifier asks whether a settled run owes a report before the reports take it.

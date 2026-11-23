@@ -165,7 +165,7 @@ If `GH_TOKEN` is saved without the rest, the dialog warns that commits and `git 
 
 ## Running commands as root
 
-Agents in Gripi can’t use `sudo` when it asks for a password, because nothing can type it. Instead, an agent in a Pi or Hermes session can run `gripi sudo -- <command>`. Gripi then shows the exact command and its directory in place of that conversation’s editor and asks for your password. **run as root** runs the command with sudo, and the agent gets only its output and exit code. **cancel**, or 2 minutes without an answer, refuses it. When sudo rejects the password, such as a wrong one, the prompt comes back with **Wrong password. Try again.**, as sudo would ask again in a terminal, until sudo gives up. The password goes from the browser to the gateway’s memory and, only if sudo asks for it, to sudo. It never reaches the agent, the model, or any file.
+Agents in Gripi can’t use `sudo` when it asks for a password, because nothing can type it. Instead, an agent in a Pi or Hermes session can run `gripi sudo -- <command>`. Gripi then shows the exact command and its directory in place of that conversation’s editor and asks for your password. **run as root** runs the command with sudo, and the agent gets only its output and exit code. **cancel**, or 2 minutes without an answer, refuses it. With [Web Push](#web-push-notifications) on, a request in a session that you're not looking at notifies you at once. When sudo rejects the password, such as a wrong one, the prompt comes back with **Wrong password. Try again.**, as sudo would ask again in a terminal, until sudo gives up. The password goes from the browser to the gateway’s memory and, only if sudo asks for it, to sudo. It never reaches the agent, the model, or any file.
 
 Gripi leaves plain `sudo` as it is, so it still fails there. `gripi sudo` is Gripi’s own: Pi CLI in a terminal shows no prompt for it.
 
@@ -502,7 +502,7 @@ The timeout is a whole number of seconds; `0` disables it. The sweep interval se
 
 Turn notifications on with the bell icon in the sidebar header, which is orange when they are on and crossed out when they are off or blocked. On iPhone and iPad, this requires iOS/iPadOS 16.4 or newer and Gripi added to the Home Screen.
 
-Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, notifies and shows as unread only for the turns that its parent didn’t start, such as yours in the browser. The parent gets a report of its own turns instead.
+Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A [`gripi sudo`](#running-commands-as-root) request notifies at once, with its command, unless the session is open and focused in one of them. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, notifies and shows as unread only for the turns that its parent didn’t start, such as yours in the browser. The parent gets a report of its own turns instead.
 
 Web Push requires HTTPS, such as [Tailscale Serve](examples.md#https-through-tailscale-serve). The gateway also needs outbound HTTPS access to the browser’s push service. Delivery is best-effort.
 
