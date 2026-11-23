@@ -24,6 +24,8 @@ type StartOptions struct {
 	Agent string
 	// CWD is the folder of a session that the agent has not saved yet, which starts there empty.
 	CWD string
+	// Scratch starts a new session that the agent keeps only in memory.
+	Scratch bool
 	// Env holds extra NAME=value variables for the agent.
 	Env         []string
 	Diagnostics *Diagnostics

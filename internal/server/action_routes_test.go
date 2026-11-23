@@ -92,7 +92,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	}
 
 	reloaded := serveAction(handler, getActionRequest("/?session="+url.QueryEscape(sessionPath)))
-	if reloaded.Code != http.StatusOK || !strings.Contains(reloaded.Body.String(), "/attachments/"+sessions.SessionHash(sessionPath)+"/") || !strings.Contains(reloaded.Body.String(), `alt="Attached image"`) {
+	if reloaded.Code != http.StatusOK || !strings.Contains(reloaded.Body.String(), "/session_images/") || !strings.Contains(reloaded.Body.String(), `alt="Attached image"`) {
 		t.Fatalf("reloaded attachment = %d %s", reloaded.Code, reloaded.Body.String())
 	}
 	bash := formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "!!printf go"}, true)

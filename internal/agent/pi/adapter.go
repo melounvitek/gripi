@@ -106,7 +106,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 		return nil, err
 	}
 	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
-		return rpc.StartInCWD(cwd, forkFrom, command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
+		return rpc.StartInCWD(cwd, forkFrom, options.Scratch, command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})
 }
 

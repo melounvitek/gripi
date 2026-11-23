@@ -238,11 +238,15 @@ func Start(sessionPath, cwd string, command []string, extensionPath string, vari
 	return startProcess(sessionPath, cwd, command, args, variables, launch, diagnostics, observer)
 }
 
-// StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set.
-func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+// StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set. Pi keeps a scratch
+// session only in memory.
+func StartInCWD(cwd, forkFrom string, scratch bool, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
 	if forkFrom != "" {
 		args = append(args, "--fork", forkFrom)
+	}
+	if scratch {
+		args = append(args, "--no-session")
 	}
 	return startProcess("", cwd, command, args, variables, launch, diagnostics, observer)
 }

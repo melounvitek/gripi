@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -88,6 +88,52 @@ test("fake Pi starts a new session in a --session file that does not exist yet, 
 
   const header = JSON.parse((await readFile(sessionPath, "utf8")).split("\n")[0]);
   assert.deepEqual([header.type, header.cwd], ["session", project]);
+});
+
+test("fake Pi keeps a --no-session session in memory and never saves it, like Pi", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-no-session-"));
+  const fixture = await seedFixtures(root);
+  const saved = await readdir(fixture.sessionsRoot, { recursive: true });
+  const child = spawnFake(fixture, ["--mode", "rpc", "--no-session"]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+
+  child.stdin.write(`${JSON.stringify({ id: "state", type: "get_state" })}\n`);
+  const state = (await nextRecord(records)).data;
+  assert.equal(state.sessionFile, undefined);
+  assert.ok(state.sessionId);
+  child.stdin.write(`${JSON.stringify({ id: "prompt", type: "prompt", message: prompts.standard })}\n`);
+  assert.equal((await nextRecord(records)).id, "prompt");
+  while ((await nextRecord(records)).type !== "agent_settled");
+
+  child.stdin.write(`${JSON.stringify({ id: "entries", type: "get_entries" })}\n`);
+  const entries = (await nextRecord(records)).data.entries;
+  assert.deepEqual(entries.map((entry) => entry.message.role), ["user", "assistant", "toolResult", "assistant"]);
+  assert.deepEqual(await readdir(fixture.sessionsRoot, { recursive: true }), saved);
+});
+
+test("fake Pi puts prompt images in the user message, like Pi", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-images-"));
+  const fixture = await seedFixtures(root);
+  const child = spawnFake(fixture, ["--mode", "rpc"]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+  const image = (name) => ({ type: "image", data: Buffer.from(name).toString("base64"), mimeType: "image/png" });
+
+  child.stdin.write(`${JSON.stringify({ id: "start", type: "prompt", message: prompts.steerStart, images: [image("first")] })}\n`);
+  assert.equal((await nextRecord(records)).id, "start");
+  child.stdin.write(`${JSON.stringify({ id: "steer", type: "prompt", message: "And this one", streamingBehavior: "steer", images: [image("second")] })}\n`);
+  const events = [];
+  while (events.at(-1)?.type !== "agent_settled") events.push(await nextRecord(records));
+  child.stdin.write(`${JSON.stringify({ id: "entries", type: "get_entries" })}\n`);
+  const entries = (await nextRecord(records)).data.entries;
+
+  const expected = [
+    [{ type: "text", text: prompts.steerStart }, image("first")],
+    [{ type: "text", text: "And this one" }, image("second")]
+  ];
+  assert.deepEqual(events.filter((event) => event.type === "message_end" && event.message.role === "user").map((event) => event.message.content), expected);
+  assert.deepEqual(entries.filter((entry) => entry.message?.role === "user").map((entry) => entry.message.content), expected);
 });
 
 test("fake Pi keeps fresh bash history in memory until an assistant response persists the session", { timeout: 5_000 }, async (context) => {
