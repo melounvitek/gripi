@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"mime"
 	"net/http"
 	"os"
@@ -65,28 +66,34 @@ type sudoRequestView struct {
 	// sudo asks for there.
 	Worker string `json:"worker,omitempty"`
 	User   string `json:"user,omitempty"`
+	// Again says that sudo asks for the password again, which it does after it rejected one, such as a wrong one.
+	Again bool `json:"again,omitempty"`
 }
 
 // sudoRequests holds the pending requests only in memory. A request leaves as it is answered, so it is never shown again.
 type sudoRequests struct {
 	mu      sync.Mutex
 	pending map[string]*sudoRequest
-	// passwords wait for the askpass program of the sudo that runs a request, by the token that it gets.
-	passwords map[string][]byte
+	// runs are the commands that sudo runs on main, by the token that their askpass program gets.
+	runs map[string]*sudoRun
 }
 
-func (requests *sudoRequests) add(session, cwd string, argv []string, worker, user string) (*sudoRequest, error) {
+// sudoRun is a command that sudo runs for an answered request, until it ends.
+type sudoRun struct {
+	ctx context.Context
+	// request is the request that the user last answered for it, whose password sudo's askpass program takes once.
+	request   *sudoRequest
+	delivered bool
+}
+
+// add shows a request, which gets an ID and expires after SudoTimeout.
+func (requests *sudoRequests) add(view sudoRequestView) (*sudoRequest, error) {
 	id, err := randomBrowserToken()
 	if err != nil {
 		return nil, err
 	}
-	request := &sudoRequest{
-		view: sudoRequestView{
-			ID: id, Session: session, Display: shellWords(argv), CWD: shellWords([]string{cwd}), ExpiresAt: time.Now().Add(SudoTimeout),
-			Worker: worker, User: user,
-		},
-		answered: make(chan struct{}),
-	}
+	view.ID, view.ExpiresAt = id, time.Now().Add(SudoTimeout)
+	request := &sudoRequest{view: view, answered: make(chan struct{})}
 	requests.mu.Lock()
 	defer requests.mu.Unlock()
 	if requests.pending == nil {
@@ -120,22 +127,74 @@ func (requests *sudoRequests) answer(id string, allowed func(session string) boo
 	return true
 }
 
-func (requests *sudoRequests) offer(token string, password []byte) {
-	requests.mu.Lock()
-	defer requests.mu.Unlock()
-	if requests.passwords == nil {
-		requests.passwords = make(map[string][]byte)
+// ask shows a request until the user answers it, which it returns, or until it expires or ctx ends, when it returns nil.
+func (requests *sudoRequests) ask(ctx context.Context, view sudoRequestView) (*sudoRequest, error) {
+	pending, err := requests.add(view)
+	if err != nil {
+		return nil, err
 	}
-	requests.passwords[token] = password
+	timeout := time.NewTimer(time.Until(pending.view.ExpiresAt))
+	defer timeout.Stop()
+	select {
+	case <-pending.answered:
+	case <-timeout.C:
+	case <-ctx.Done():
+	}
+	// The user's answer takes the request away, so it wins even when it comes with the timeout.
+	if requests.remove(pending.view.ID) {
+		return nil, nil
+	}
+	return pending, nil
 }
 
-// take hands out the password for a token once, to a caller that then owns it.
-func (requests *sudoRequests) take(token string) []byte {
+// password hands the password of a run to sudo's askpass program, which then owns it, or nil once the user refuses
+// it. The first time, it is the password that the user entered for the request. sudo asks again only after it rejected
+// the password, such as a wrong one, before the command runs, so then the user is asked again, as sudo would in a
+// terminal.
+func (requests *sudoRequests) password(ctx context.Context, run *sudoRun) []byte {
+	requests.mu.Lock()
+	if !run.delivered {
+		run.delivered = true
+		password := run.request.password
+		run.request.password = nil
+		requests.mu.Unlock()
+		return password
+	}
+	view := run.request.view
+	requests.mu.Unlock()
+	view.Again = true
+	answer, err := requests.ask(ctx, view)
+	if answer == nil || err != nil {
+		return nil
+	}
 	requests.mu.Lock()
 	defer requests.mu.Unlock()
-	password := requests.passwords[token]
-	delete(requests.passwords, token)
+	run.request = answer
+	password := answer.password
+	answer.password = nil
 	return password
+}
+
+// start lets sudo's askpass program take the password of a run on main with token, until the run ends.
+func (requests *sudoRequests) start(token string, run *sudoRun) (end func()) {
+	requests.mu.Lock()
+	defer requests.mu.Unlock()
+	if requests.runs == nil {
+		requests.runs = make(map[string]*sudoRun)
+	}
+	requests.runs[token] = run
+	return func() {
+		requests.mu.Lock()
+		defer requests.mu.Unlock()
+		delete(requests.runs, token)
+		clear(run.request.password)
+	}
+}
+
+func (requests *sudoRequests) run(token string) *sudoRun {
+	requests.mu.Lock()
+	defer requests.mu.Unlock()
+	return requests.runs[token]
 }
 
 func (requests *sudoRequests) of(session string) []sudoRequestView {
@@ -192,25 +251,17 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
 	}
-	var worker, user string
+	view := sudoRequestView{Session: session, Display: shellWords(argv), CWD: shellWords([]string{cwd})}
 	if fromWorker {
 		location, _ := app.workers.Location(session)
-		worker, user = placement.Name(), location.User
+		view.Worker, view.User = placement.Name(), location.User
 	}
-	pending, err := app.sudoRequests.add(session, cwd, argv, worker, user)
+	pending, err := app.sudoRequests.ask(request.Context(), view)
 	if err != nil {
 		writeInternalError(response, "add a sudo request", err)
 		return
 	}
-	timeout := time.NewTimer(time.Until(pending.view.ExpiresAt))
-	defer timeout.Stop()
-	select {
-	case <-pending.answered:
-	case <-timeout.C:
-	case <-request.Context().Done():
-	}
-	// The user's answer takes the request away, so it wins even when it comes with the timeout.
-	if app.sudoRequests.remove(pending.view.ID) {
+	if pending == nil {
 		if request.Context().Err() == nil {
 			writeJSONStatus(response, http.StatusRequestTimeout, map[string]string{"error": "nobody answered the request in Gripi in time"})
 		}
@@ -220,11 +271,11 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the user cancelled the request in Gripi"})
 		return
 	}
-	if worker != "" {
+	if view.Worker != "" {
 		app.runSudoOnWorker(response, request, session, cwd, argv, pending.password)
 		return
 	}
-	app.runSudo(response, request, cwd, argv, pending.password)
+	app.runSudo(response, request, cwd, argv, &sudoRun{ctx: request.Context(), request: pending})
 }
 
 // runSudoOnWorker runs the command with sudo on the worker that runs the session.
@@ -243,16 +294,15 @@ func (app *application) runSudoOnWorker(response http.ResponseWriter, request *h
 }
 
 // runSudo runs the command with sudo, which runs gripi as its askpass program. gripi takes the password from the
-// gateway with a token that works once, and only while sudo runs.
-func (app *application) runSudo(response http.ResponseWriter, request *http.Request, cwd string, argv []string, password []byte) {
+// gateway with a token that works only while sudo runs.
+func (app *application) runSudo(response http.ResponseWriter, request *http.Request, cwd string, argv []string, run *sudoRun) {
 	token, err := randomBrowserToken()
 	if err != nil {
-		clear(password)
+		clear(run.request.password)
 		writeInternalError(response, "create a sudo token", err)
 		return
 	}
-	app.sudoRequests.offer(token, password)
-	defer func() { clear(app.sudoRequests.take(token)) }()
+	defer app.sudoRequests.start(token, run)()
 	executable, err := os.Executable()
 	if err != nil {
 		writeInternalError(response, "find gripi for sudo", err)
@@ -303,7 +353,14 @@ func (app *application) sudoAskpass(response http.ResponseWriter, request *http.
 	if !parseForm(response, request) {
 		return
 	}
-	password := app.sudoRequests.take(request.PostForm.Get("token"))
+	var password []byte
+	if run := app.sudoRequests.run(request.PostForm.Get("token")); run != nil {
+		// Asking again ends with the run, also when askpass outlives sudo.
+		ctx, cancel := context.WithCancel(request.Context())
+		defer cancel()
+		defer context.AfterFunc(run.ctx, cancel)()
+		password = app.sudoRequests.password(ctx, run)
+	}
 	if password == nil {
 		writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": "no password waits for this token"})
 		return

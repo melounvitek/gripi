@@ -165,7 +165,7 @@ If `GH_TOKEN` is saved without the rest, the dialog warns that commits and `git 
 
 ## Running commands as root
 
-Agents in Gripi can’t use `sudo` when it asks for a password, because nothing can type it. Instead, an agent in a Pi or Hermes session can run `gripi sudo -- <command>`. Gripi then shows the exact command and its directory in place of that conversation’s editor and asks for your password. **run as root** runs the command with sudo, and the agent gets only its output and exit code. **cancel**, or 2 minutes without an answer, refuses it. The password goes from the browser to the gateway’s memory and, only if sudo asks for it, to sudo. It never reaches the agent, the model, or any file.
+Agents in Gripi can’t use `sudo` when it asks for a password, because nothing can type it. Instead, an agent in a Pi or Hermes session can run `gripi sudo -- <command>`. Gripi then shows the exact command and its directory in place of that conversation’s editor and asks for your password. **run as root** runs the command with sudo, and the agent gets only its output and exit code. **cancel**, or 2 minutes without an answer, refuses it. When sudo rejects the password, such as a wrong one, the prompt comes back with **Wrong password. Try again.**, as sudo would ask again in a terminal, until sudo gives up. The password goes from the browser to the gateway’s memory and, only if sudo asks for it, to sudo. It never reaches the agent, the model, or any file.
 
 Gripi leaves plain `sudo` as it is, so it still fails there. `gripi sudo` is Gripi’s own: Pi CLI in a terminal shows no prompt for it.
 

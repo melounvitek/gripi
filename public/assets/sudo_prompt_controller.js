@@ -76,7 +76,9 @@ export class SudoPromptController {
     // Decided before the editor goes, so that a message being typed doesn't go on in the password field.
     const focus = request && !this.request && this.canFocus();
     this.clearPassword();
-    error.hidden = true;
+    // sudo asks again after it rejected the password.
+    error.textContent = request?.again ? "Wrong password. Try again." : "";
+    error.hidden = !request?.again;
     clearInterval(this.ticker);
     this.ticker = null;
     this.request = request;

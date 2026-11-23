@@ -100,6 +100,28 @@ test("the prompt takes the editor's place, runs the approved command, and keeps 
   }
 });
 
+test("a wrong password asks again, as sudo does in a terminal", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  const session = await openSession(page, "sudo", sessions.sudo);
+  const { ended } = gripiSudo(session, ["echo", "retried"]);
+  const prompt = sudoPrompt(page);
+  const password = prompt.getByLabel("password");
+  await expect(password).toBeFocused();
+  await expect(prompt.getByRole("alert")).toBeHidden();
+
+  await password.fill("wrong password");
+  await password.press("Enter");
+  await expect(prompt.getByRole("alert")).toHaveText("Wrong password. Try again.");
+  await expect(prompt.getByRole("definition").first()).toHaveText("echo retried");
+  await expect(password).toBeFocused();
+  await expect(password).toHaveValue("");
+
+  await password.fill("right password");
+  await password.press("Enter");
+  await expect(prompt).toBeHidden();
+  expect(await ended).toMatchObject({ code: 0, stdout: "retried\n" });
+});
+
 test("a reload brings the oldest pending request back from the page, and the next one shows after it", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   const session = await openSession(page, "sudo", sessions.sudo);

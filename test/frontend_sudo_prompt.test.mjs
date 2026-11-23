@@ -112,6 +112,26 @@ test("Enter sends the password as a form and clears the field at once, and a ref
   assert.equal(prompt.hidden, true);
 });
 
+test("a request that sudo asks again after a wrong password says so and takes the focus", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
+  const { controller, error, password } = promptFixture();
+
+  controller.update([request("first")]);
+  assert.equal(error.hidden, true);
+  controller.update([]);
+  password.focused = false;
+
+  controller.update([{ ...request("again"), again: true }]);
+  assert.equal(error.textContent, "Wrong password. Try again.");
+  assert.equal(error.hidden, false);
+  assert.equal(password.focused, true);
+
+  controller.update([{ ...request("again"), again: true }, request("next")]);
+  assert.equal(error.hidden, false);
+  controller.update([request("next")]);
+  assert.equal(error.hidden, true);
+});
+
 test("Escape cancels, and a request that is gone says so before the next one shows", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: NOW });
   const gone = "The sudo request is no longer waiting for an answer.";

@@ -20,7 +20,9 @@ Asks the user to run a command as root and waits up to 2 minutes for them to
 answer in Gripi, where the request takes the editor's place in the
 conversation of the Pi or Hermes session that runs gripi sudo. Once they enter
 their password, Gripi runs the command with sudo and passes on its output and
-exit code. The password goes only to sudo, never to the agent.
+exit code. The password goes only to sudo, never to the agent. When sudo
+rejects it, as a wrong one, Gripi asks the user again, as sudo would in a
+terminal.
 
 Each command needs the user's password again. The command reads no input, and
 Gripi keeps only the first 16 MiB of each of its outputs.
