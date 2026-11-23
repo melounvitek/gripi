@@ -445,7 +445,7 @@ func TestThePiAdapterExtractsTheExtensionsToTheSameFolderAfterARestart(t *testin
 type recordedWorkers struct {
 	moves    []string
 	location gateway.WorkerLocation
-	sudo     func(key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error)
+	sudo     func(key, worker, cwd string, argv []string, password func() []byte, stdout, stderr io.Writer) (int, error)
 }
 
 func (workers *recordedWorkers) Move(_ context.Context, key, _, worker string, _ func(context.Context, func(string) bool) (func(), error)) error {
@@ -474,8 +474,8 @@ func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) 
 	return workers.location, workers.location.Worker != ""
 }
 
-func (workers *recordedWorkers) Sudo(_ context.Context, key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
-	return workers.sudo(key, cwd, argv, password, stdout, stderr)
+func (workers *recordedWorkers) Sudo(ctx context.Context, key, worker, cwd string, argv []string, password func(context.Context) []byte, stdout, stderr io.Writer) (int, error) {
+	return workers.sudo(key, worker, cwd, argv, func() []byte { return password(ctx) }, stdout, stderr)
 }
 
 func (workers *recordedWorkers) Placed() map[string]string { return nil }

@@ -264,9 +264,9 @@ func (link *fakeLink) DeleteMove(_ context.Context, id string) error {
 	return link.call("delete %s", id)
 }
 
-func (link *fakeLink) Sudo(_ context.Context, session, cwd string, argv []string, password []byte, stdout, _ io.Writer) (int, error) {
+func (link *fakeLink) Sudo(ctx context.Context, session, cwd string, argv []string, password func(context.Context) []byte, stdout, _ io.Writer) (int, error) {
 	io.WriteString(stdout, "ran\n")
-	return 3, link.call("sudo %s in %s: %s with %s", session, cwd, strings.Join(argv, " "), password)
+	return 3, link.call("sudo %s in %s: %s with %s", session, cwd, strings.Join(argv, " "), password(ctx))
 }
 
 // moveRig is main with a repository in its home folder, which has a linked worktree that a session used and another
@@ -806,29 +806,37 @@ func TestASessionOnALostWorkerContinuesOnMainOnceTheWorkerIsGone(t *testing.T) {
 	}
 }
 
-// gripi sudo in a session on a worker runs the command there, but not once the session is on its way back.
+// gripi sudo in a session on a worker runs the command there, but not on another worker, which would get the password
+// of the worker that the user was asked for, nor once the session is on its way back.
 func TestSudoRunsTheCommandOnTheWorkerOfTheSession(t *testing.T) {
 	rig := newMoveRig(t)
 	ctx := context.Background()
+	password := func(context.Context) []byte { return []byte("secret") }
 	var output strings.Builder
-	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) {
+	if _, err := rig.manager.Sudo(ctx, rig.key, "beelink", rig.feature, []string{"id"}, password, &output, io.Discard); !refused(err) {
 		t.Fatalf("Sudo in a session on main = %v", err)
 	}
 	rig.move()
 	rig.took()
 
-	code, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id", "-u"}, []byte("secret"), &output, io.Discard)
+	code, err := rig.manager.Sudo(ctx, rig.key, "beelink", rig.feature, []string{"id", "-u"}, password, &output, io.Discard)
 	if err != nil || code != 3 || output.String() != "ran\n" {
 		t.Fatalf("Sudo = %d, %v, printed %q", code, err, output.String())
 	}
 	if events, want := rig.took(), []string{"sudo " + sessionID(rig.key) + " in " + rig.feature + ": id -u with secret"}; !slices.Equal(events, want) {
 		t.Fatalf("the worker did %q, want %q", events, want)
 	}
+	if _, err := rig.manager.Sudo(ctx, rig.key, "other", rig.feature, []string{"id"}, password, &output, io.Discard); !refused(err) || !strings.Contains(err.Error(), "worker beelink") {
+		t.Fatalf("Sudo for another worker = %v", err)
+	}
 	if err := rig.manager.options.Placements.SetStage(rig.key, releasing); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rig.manager.Sudo(ctx, rig.key, rig.feature, []string{"id"}, []byte("secret"), &output, io.Discard); !refused(err) || !strings.Contains(err.Error(), "worker beelink") {
+	if _, err := rig.manager.Sudo(ctx, rig.key, "beelink", rig.feature, []string{"id"}, password, &output, io.Discard); !refused(err) || !strings.Contains(err.Error(), "worker beelink") {
 		t.Fatalf("Sudo in a session that is coming back = %v", err)
+	}
+	if events := rig.took(); len(events) != 0 {
+		t.Fatalf("the worker did %q", events)
 	}
 }
 

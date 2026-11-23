@@ -11,16 +11,20 @@ import (
 	"github.com/melounvitek/gripi/internal/worker/helper"
 )
 
-// Sudo runs a command as root on the worker that runs a session, in the session's view at cwd, with the worker's
-// sudo, which gets password, the worker user's. It passes the command's outputs to stdout and stderr, stops sudo when
-// ctx ends, and returns sudo's exit status.
-func (manager *Manager) Sudo(ctx context.Context, key, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
+// Sudo runs a command as root on worker, which runs a session, in the session's view at cwd, with the worker's sudo,
+// which gets the password of the worker's user from password each time that it asks. It passes the command's outputs
+// to stdout and stderr, stops sudo when ctx ends, and returns sudo's exit status.
+func (manager *Manager) Sudo(ctx context.Context, key, worker, cwd string, argv []string, password func(context.Context) []byte, stdout, stderr io.Writer) (int, error) {
 	placement, placed := manager.options.Placements.Find(key)
 	if !placed {
 		return 0, refuse("the session runs on main now; run the command again")
 	}
 	if placement.Stage != "" {
 		return 0, refuse("the session is coming back from worker %s; run the command again once it runs on main", placement.Worker)
+	}
+	// Another worker would get the password of the one that the user was asked for.
+	if placement.Worker != worker {
+		return 0, refuse("the session runs on worker %s now; run the command again", placement.Worker)
 	}
 	manager.mu.Lock()
 	var conn link
@@ -34,17 +38,19 @@ func (manager *Manager) Sudo(ctx context.Context, key, cwd string, argv []string
 	return conn.Sudo(ctx, sessionID(key), cwd, argv, password, stdout, stderr)
 }
 
-// Sudo runs a command as root in the view of a session on the worker, at cwd: the helper keeps password for the
-// askpass program of the worker's sudo, which `gripi worker sudo` runs outside the views, in the session's cgroup. It
-// passes the command's outputs to stdout and stderr, stops sudo when ctx ends, and returns sudo's exit status.
-func (conn *Conn) Sudo(ctx context.Context, session, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error) {
+// Sudo runs a command as root in the view of a session on the worker, at cwd, with the worker's sudo, which
+// `gripi worker sudo` runs outside the views, in the session's cgroup. Its askpass program gets the password from
+// password, through the helper, each time that sudo asks. It passes the command's outputs to stdout and stderr, stops
+// sudo when ctx ends, and returns sudo's exit status.
+func (conn *Conn) Sudo(ctx context.Context, session, cwd string, argv []string, password func(context.Context) []byte, stdout, stderr io.Writer) (int, error) {
 	random := make([]byte, 16)
 	rand.Read(random)
 	token := hex.EncodeToString(random)
-	offer, err := conn.request(ctx, helper.Message{Type: "sudo.offer", Session: session, Token: token, Password: string(password), Cwd: cwd, Args: argv})
+	offer, err := conn.request(ctx, helper.Message{Type: "sudo.offer", Session: session, Cwd: cwd, Args: argv})
 	if err != nil {
 		return 0, err
 	}
+	defer conn.Askpass(token, func() []byte { return password(ctx) })()
 	run, err := json.Marshal(helper.SudoRun{Sudo: conn.options.Sudo, Token: token, Cgroup: offer.Path, Args: offer.Args})
 	if err != nil {
 		return 0, err

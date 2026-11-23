@@ -139,7 +139,7 @@ type link interface {
 	ReleaseMove(ctx context.Context, id string) (helper.Barriers, error)
 	TakeOutside(ctx context.Context, id, folder, temporary string) error
 	DeleteMove(ctx context.Context, id string) error
-	Sudo(ctx context.Context, session, cwd string, argv []string, password []byte, stdout, stderr io.Writer) (int, error)
+	Sudo(ctx context.Context, session, cwd string, argv []string, password func(context.Context) []byte, stdout, stderr io.Writer) (int, error)
 	// hangUp ends every channel at once, also over a link that hangs, before Close.
 	hangUp()
 	Close() error

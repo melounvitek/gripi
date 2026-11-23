@@ -86,6 +86,13 @@ type sudoRun struct {
 	delivered bool
 }
 
+// end clears the password of a run that has ended, unless sudo's askpass program took it.
+func (requests *sudoRequests) end(run *sudoRun) {
+	requests.mu.Lock()
+	defer requests.mu.Unlock()
+	clear(run.request.password)
+}
+
 // add shows a request, which gets an ID and expires after SudoTimeout.
 func (requests *sudoRequests) add(view sudoRequestView) (*sudoRequest, error) {
 	id, err := randomBrowserToken()
@@ -185,9 +192,9 @@ func (requests *sudoRequests) start(token string, run *sudoRun) (end func()) {
 	requests.runs[token] = run
 	return func() {
 		requests.mu.Lock()
-		defer requests.mu.Unlock()
 		delete(requests.runs, token)
-		clear(run.request.password)
+		requests.mu.Unlock()
+		requests.end(run)
 	}
 }
 
@@ -271,18 +278,20 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "the user cancelled the request in Gripi"})
 		return
 	}
+	run := &sudoRun{ctx: request.Context(), request: pending}
 	if view.Worker != "" {
-		app.runSudoOnWorker(response, request, session, cwd, argv, pending.password)
+		app.runSudoOnWorker(response, request, session, view.Worker, cwd, argv, run)
 		return
 	}
-	app.runSudo(response, request, cwd, argv, &sudoRun{ctx: request.Context(), request: pending})
+	app.runSudo(response, request, cwd, argv, run)
 }
 
-// runSudoOnWorker runs the command with sudo on the worker that runs the session.
-func (app *application) runSudoOnWorker(response http.ResponseWriter, request *http.Request, session, cwd string, argv []string, password []byte) {
-	defer clear(password)
+// runSudoOnWorker runs the command with sudo on the worker that runs the session, as the request said.
+func (app *application) runSudoOnWorker(response http.ResponseWriter, request *http.Request, session, worker, cwd string, argv []string, run *sudoRun) {
+	defer app.sudoRequests.end(run)
+	password := func(ctx context.Context) []byte { return app.sudoRequests.password(ctx, run) }
 	var stdout, stderr cappedBuffer
-	code, err := app.workers.Sudo(request.Context(), session, cwd, argv, password, &stdout, &stderr)
+	code, err := app.workers.Sudo(request.Context(), session, worker, cwd, argv, password, &stdout, &stderr)
 	if request.Context().Err() != nil {
 		return
 	}
