@@ -110,6 +110,7 @@ type sudoRun struct {
 	// request is the request that the user last answered for it, whose password sudo's askpass program takes once.
 	request   *sudoRequest
 	delivered bool
+	ended     bool
 }
 
 // end clears the password of a run that has ended, unless sudo's askpass program took it. A password that the user
@@ -118,6 +119,7 @@ type sudoRun struct {
 func (requests *sudoRequests) end(run *sudoRun, succeeded bool) {
 	requests.mu.Lock()
 	defer requests.mu.Unlock()
+	run.ended = true
 	clear(run.request.password)
 	entry := run.request.remembered
 	if entry == nil || entry.confirmed {
@@ -275,6 +277,14 @@ func (requests *sudoRequests) password(ctx context.Context, run *sudoRun) []byte
 	}
 	requests.mu.Lock()
 	defer requests.mu.Unlock()
+	// An answer that comes as the run ends is too late for it.
+	if run.ended {
+		clear(answer.password)
+		if entry := answer.remembered; entry != nil && !entry.confirmed {
+			requests.forget(entry)
+		}
+		return nil
+	}
 	run.request = answer
 	password := answer.password
 	answer.password = nil

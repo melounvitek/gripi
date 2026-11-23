@@ -122,6 +122,19 @@ test("a wrong password asks again, as sudo does in a terminal", async ({ page, i
   expect(await ended).toMatchObject({ code: 0, stdout: "retried\n" });
 });
 
+test("cancelling after a wrong password makes sudo give up without running the command", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  const session = await openSession(page, "sudo", sessions.sudo);
+  const { ended } = gripiSudo(session, ["echo", "never"]);
+  const prompt = sudoPrompt(page);
+  await prompt.getByLabel("password").fill("wrong password");
+  await prompt.getByLabel("password").press("Enter");
+  await expect(prompt.getByRole("alert")).toHaveText("Wrong password. Try again.");
+  await prompt.getByLabel("password").press("Escape");
+  await expect(prompt).toBeHidden();
+  expect(await ended).toMatchObject({ code: 1, stdout: "", stderr: expect.stringContaining("gripi sudo: Gripi has no password for this sudo") });
+});
+
 test("a reload brings the oldest pending request back from the page, and the next one shows after it", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   const session = await openSession(page, "sudo", sessions.sudo);

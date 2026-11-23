@@ -94,7 +94,8 @@ func runningSession() string {
 }
 
 // answerSudoPrompt is gripi as the askpass program of a sudo that the gateway runs. It prints the user's password
-// only for sudo's password prompt, once, and otherwise prints nothing at all, after which sudo gives up.
+// only for sudo's password prompt, and otherwise, or when the user doesn't enter it again after sudo rejected it,
+// prints nothing at all, after which sudo gives up.
 func answerSudoPrompt(arguments []string, stdout, stderr io.Writer) int {
 	// Where sudoers keeps the environment, a command that sudo runs has the token too, and may run gripi.
 	parent, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", os.Getppid()))
@@ -113,7 +114,7 @@ func answerSudoPrompt(arguments []string, stdout, stderr io.Writer) int {
 	defer response.Body.Close()
 	password, err := io.ReadAll(response.Body)
 	if err != nil || response.StatusCode != http.StatusOK {
-		fmt.Fprintln(stderr, "gripi sudo: Gripi gives sudo the password only once")
+		fmt.Fprintln(stderr, "gripi sudo: Gripi has no password for this sudo")
 		return exitFailure
 	}
 	stdout.Write(append(password, '\n'))

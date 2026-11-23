@@ -519,7 +519,7 @@ func TestSudoGivesThePasswordOnlyToThePasswordPromptOfClassicSudo(t *testing.T) 
 
 // sudo asks for the password again only after it rejected one, as a wrong one, before the command runs.
 func TestSudoAsksAgainInTheBrowserWhenSudoAsksAgain(t *testing.T) {
-	record := fakeSudo(t, "password password password")
+	record := fakeSudo(t, "password password")
 	alpha, _ := fakePiGateway(t)
 	outsideSessions(t)
 	t.Setenv("PI_SESSION_FILE", alpha)
@@ -539,15 +539,10 @@ func TestSudoAsksAgainInTheBrowserWhenSudoAsksAgain(t *testing.T) {
 	if code := answerSudo(second["id"].(string), "right", ""); code != http.StatusOK {
 		t.Fatalf("second answer = %d", code)
 	}
-	// Cancelling refuses sudo the password, so it gives up.
-	third := sudoRequestsUntil(t, alpha, "", 1)[0]
-	if code := cancelSudo(third["id"].(string), ""); code != http.StatusOK {
-		t.Fatalf("cancel = %d", code)
-	}
 	if answered := <-result; answered.code != 0 || answered.stdout != "ran\n" {
 		t.Fatalf("gripi sudo = %+v", answered)
 	}
-	if answers := strings.Fields(recorded(t, record, "askpass")); !slices.Equal(answers, []string{sha256Hex("wrong\n"), sha256Hex("right\n"), sha256Hex("")}) {
+	if answers := strings.Fields(recorded(t, record, "askpass")); !slices.Equal(answers, []string{sha256Hex("wrong\n"), sha256Hex("right\n")}) {
 		t.Fatalf("askpass answered %v", answers)
 	}
 	sudoRequestsUntil(t, alpha, "", 0)

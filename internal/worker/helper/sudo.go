@@ -79,6 +79,12 @@ func (s *server) answerAskpass(response http.ResponseWriter, request *http.Reque
 		if s.askpasses[token] == answer {
 			delete(s.askpasses, token)
 		}
+		// An answer that came as the wait ended.
+		select {
+		case password := <-answer:
+			clear(password)
+		default:
+		}
 	}()
 	s.send(Message{Type: "sudo.askpass", Token: token})
 	timeout := time.NewTimer(askpassTimeout)
