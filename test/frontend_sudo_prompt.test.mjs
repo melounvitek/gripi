@@ -14,13 +14,18 @@ function reply(status, body = {}) {
   return { ok: status === 200, status, json: async () => body };
 }
 
-function promptFixture({ replies = [] } = {}) {
+function promptFixture({ replies = [], storage = new Map() } = {}) {
   const form = new FakeElement("form");
   const prompt = new FakeElement("section");
   prompt.hidden = true;
   const parts = Object.fromEntries(["expiry", "command", "cwd", "worker-term", "worker", "password-field", "password", "remember-field", "remember", "remembered", "error", "run", "cancel"].map((name) => [name, new FakeElement("span", [`[data-sudo-${name}]`])]));
   prompt.append(...Object.values(parts));
   const window = new FakeEventTarget();
+  window.localStorage = {
+    getItem: (name) => storage.get(name) ?? null,
+    setItem: (name, value) => storage.set(name, value),
+    removeItem: (name) => storage.delete(name)
+  };
   const sent = [];
   window.fetch = async (url, options) => {
     sent.push({ url, body: options.body.toString() });
@@ -169,6 +174,32 @@ test("the user may ask Gripi to remember the password, which a remembered passwo
   await flush();
   assert.equal(field.hidden, false);
   assert.equal(parts.error.textContent, "Enter the password on one line.");
+});
+
+test("the browser keeps the user's last choice to remember the password", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
+  const storage = new Map();
+  const { controller, remember, fire } = promptFixture({ storage });
+  controller.update([request("first")]);
+  assert.equal(remember.checked, false);
+  remember.checked = true;
+  fire(remember, "change");
+
+  const next = promptFixture({ storage });
+  next.controller.update([request("second")]);
+  next.password.value = "secret";
+  next.key("Enter");
+  await flush();
+  assert.equal(next.sent[0].body, "id=second&password=secret&remember=1");
+
+  next.controller.update([request("third")]);
+  next.remember.checked = false;
+  next.fire(next.remember, "change");
+
+  const last = promptFixture({ storage });
+  last.remember.checked = true;
+  last.controller.update([request("fourth")]);
+  assert.equal(last.remember.checked, false);
 });
 
 test("Escape cancels, and a request that is gone says so before the next one shows", async (t) => {
