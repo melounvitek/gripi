@@ -274,3 +274,141 @@ test("large native trees are compacted before crossing the extension bridge", as
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+const MiB = 1024 * 1024;
+const pngData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+test("history bridge reads Pi's in-memory session in RPC mode", { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-history-extension-"));
+  const project = path.join(directory, "project");
+  await mkdir(project);
+  const child = spawn(piExecutable, [
+    "--mode", "rpc", "--no-session", "-ne", "--approve",
+    "--extension", path.resolve("test/helpers/fake_provider.ts"), "--extension", extensionPath, "--model", "fake/fake-1",
+  ], {
+    cwd: project,
+    env: { ...process.env, PI_CODING_AGENT_DIR: path.join(directory, "agent"), PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const records = rpcRecords(child);
+  const bridgeRequest = async (name, requestId, payload) => {
+    child.stdin.write(`${JSON.stringify({ id: requestId, type: "prompt", message: `/${name} ${requestId} ${Buffer.from(JSON.stringify(payload)).toString("base64url")}` })}\n`);
+    const [response, status] = await Promise.all([
+      records.next((record) => record.id === requestId),
+      records.next((record) => record.statusKey === `${name}:${requestId}`),
+    ]);
+    assert.equal(response.success, true, response.error);
+    return JSON.parse(status.statusText);
+  };
+
+  try {
+    const script = JSON.stringify([[{ name: "bash", arguments: { command: "echo hi" } }]]);
+    child.stdin.write(`${JSON.stringify({ id: "run", type: "prompt", message: `RUN ${script}`, images: [{ type: "image", data: pngData, mimeType: "image/png" }] })}\n`);
+    await records.next((record) => record.type === "agent_settled");
+
+    const history = await bridgeRequest("gripi_history", "a1", {});
+    assert.equal(history.ok, true, history.error);
+    const messages = history.entries.filter((entry) => entry.type === "message" && entry.message.role !== "system");
+    assert.deepEqual(messages.map((entry) => entry.message.role), ["user", "assistant", "toolResult", "assistant"]);
+    const prompt = messages[0];
+    assert.deepEqual(prompt.message.content[1], { type: "image", data: "-", mimeType: "image/png" });
+
+    assert.deepEqual(await bridgeRequest("gripi_history_image", "a2", { entryId: prompt.id, index: 0 }), { ok: true, data: pngData, mimeType: "image/png" });
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("history replaces image data without changing Pi's entries, and reads one image by its number", async () => {
+  const commands = await loadTreeExtension();
+  const image = (data, mimeType = "image/png") => ({ type: "image", data, mimeType });
+  const branch = branchOf(
+    { role: "user", content: [{ type: "text", text: "Look" }, image("A"), image("B", "image/svg+xml"), image(""), image("C", "image/jpeg")] },
+    { type: "custom_message", customType: "note", display: true, content: [image("D")] },
+    { role: "toolResult", toolCallId: "r", toolName: "bash", content: [], details: { preview: image("E") }, isError: false },
+  );
+  const original = structuredClone(branch);
+  const session = sessionOf(branch);
+
+  const history = await bridge(commands, "gripi_history", {}, session);
+  assert.deepEqual(history.entries[0].message.content.slice(1), [image("-"), image("-", "image/svg+xml"), image(""), image("-", "image/jpeg")]);
+  assert.deepEqual(history.entries[1].content, [image("-")]);
+  assert.deepEqual(history.entries[2].message.details, { preview: image("-") });
+  assert.deepEqual(branch, original);
+
+  const imageAt = (entryId, index) => bridge(commands, "gripi_history_image", { entryId, index }, session);
+  assert.deepEqual(await imageAt("e0", 0), { ok: true, data: "A", mimeType: "image/png" });
+  assert.deepEqual(await imageAt("e0", 1), { ok: true, data: "C", mimeType: "image/jpeg" });
+  assert.deepEqual(await imageAt("e1", 0), { ok: true, data: "D", mimeType: "image/png" });
+  assert.deepEqual(await imageAt("e0", 2), { ok: false, error: "Image not found" });
+  assert.deepEqual(await imageAt("e2", 0), { ok: false, error: "Image not found" });
+  assert.deepEqual(await imageAt("missing", 0), { ok: false, error: "Image not found" });
+});
+
+test("history image refuses images over 48 MiB", async () => {
+  const commands = await loadTreeExtension();
+  const branch = branchOf({ role: "user", content: [{ type: "image", data: "A".repeat(48 * MiB + 4), mimeType: "image/png" }] });
+
+  assert.deepEqual(await bridge(commands, "gripi_history_image", { entryId: "e0", index: 0 }, sessionOf(branch)), { ok: false, error: "Image is too large" });
+});
+
+test("history keeps its reply small enough for Pi's output", async () => {
+  const commands = await loadTreeExtension();
+  const text = (size) => ({ role: "assistant", content: [{ type: "text", text: "x".repeat(size) }], stopReason: "stop" });
+  const many = { role: "assistant", content: Array.from({ length: 6_000 }, () => ({ type: "text", text: "y".repeat(2_000) })), stopReason: "stop" };
+  const branch = branchOf(text(10), ...Array.from({ length: 18 }, () => text(900 * 1024)), text(2 * MiB), many);
+  const original = structuredClone(branch);
+
+  const history = await bridge(commands, "gripi_history", {}, sessionOf(branch));
+  // The newest entries that fit come back, so the oldest are left out.
+  const ids = history.entries.map((entry) => Number(entry.id.slice(1)));
+  assert.ok(ids[0] > 0);
+  assert.deepEqual(ids, Array.from({ length: ids.length }, (_, index) => ids[0] + index));
+  assert.equal(ids.at(-1), 20);
+  assert.ok(JSON.stringify(history.entries).length <= 16 * MiB);
+  assert.equal(history.entries.at(-2).message.content[0].text, "Message too large to show (2.0MB)");
+  // An entry that is still too large keeps only its short strings.
+  const cut = history.entries.at(-1).message;
+  assert.equal(cut.role, "assistant");
+  assert.match(cut.content[0].text, /^Message too large to show \(11\.\dMB\)$/);
+  assert.deepEqual(branch, original);
+});
+
+async function loadTreeExtension() {
+  const jiti = createJiti(import.meta.url, { interopDefault: true, alias: { "@earendil-works/pi-coding-agent": piIndex } });
+  const loadExtension = await jiti.import(extensionPath, { default: true });
+  const commands = new Map();
+  loadExtension({ registerCommand(name, command) { commands.set(name, command); }, on() {}, setLabel() {} });
+  return commands;
+}
+
+// Runs a bridge command as Gripi sends it and returns the extension's reply.
+async function bridge(commands, name, payload, sessionManager) {
+  let reply;
+  await commands.get(name).handler(`abc ${Buffer.from(JSON.stringify(payload)).toString("base64url")}`, {
+    sessionManager,
+    ui: { setStatus(_key, value) { reply = value; } },
+  });
+  return JSON.parse(reply);
+}
+
+function sessionOf(branch) {
+  return {
+    getBranch: () => branch,
+    getLeafId: () => branch.at(-1)?.id ?? null,
+    getEntry: (id) => branch.find((entry) => entry.id === id),
+  };
+}
+
+// Messages, or whole entries that have a type, become a chain of entries e0, e1, ….
+function branchOf(...items) {
+  return items.map((item, index) => ({
+    type: "message",
+    id: `e${index}`,
+    parentId: index ? `e${index - 1}` : null,
+    timestamp: "2026-11-23T10:00:00.000Z",
+    ...(item.type ? item : { message: item }),
+  }));
+}

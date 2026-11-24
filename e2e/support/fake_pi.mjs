@@ -452,7 +452,7 @@ function acceptReloadBridge(command) {
 }
 
 function acceptTreeBridge(command) {
-  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)|gripi_scoped_models) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
+  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)|gripi_scoped_models|gripi_history(?:_image)?) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
   if (!match) return false;
   respond(command, true);
   const [, name, requestId, encoded] = match;
@@ -480,6 +480,15 @@ function acceptTreeBridge(command) {
     });
   } else if (name === "gripi_tree_leaf") {
     emitTreeBridge(name, requestId, { ok: true, leafId });
+  } else if (name === "gripi_history") {
+    // Like Gripi's extension, without its size limits.
+    const withoutImageData = function (key, value) { return key === "data" && this.type === "image" && value ? "-" : value; };
+    emitTreeBridge(name, requestId, { ok: true, entries: JSON.parse(JSON.stringify(branchEntries(), withoutImageData)) });
+  } else if (name === "gripi_history_image") {
+    const entry = entries.find((candidate) => candidate.id === payload.entryId);
+    const content = entry?.type === "custom_message" ? entry.content : entry?.message?.content;
+    const image = (Array.isArray(content) ? content : []).filter((part) => part?.type === "image" && part.data)[payload.index];
+    emitTreeBridge(name, requestId, image ? { ok: true, data: image.data, mimeType: image.mimeType } : { ok: false, error: "Image not found" });
   } else if (name === "gripi_scoped_models") {
     // controls-project stands for Pi without enabledModels, where nothing is scoped.
     const scoped = path.basename(header?.cwd || "") === "controls-project" ? [] : fakeModels().slice(0, 2);
@@ -501,6 +510,12 @@ function acceptTreeBridge(command) {
     }
   }
   return true;
+}
+
+function branchEntries() {
+  const branch = [];
+  for (let entry = entries.find((candidate) => candidate.id === leafId); entry; entry = entries.find((candidate) => candidate.id === entry.parentId)) branch.unshift(entry);
+  return branch;
 }
 
 function emitTreeBridge(name, requestId, result) {

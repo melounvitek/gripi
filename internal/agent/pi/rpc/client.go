@@ -1878,7 +1878,7 @@ func internalBridgeStatusKey(response map[string]any) string {
 		return ""
 	}
 	key := stringValue(response["statusKey"])
-	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|scoped_models|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
+	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|scoped_models|history|history_image|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
 	if matched {
 		return key
 	}
@@ -2624,6 +2624,16 @@ func (client *Client) TreeLeaf(ctx context.Context) (map[string]any, error) {
 }
 func (client *Client) ScopedModels(ctx context.Context) (map[string]any, error) {
 	return client.extensionRequest(ctx, "gripi_scoped_models", map[string]any{}, client.treeBridgeTimeout, "Scoped models request timed out")
+}
+
+// History returns the latest entries of the current branch, without image data, from Gripi's extension. It reads a
+// session that Pi keeps only in memory.
+func (client *Client) History(ctx context.Context) (map[string]any, error) {
+	return client.extensionRequest(ctx, "gripi_history", map[string]any{}, client.treeBridgeTimeout, "Session history request timed out")
+}
+func (client *Client) HistoryImage(ctx context.Context, entryID string, index int) (map[string]any, error) {
+	payload := map[string]any{"entryId": entryID, "index": index}
+	return client.extensionRequest(ctx, "gripi_history_image", payload, client.treeBridgeTimeout, "Session history request timed out")
 }
 func (client *Client) NavigateTree(ctx context.Context, entryID, summary, instructions string) (map[string]any, error) {
 	payload := map[string]any{"entryId": entryID, "summary": summary}
