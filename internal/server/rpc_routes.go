@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,9 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 		}
 	} else {
 		payload["session_sync"] = map[string]any{"mode": agent.SyncAvailable, "revision": nil, "error": nil, "gateway_busy": app.rpcClients.Busy(path)}
+	}
+	if app.scratch.contains(path) && app.scratchGone(path) {
+		payload["gone"] = true
 	}
 	writeJSON(response, payload)
 }
@@ -102,6 +106,9 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 	})
 	// Without the agent's own commands, the palette still lists those of the gateway.
 	commands := composer.Commands()
+	if app.scratch.contains(path) {
+		commands = slices.DeleteFunc(commands, func(command agent.Command) bool { return slices.Contains(scratchRefusedCommands, command.Name) })
+	}
 	if err == nil {
 		commands = append(commands, agentCommands...)
 	} else if !commandCatalogFallbackError(err) && app.writeRPCError(response, err) {
@@ -568,8 +575,9 @@ func (app *application) retireStaleRPCClient(request *http.Request, path string)
 	}
 	if _, pending := app.pendingSessions.CWD(path); pending && !app.sessionStore.Exists(path) {
 		// An unsaved Hermes session lives only in the Hermes that all Hermes sessions share, so it gets the variables
-		// once saved, when its client retires like a saved session's.
-		if app.agentOf(path) == "hermes" {
+		// once saved, when its client retires like a saved session's. A scratch session lives only in its Pi, so it
+		// keeps the variables that it started with.
+		if app.agentOf(path) == "hermes" || app.scratch.contains(path) {
 			return nil
 		}
 		_, err := agent.RestartUnsavedSession(request.Context(), path, changedAt, app.rpcClients, app.pendingSessions)

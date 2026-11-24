@@ -34,7 +34,7 @@ export default defineConfig({
     {
       name: "desktop",
       dependencies: ["setup"],
-      testIgnore: [/access\.setup\.js/, /mobile\.spec\.js/, /quote_touch\.spec\.js/, /real_pi\.spec\.js/, /specs\/hermes[^/]*\.spec\.js$/],
+      testIgnore: [/access\.setup\.js/, /mobile\.spec\.js/, /scratch_touch\.spec\.js/, /quote_touch\.spec\.js/, /real_pi\.spec\.js/, /specs\/hermes[^/]*\.spec\.js$/],
       use: {
         storageState,
         viewport: { width: 1440, height: 900 }
@@ -43,7 +43,7 @@ export default defineConfig({
     {
       name: "mobile",
       dependencies: ["setup"],
-      testMatch: [/mobile\.spec\.js/, /session_footer\.spec\.js/, /active_activity\.spec\.js/, /tool_preparation\.spec\.js/, /quote_touch\.spec\.js/, /markdown_classes\.spec\.js/, /session_rename\.spec\.js/, /session_tags\.spec\.js/, /new_session_picker\.spec\.js/, /command_palette\.spec\.js/, /session_tag_icons\.spec\.js/, /header_tag_icons\.spec\.js/, /environment\.spec\.js/, /sudo\.spec\.js/, /workers\.spec\.js/, /access_requests\.spec\.js/],
+      testMatch: [/mobile\.spec\.js/, /scratch_touch\.spec\.js/, /session_footer\.spec\.js/, /active_activity\.spec\.js/, /tool_preparation\.spec\.js/, /quote_touch\.spec\.js/, /markdown_classes\.spec\.js/, /session_rename\.spec\.js/, /session_tags\.spec\.js/, /new_session_picker\.spec\.js/, /command_palette\.spec\.js/, /session_tag_icons\.spec\.js/, /header_tag_icons\.spec\.js/, /environment\.spec\.js/, /sudo\.spec\.js/, /workers\.spec\.js/, /access_requests\.spec\.js/],
       use: {
         ...devices["Pixel 7"],
         storageState

@@ -504,7 +504,12 @@ func (store Store) windowOnce(path, leafID string, leafSupplied bool, cursor *in
 	if cursor != nil {
 		end = clamp(*cursor, 0, len(units))
 	}
-	messages, start, err := renderWindow(path, indexed, units, end, after, store.Home)
+	file, err := os.Open(path)
+	if err != nil {
+		return agent.Window{}, err
+	}
+	defer file.Close()
+	messages, start, err := renderWindow(file, units, end, after, store.Home)
 	if err != nil {
 		return agent.Window{}, err
 	}
@@ -520,6 +525,35 @@ func (store Store) windowOnce(path, leafID string, leafSupplied bool, cursor *in
 		LatestStableLeafID: indexed.stableLeafID(indexed.latestLeafID()), CurrentStableLeafID: indexed.stableLeafID(leafID),
 		Status: indexed.sessionStatus(),
 	}, nil
+}
+
+// WindowFromEntries renders a window of a session that Pi keeps only in memory, from its branch's entries as decoded
+// JSON, the way Window renders a session file.
+func (store Store) WindowFromEntries(entries []any, cursor *int, after *int) (agent.Window, error) {
+	var source []byte
+	branch := make([]entry, 0, len(entries))
+	for ordinal, item := range entries {
+		raw, ok := item.(map[string]any)
+		data, err := json.Marshal(item)
+		if !ok || err != nil {
+			return agent.Window{}, errors.New("session entry is not an object")
+		}
+		branch = append(branch, metadataFromRaw(raw, ordinal, int64(len(source)), int64(len(data))))
+		source = append(source, data...)
+	}
+	units, projectionOK := projectedUnits(branch)
+	if !projectionOK {
+		return agent.Window{}, errors.New("session contains mismatched tool call metadata")
+	}
+	end := len(units)
+	if cursor != nil {
+		end = clamp(*cursor, 0, len(units))
+	}
+	messages, start, err := renderWindow(bytes.NewReader(source), units, end, after, store.Home)
+	if err != nil {
+		return agent.Window{}, err
+	}
+	return agent.Window{Messages: messages, StartIndex: start, EndIndex: end, TotalMessageCount: len(units)}, nil
 }
 
 func (store Store) Status(path string) (agent.Status, error) {
@@ -1266,7 +1300,7 @@ func projectedUnits(entries []entry) ([]unit, bool) {
 	return result, true
 }
 
-func renderWindow(path string, indexed *index, units []unit, end int, after *int, home string) ([]*agent.Message, int, error) {
+func renderWindow(source io.ReaderAt, units []unit, end int, after *int, home string) ([]*agent.Message, int, error) {
 	start := 0
 	forward := after != nil
 	if forward {
@@ -1288,7 +1322,7 @@ func renderWindow(path string, indexed *index, units []unit, end int, after *int
 		if enough && bytesUsed+item.Estimate > WindowByteBudget {
 			break
 		}
-		rendered, err := renderUnits(path, indexed, []unit{item}, home)
+		rendered, err := renderUnits(source, []unit{item}, home)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1335,7 +1369,8 @@ func renderedMessageBytes(message *agent.Message) int64 {
 	return int64((len(message.Role) + len(message.Text) + len(message.Summary)) * 2)
 }
 
-func renderUnits(path string, indexed *index, selected []unit, home string) ([]*agent.Message, error) {
+// renderUnits reads the entries of the units from source, at the offsets that the index found them.
+func renderUnits(source io.ReaderAt, selected []unit, home string) ([]*agent.Message, error) {
 	if len(selected) == 0 {
 		return nil, nil
 	}
@@ -1353,11 +1388,6 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 		ordinals = append(ordinals, ordinal)
 	}
 	sort.Ints(ordinals)
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
 	var messages []*agent.Message
 	type subagentContext struct {
 		prompt    string
@@ -1401,7 +1431,7 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 			continue
 		}
 		data := make([]byte, item.Length)
-		if _, err := file.ReadAt(data, item.Offset); err != nil && !errors.Is(err, io.EOF) {
+		if _, err := source.ReadAt(data, item.Offset); err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
 		var raw map[string]any

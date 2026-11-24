@@ -496,6 +496,12 @@ func newSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) i
 	if *asJSON && *onlyID {
 		return usageError(stderr, "new", "--id and --json cannot be combined")
 	}
+	// Pi sets no PI_SESSION_FILE in a session that it keeps only in memory, such as a scratch session.
+	emptyParent := false
+	flags.Visit(func(set *flag.Flag) { emptyParent = emptyParent || set.Name == "parent" && *parentReference == "" })
+	if emptyParent {
+		return usageError(stderr, "new", "--parent names no session, as $PI_SESSION_FILE does in a scratch session, which has no file")
+	}
 	message := ""
 	if len(positional) == 2 {
 		var problem string

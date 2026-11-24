@@ -20,6 +20,15 @@ const TREE_METADATA_BYTES = 1_024;
 const ENTRY_ID_BYTES = 1024;
 const LABEL_BYTES = 4096;
 const CUSTOM_INSTRUCTIONS_BYTES = 64 * 1024;
+// The history's reply crosses Pi's output as one line, which Gripi reads up to 65 MiB. Escaping it once more there at
+// most triples 16 Mi characters.
+const HISTORY_CHARACTERS = 16 * 1024 * 1024;
+const HISTORY_ENTRY_CHARACTERS = 4 * 1024 * 1024;
+const HISTORY_STRING_CHARACTERS = 1024 * 1024;
+const HISTORY_SHORT_STRING_CHARACTERS = 1024;
+const HISTORY_IMAGE_CHARACTERS = 48 * 1024 * 1024;
+// Gripi shows inline images of these types only, and numbers them among themselves.
+const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 type TreeFilterMode = "default" | "no-tools" | "user-only" | "labeled-only" | "all";
 
@@ -279,6 +288,48 @@ function projectTree(tree: SessionTreeNode[], leafId: string | null, filterMode:
   };
 }
 
+function tooLargeNote(characters: number): string {
+  return `Message too large to show (${(characters / (1024 * 1024)).toFixed(1)}MB)`;
+}
+
+// A copy of the entry in which image data becomes "-", as Gripi's withoutImageData does, so images keep their numbers,
+// and strings over the limit become a note.
+function historyJSON(entry: SessionEntry, stringLimit: number, note: (characters: number) => string): string {
+  return JSON.stringify(entry, function (this: Record<string, unknown>, key: string, value: unknown) {
+    if (key === "data" && this.type === "image" && typeof value === "string" && value) return "-";
+    if (typeof value === "string" && value.length > stringLimit) return note(value.length);
+    return value;
+  });
+}
+
+function historyEntryJSON(entry: SessionEntry): string {
+  const json = historyJSON(entry, HISTORY_STRING_CHARACTERS, tooLargeNote);
+  return json.length <= HISTORY_ENTRY_CHARACTERS ? json : historyJSON(entry, HISTORY_SHORT_STRING_CHARACTERS, () => tooLargeNote(json.length));
+}
+
+// The newest entries of the current branch that fit the limit.
+function history(branch: SessionEntry[]): unknown[] {
+  const entries: unknown[] = [];
+  let characters = 0;
+  for (let index = branch.length - 1; index >= 0; index--) {
+    const json = historyEntryJSON(branch[index]);
+    characters += json.length;
+    if (characters > HISTORY_CHARACTERS) break;
+    entries.push(JSON.parse(json));
+  }
+  return entries.reverse();
+}
+
+function historyImage(entry: SessionEntry | undefined, index: unknown): { data: string; mimeType: string } {
+  const content = entry?.type === "message" ? entry.message.content : entry?.type === "custom_message" ? entry.content : undefined;
+  const images = (Array.isArray(content) ? content : []).filter((part): part is { type: "image"; data: string; mimeType: string } =>
+    part?.type === "image" && IMAGE_MIME_TYPES.has(part.mimeType) && typeof part.data === "string" && part.data !== "");
+  const image = typeof index === "number" ? images[index] : undefined;
+  if (!image) throw new Error("Image not found");
+  if (image.data.length > HISTORY_IMAGE_CHARACTERS) throw new Error("Image is too large");
+  return { data: image.data, mimeType: image.mimeType };
+}
+
 function registerBridgeCommand(pi: ExtensionAPI, name: string, description: string, handler: BridgeHandler): void {
   pi.registerCommand(name, {
     description,
@@ -368,6 +419,17 @@ export default function (pi: ExtensionAPI) {
   registerBridgeCommand(pi, "gripi_scoped_models", "Report the session's scoped models to Gripi", (_requestPayload, ctx) => ({
     models: ctx.scopedModels.map(({ model }) => ({ provider: model.provider, id: model.id })),
   }));
+
+  // A session that Pi keeps only in memory has no file that Gripi could read its history from.
+  registerBridgeCommand(pi, "gripi_history", "Report the current branch's latest entries to Gripi", (_requestPayload, ctx) => ({
+    entries: history(ctx.sessionManager.getBranch()),
+  }));
+
+  registerBridgeCommand(pi, "gripi_history_image", "Report an image of a session entry to Gripi", (requestPayload, ctx) => {
+    const entryId = requestPayload.entryId;
+    if (typeof entryId !== "string" || exceedsBytes(entryId, ENTRY_ID_BYTES)) throw new Error("Image not found");
+    return historyImage(ctx.sessionManager.getEntry(entryId), requestPayload.index);
+  });
 
   registerBridgeCommand(pi, "gripi_tree_label", "Set or clear a native Pi tree label from Gripi", (requestPayload, ctx) => {
     if (!ctx.isIdle()) throw new Error("Session is busy");

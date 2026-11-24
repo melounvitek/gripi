@@ -238,11 +238,15 @@ func Start(sessionPath, cwd string, command []string, extensionPath string, vari
 	return startProcess(sessionPath, cwd, command, args, variables, launch, diagnostics, observer)
 }
 
-// StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set.
-func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+// StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set. Pi keeps a scratch
+// session only in memory.
+func StartInCWD(cwd, forkFrom string, scratch bool, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
 	if forkFrom != "" {
 		args = append(args, "--fork", forkFrom)
+	}
+	if scratch {
+		args = append(args, "--no-session")
 	}
 	return startProcess("", cwd, command, args, variables, launch, diagnostics, observer)
 }
@@ -931,7 +935,12 @@ func (writer *commandWriter) Write(value []byte) (int, error) {
 
 func writeImageCommand(writer io.Writer, value map[string]any, images []agent.PromptImage) error {
 	files := make([]*os.File, 0, len(images))
+	readers := make([]io.Reader, 0, len(images))
 	for _, image := range images {
+		if image.Data != nil {
+			readers = append(readers, bytes.NewReader(image.Data))
+			continue
+		}
 		file, err := os.Open(image.Path)
 		if err == nil {
 			var info os.FileInfo
@@ -950,6 +959,7 @@ func writeImageCommand(writer io.Writer, value map[string]any, images []agent.Pr
 			return err
 		}
 		files = append(files, file)
+		readers = append(readers, file)
 	}
 	defer func() {
 		for _, file := range files {
@@ -999,7 +1009,7 @@ func writeImageCommand(writer io.Writer, value map[string]any, images []agent.Pr
 			return err
 		}
 		encoder := base64.NewEncoder(base64.StdEncoding, writer)
-		copied, copyErr := io.Copy(encoder, io.LimitReader(files[index], image.Size+1))
+		copied, copyErr := io.Copy(encoder, io.LimitReader(readers[index], image.Size+1))
 		if copyErr != nil {
 			_ = encoder.Close()
 			return copyErr
@@ -1874,7 +1884,7 @@ func internalBridgeStatusKey(response map[string]any) string {
 		return ""
 	}
 	key := stringValue(response["statusKey"])
-	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|scoped_models|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
+	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|scoped_models|history|history_image|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
 	if matched {
 		return key
 	}
@@ -2620,6 +2630,16 @@ func (client *Client) TreeLeaf(ctx context.Context) (map[string]any, error) {
 }
 func (client *Client) ScopedModels(ctx context.Context) (map[string]any, error) {
 	return client.extensionRequest(ctx, "gripi_scoped_models", map[string]any{}, client.treeBridgeTimeout, "Scoped models request timed out")
+}
+
+// History returns the latest entries of the current branch, without image data, from Gripi's extension. It reads a
+// session that Pi keeps only in memory.
+func (client *Client) History(ctx context.Context) (map[string]any, error) {
+	return client.extensionRequest(ctx, "gripi_history", map[string]any{}, client.treeBridgeTimeout, "Session history request timed out")
+}
+func (client *Client) HistoryImage(ctx context.Context, entryID string, index int) (map[string]any, error) {
+	payload := map[string]any{"entryId": entryID, "index": index}
+	return client.extensionRequest(ctx, "gripi_history_image", payload, client.treeBridgeTimeout, "Session history request timed out")
 }
 func (client *Client) NavigateTree(ctx context.Context, entryID, summary, instructions string) (map[string]any, error) {
 	payload := map[string]any{"entryId": entryID, "summary": summary}

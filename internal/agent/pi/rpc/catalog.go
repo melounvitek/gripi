@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var internalCommandNames = []string{"gripi_reload", "gripi_tree_navigate", "gripi_tree_snapshot", "gripi_tree_leaf", "gripi_tree_label", "gripi_scoped_models"}
+var internalCommandNames = []string{"gripi_reload", "gripi_tree_navigate", "gripi_tree_snapshot", "gripi_tree_leaf", "gripi_tree_label", "gripi_scoped_models", "gripi_history", "gripi_history_image"}
 
 // InternalCommand reports whether Pi would run the message as one of the commands
 // that carry the gateway's own requests to its Pi extension.

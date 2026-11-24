@@ -10,6 +10,7 @@ import { activeRecovery, footerModel, footerStatus, live, mobileSubagents, nativ
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
 const forkSource = valueAfter("--fork");
+const noSession = process.argv.includes("--no-session");
 const sessionsRoot = process.env.GRIPI_E2E_SESSIONS_ROOT;
 let sessionPath = resumedPath || null;
 let header = null;
@@ -250,7 +251,8 @@ function state() {
     isCompacting: compacting,
     steeringMode: "one-at-a-time",
     followUpMode: "one-at-a-time",
-    sessionFile: sessionPath,
+    // Like Pi, which leaves it out for a --no-session session.
+    sessionFile: sessionPath ?? undefined,
     sessionId: header?.id || null,
     ...(sessionName ? { sessionName } : {}),
     autoCompactionEnabled: true,
@@ -321,7 +323,7 @@ function acceptPrompt(command) {
     respond(command, false, { error: "Agent is already streaming" });
     return;
   }
-  const user = userMessage(command.message);
+  const user = userMessage(command.message, command.images);
   appendMessage(user);
   respond(command, true, { data: { disposition: "started" } });
   busy = true;
@@ -450,7 +452,7 @@ function acceptReloadBridge(command) {
 }
 
 function acceptTreeBridge(command) {
-  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)|gripi_scoped_models) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
+  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)|gripi_scoped_models|gripi_history(?:_image)?) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
   if (!match) return false;
   respond(command, true);
   const [, name, requestId, encoded] = match;
@@ -478,6 +480,15 @@ function acceptTreeBridge(command) {
     });
   } else if (name === "gripi_tree_leaf") {
     emitTreeBridge(name, requestId, { ok: true, leafId });
+  } else if (name === "gripi_history") {
+    // Like Gripi's extension, without its size limits.
+    const withoutImageData = function (key, value) { return key === "data" && this.type === "image" && value ? "-" : value; };
+    emitTreeBridge(name, requestId, { ok: true, entries: JSON.parse(JSON.stringify(branchEntries(), withoutImageData)) });
+  } else if (name === "gripi_history_image") {
+    const entry = entries.find((candidate) => candidate.id === payload.entryId);
+    const content = entry?.type === "custom_message" ? entry.content : entry?.message?.content;
+    const image = (Array.isArray(content) ? content : []).filter((part) => part?.type === "image" && part.data)[payload.index];
+    emitTreeBridge(name, requestId, image ? { ok: true, data: image.data, mimeType: image.mimeType } : { ok: false, error: "Image not found" });
   } else if (name === "gripi_scoped_models") {
     // controls-project stands for Pi without enabledModels, where nothing is scoped.
     const scoped = path.basename(header?.cwd || "") === "controls-project" ? [] : fakeModels().slice(0, 2);
@@ -499,6 +510,12 @@ function acceptTreeBridge(command) {
     }
   }
   return true;
+}
+
+function branchEntries() {
+  const branch = [];
+  for (let entry = entries.find((candidate) => candidate.id === leafId); entry; entry = entries.find((candidate) => candidate.id === entry.parentId)) branch.unshift(entry);
+  return branch;
 }
 
 function emitTreeBridge(name, requestId, result) {
@@ -594,7 +611,7 @@ function acceptQueuedMessage(command, kind, reply) {
   pending.timer = schedule(delay, () => {
     pendingMessages.splice(pendingMessages.indexOf(pending), 1);
     emit({ type: "queue_update", ...queuedMessages() });
-    const user = userMessage(command.message);
+    const user = userMessage(command.message, command.images);
     appendMessage(user);
     emitMessage(user);
     completeAssistant(reply);
@@ -1384,8 +1401,6 @@ function forkSession(sourcePath) {
 }
 
 function prepareNewSession(filePath) {
-  if (!sessionsRoot) throw new Error("GRIPI_E2E_SESSIONS_ROOT is required for new fake sessions");
-  sessionPath = filePath || path.join(sessionsRoot, "e2e", `generated-${randomUUID()}.jsonl`);
   header = {
     type: "session",
     version: 3,
@@ -1393,6 +1408,9 @@ function prepareNewSession(filePath) {
     timestamp: new Date().toISOString(),
     cwd: process.cwd()
   };
+  if (noSession) return;
+  if (!sessionsRoot) throw new Error("GRIPI_E2E_SESSIONS_ROOT is required for new fake sessions");
+  sessionPath = filePath || path.join(sessionsRoot, "e2e", `generated-${randomUUID()}.jsonl`);
 }
 
 function appendMessage(value) {
@@ -1400,12 +1418,12 @@ function appendMessage(value) {
 }
 
 function appendEntry(type, fields) {
-  if (!sessionPath) return;
   entrySequence += 1;
   const id = `${process.pid.toString(16).slice(-4).padStart(4, "0")}${entrySequence.toString(16).slice(-4).padStart(4, "0")}`;
   const entry = { type, id, parentId: leafId, timestamp: new Date().toISOString(), ...fields };
   entries.push(entry);
   leafId = id;
+  if (!sessionPath) return entry;
   if (sessionPersisted) {
     appendFileSync(sessionPath, `${JSON.stringify(entry)}\n`);
   } else if (type === "message" && fields.message?.role === "assistant") {
@@ -1416,8 +1434,8 @@ function appendEntry(type, fields) {
   return entry;
 }
 
-function userMessage(text) {
-  return { role: "user", content: [{ type: "text", text }], timestamp: Date.now() };
+function userMessage(text, images = []) {
+  return { role: "user", content: [{ type: "text", text }, ...images], timestamp: Date.now() };
 }
 
 function assistantMessage(content, stopReason, timestamp = Date.now()) {

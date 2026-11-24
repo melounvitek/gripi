@@ -50,7 +50,7 @@ func TestALauncherRunsPiElsewhereAndHearsWhenItEnded(t *testing.T) {
 		t.Fatalf("launched %+v, want %+v", launched, expected)
 	}
 
-	local, err := StartInCWD(here, "", []string{"/bin/sh", "-c", `echo here > "$0"`, dump}, "unused.ts", nil, launch, nil, nil)
+	local, err := StartInCWD(here, "", false, []string{"/bin/sh", "-c", `echo here > "$0"`, dump}, "unused.ts", nil, launch, nil, nil)
 	if err == nil {
 		t.Cleanup(func() { _ = local.Close() })
 		<-local.waitDone

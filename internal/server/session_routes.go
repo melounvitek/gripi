@@ -228,6 +228,11 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 		return
 	}
 	session, ok := app.sessionStore.Session(path)
+	scratch := app.scratch.contains(path)
+	if scratch {
+		cwd, _ := app.pendingSessions.CWD(path)
+		session, ok = &agent.Session{Path: path, CWD: cwd}, true
+	}
 	if !ok {
 		writeJSON(response, empty)
 		return
@@ -243,12 +248,21 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 	if supplied && len(leaf) > 0 {
 		leafID = leaf[0]
 	}
-	window, err := app.sessionStore.Window(session.Path, leafID, supplied, &cursor, after)
+	var window agent.Window
+	var err error
+	if scratch {
+		window, err = app.scratchWindow(request.Context(), path, &cursor, after)
+	} else {
+		window, err = app.sessionStore.Window(session.Path, leafID, supplied, &cursor, after)
+	}
 	if err != nil {
 		http.Error(response, "Session changed while it was read", http.StatusServiceUnavailable)
 		return
 	}
-	matches := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(session.Path, window.Messages)
+	var matches map[*agent.Message]sessions.AttachmentMatch
+	if !scratch {
+		matches = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(session.Path, window.Messages)
+	}
 	view := &pageView{Selected: session, Home: app.config.Home, Attachments: matches, HideThinkingBlock: app.adapter.DisplaySettings(session.CWD).HideThinkingBlock}
 	view.LiveOutput.AgentRunning = app.rpcClients.AgentRunning(session.Path)
 	var html bytes.Buffer
@@ -332,7 +346,16 @@ func (app *application) sessionImage(response http.ResponseWriter, request *http
 		http.NotFound(response, request)
 		return
 	}
-	data, mimeType, err := app.sessionStore.Image(path, request.PathValue("entry_id"), index)
+	var data []byte
+	var mimeType string
+	if app.scratch.contains(path) {
+		err = app.scratchHistory(request.Context(), path, func(history agent.MemoryHistory) (err error) {
+			data, mimeType, err = history.MemoryImage(request.Context(), request.PathValue("entry_id"), index)
+			return err
+		})
+	} else {
+		data, mimeType, err = app.sessionStore.Image(path, request.PathValue("entry_id"), index)
+	}
 	if err != nil {
 		http.NotFound(response, request)
 		return
@@ -430,6 +453,10 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 }
 
 func (app *application) gatewayStateSessionPath(path string) (string, bool) {
+	// Gripi keeps nothing about a scratch session, such as its sub-sessions.
+	if app.scratch.contains(path) {
+		return "", false
+	}
 	if session, persisted := app.sessionStore.Session(path); persisted {
 		return session.Path, true
 	}

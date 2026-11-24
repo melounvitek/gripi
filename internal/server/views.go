@@ -135,6 +135,11 @@ type pageView struct {
 	HermesPanel   bool
 	// VoiceEnabled offers Hermes sessions a voice conversation.
 	VoiceEnabled bool
+	// ScratchPage is the page of the user's scratch session, which the scratch overlay shows, and ScratchGone tells that
+	// the session has ended. ScratchExists tells that the user has one.
+	ScratchPage   bool
+	ScratchGone   bool
+	ScratchExists bool
 	// SubSession tells that the selected session is linked under another, so its page leaves notifying to the sidebar,
 	// which shows only the replies to the user's own turns as completed.
 	SubSession bool
@@ -175,6 +180,10 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	hermesPanel := params.Get("session_only") == "1" && app.agentOf(params.Get("session")) == "hermes"
+	// Pages never list a scratch session; only the scratch overlay's page shows it, and once it has ended, that page
+	// says so rather than show another session, also of a key that names one.
+	scratchPage := params.Get("session_only") == "1" && params.Get("scratch") == "1"
+	scratchOwned := scratchPage && app.ownsScratch(request, params.Get("session"))
 	// Pages don't list Hermes's conversations, so the Hermes panel's page adds its own.
 	if hermesPanel {
 		if session, saved := app.sessionStore.Session(params.Get("session")); saved {
@@ -194,7 +203,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		if app.rpcClients.Registered(pending.Path) && (app.ownsSession == nil || app.ownsSession(request, pending.Path)) {
 			unresolvedPendingCWDs[pending.CWD] = true
 		}
-		if knownPaths[pending.Path] {
+		if knownPaths[pending.Path] || app.scratch.contains(pending.Path) {
 			continue
 		}
 		all = append(all, &agent.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt, Agent: app.agentOf(pending.Path)})
@@ -242,7 +251,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		selectedProject = ""
 	}
 	var selected *agent.Session
-	if params.Get("no_session") != "1" {
+	if scratchOwned {
+		cwd, _ := app.pendingSessions.CWD(params.Get("session"))
+		selected = &agent.Session{Path: params.Get("session"), CWD: cwd, DisplayName: "Scratch", Agent: app.agentOf(params.Get("session"))}
+	} else if scratchPage {
+		selected = &agent.Session{DisplayName: "Scratch"}
+	} else if params.Get("no_session") != "1" {
 		for _, session := range all {
 			if session.Path == params.Get("session") {
 				selected = session
@@ -279,7 +293,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	// Browsers ask with mark_read=0 while their window has no focus.
 	markRead := (request.URL.Path != "/sidebar" || params.Get("session") != "") && params.Get("mark_read") != "0"
-	unread, pinned, err := app.gatewayState.ReadAndObservePending(all, selected, markRead, externalFollow, unresolvedPendingCWDs)
+	// Gripi keeps nothing about a scratch session, such as whether it was read.
+	observed := selected
+	if scratchPage {
+		observed = nil
+	}
+	unread, pinned, err := app.gatewayState.ReadAndObservePending(all, observed, markRead, externalFollow, unresolvedPendingCWDs)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +306,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
-	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil}
+	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil, ScratchPage: scratchPage, ScratchGone: scratchPage && !scratchOwned, ScratchExists: app.scratch.key(currentWorkspaceID(request)) != ""}
 	view.ExternalFollow = externalFollow
 	if notifier := app.completionNotifications; notifier != nil {
 		notifier.mu.Lock()
@@ -379,14 +398,29 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
 		window := agent.Window{}
+		var read func() (agent.Window, error)
 		if saved {
+			read = func() (agent.Window, error) {
+				return app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
+			}
+		} else if scratchOwned {
+			read = func() (agent.Window, error) {
+				window, err := app.scratchWindow(request.Context(), selected.Path, nil, nil)
+				// Without its history, such as when Pi doesn't answer in time, the page shows the live run.
+				if err != nil {
+					logInternalError("read scratch session history", err)
+				}
+				return window, nil
+			}
+		}
+		if read != nil {
 			// A run that starts or ends during the read would pair its messages with the other run state, so read
 			// again until the state holds across a read. An idle agent also must not have had events, which a whole
 			// run would leave; a running one has them for every streamed delta. The snapshot stays the earlier one:
 			// its event cursor must not skip anything the window lacks.
 			for attempt := 1; ; attempt++ {
 				var err error
-				window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
+				window, err = read()
 				if err != nil {
 					return nil, err
 				}
@@ -772,7 +806,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return relationData{view, session, current}
 		},
 		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
-		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph, "serverIcon": serverIcon,
+		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph, "scratchGlyph": scratchGlyph, "serverIcon": serverIcon,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
@@ -1323,6 +1357,11 @@ func agentLabel(name string) string {
 }
 
 // hermesGlyph is Hermes's caduceus, which marks the Hermes panel and its button.
+// scratchGlyph is an incognito hat and glasses, as browsers show their private windows.
+func scratchGlyph() template.HTML {
+	return `<svg class="scratch-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 10 8 4.5h8L17.5 10"/><path d="M3 10.5h18"/><circle cx="7.5" cy="16" r="2.8"/><circle cx="16.5" cy="16" r="2.8"/><path d="M10.3 16q1.7-1.2 3.4 0"/></svg>`
+}
+
 func hermesGlyph() template.HTML {
 	return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="M12 5.5C10 3.5 6.5 3.2 3.5 4.5c2.3 1.4 5.4 2 8.5 2.5M12 5.5c2-2 5.5-2.3 8.5-1-2.3 1.4-5.4 2-8.5 2.5"/><path d="M9 10c0 1.8 6 1.4 6 3.5S9 15.7 9 17.5s4.5 1.9 6 1.5"/></svg>`
 }

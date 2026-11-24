@@ -148,8 +148,14 @@ function installAppMenu() {
           }
         },
         {
-          label: "Add Server…",
+          label: "Scratch Session",
           accelerator: "CmdOrCtrl+Shift+N",
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send("gateway:scratch-session-requested");
+          }
+        },
+        {
+          label: "Add Server…",
           click: () => {
             if (mainWindow) mainWindow.webContents.send("gateway:add-requested");
           }

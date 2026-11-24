@@ -49,6 +49,10 @@ window.gripiDesktop.onNewSessionRequested(() => {
   openActiveGatewayNewSessionModal();
 });
 
+window.gripiDesktop.onScratchSessionRequested(() => {
+  dispatchActiveGatewayEvent("gripi:scratch-session-requested");
+});
+
 window.gripiDesktop.onNextGatewayRequested(async () => {
   await activateNextGateway();
 });

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -51,10 +52,12 @@ func (app *application) securityHeaders(next http.Handler) http.Handler {
 			http.Error(response, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		// The Hermes panel shows the session-only page of its conversation in a frame, which /hermes leads to.
+		// The Hermes panel shows the session-only page of its conversation in a frame, which /hermes leads to, and the
+		// scratch overlay the page of the scratch session.
 		frameAncestors := "'none'"
 		query := request.URL.Query()
-		if strings.HasPrefix(request.URL.Path, "/hermes") || request.URL.Path == "/" && query.Get("session_only") == "1" && app.agentOf(query.Get("session")) == "hermes" {
+		sessionOnly := request.URL.Path == "/" && query.Get("session_only") == "1"
+		if strings.HasPrefix(request.URL.Path, "/hermes") || sessionOnly && (app.agentOf(query.Get("session")) == "hermes" || query.Get("scratch") == "1") {
 			frameAncestors = "'self'"
 		}
 		policy := strings.Join([]string{
@@ -114,6 +117,22 @@ func (app *application) limitRequestBody(next http.Handler) http.Handler {
 
 		originalBody := request.Body
 		defer originalBody.Close()
+		// A prompt may carry a scratch session's images, which must not reach a file either.
+		if path.Clean(request.URL.Path) == "/prompt" {
+			contents, err := io.ReadAll(io.LimitReader(originalBody, maxRequestBodyBytes+1))
+			if err != nil {
+				writeText(response, http.StatusBadRequest, "Invalid request body")
+				return
+			}
+			if int64(len(contents)) > maxRequestBodyBytes {
+				writeText(response, http.StatusRequestEntityTooLarge, "Request body too large")
+				return
+			}
+			request.Body = io.NopCloser(bytes.NewReader(contents))
+			request.ContentLength = int64(len(contents))
+			next.ServeHTTP(response, request)
+			return
+		}
 		bodyFile, err := os.CreateTemp("", "gripi-request-body-*")
 		if err != nil {
 			writeText(response, http.StatusInternalServerError, "Internal Server Error")
@@ -407,6 +426,10 @@ func (app *application) writeSecurityError(response http.ResponseWriter, status 
 func parseRequestForm(request *http.Request) error {
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err == nil && mediaType == "multipart/form-data" {
+		// limitRequestBody bounds the body, so a prompt's images, which may be a scratch session's, stay in memory.
+		if path.Clean(request.URL.Path) == "/prompt" {
+			return request.ParseMultipartForm(maxRequestBodyBytes)
+		}
 		return request.ParseMultipartForm(0)
 	}
 	return request.ParseForm()

@@ -68,6 +68,13 @@ func (app *application) registerActionRoutes(mux *http.ServeMux) {
 }
 
 func (app *application) prompt(response http.ResponseWriter, request *http.Request) {
+	// A prompt's form stays in memory, as it may hold a scratch session's images, so two large ones at a time do.
+	if request.ContentLength > 1<<20 {
+		if !acquireRequestSlot(response, request, app.promptUploads) {
+			return
+		}
+		defer releaseRequestSlot(app.promptUploads)
+	}
 	if !parseForm(response, request) {
 		return
 	}
@@ -82,6 +89,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	message := request.FormValue("message")
 	imageFiles, ok := uploadedPromptImages(response, request)
 	if !ok {
+		return
+	}
+	scratch := app.scratch.contains(path)
+	if scratch && scratchPromptTooLarge(message, imageFiles) {
+		writeText(response, http.StatusRequestEntityTooLarge, "This message is too large for a scratch session, which takes about 30 MB of text and images at once.")
 		return
 	}
 	if strings.TrimSpace(message) == "" && len(imageFiles) == 0 {
@@ -135,6 +147,9 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if behavior != "follow_up" {
 		command = composer.SlashCommand(message)
 	}
+	if app.scratch.contains(path) && slices.Contains(scratchRefusedCommands, command.Name) {
+		command.Unavailable = "`/" + command.Name + "` isn’t available in a scratch session."
+	}
 	if command.Unavailable != "" {
 		app.writePromptResult(response, request, path, map[string]any{"command": command.Name, "message": command.Unavailable})
 		return
@@ -178,6 +193,12 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		if len(promptImages) > 0 {
 			return promptImages, nil
 		}
+		// Gripi keeps nothing of a scratch session, so its images stay in memory.
+		if scratch {
+			var err error
+			promptImages, err = app.scratchPromptImages(path, imageFiles)
+			return promptImages, err
+		}
 		hash := sessions.SessionHash(path)
 		images, cleanup, err := prompts.PersistUploadedImages(imageFiles, filepath.Join(app.config.AttachmentsRoot, hash))
 		if err != nil {
@@ -196,7 +217,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return promptImages, nil
 	}
 	recordImages := func() error {
-		if len(promptImages) == 0 {
+		if len(promptImages) == 0 || scratch {
 			return nil
 		}
 		keepImages = true
@@ -1684,6 +1705,9 @@ func (app *application) actionSessionPath(response http.ResponseWriter, request 
 func (app *application) validOwnedSessionPath(request *http.Request, path string) bool {
 	if path == "" || len(path) > maximumSessionPathBytes || !app.sessionStore.ValidKey(path) || strings.ContainsRune(path, 0) || !reachesSession(request, path) {
 		return false
+	}
+	if app.scratch.contains(path) {
+		return app.ownsScratch(request, path)
 	}
 	return app.ownsSession == nil || app.ownsSession(request, path)
 }

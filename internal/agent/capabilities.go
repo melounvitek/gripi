@@ -20,6 +20,13 @@ type Exiter interface {
 	Exited() bool
 }
 
+// MemoryHistory is a client whose agent keeps the session only in memory, where its history comes from, as Store
+// reads a saved session's.
+type MemoryHistory interface {
+	MemoryWindow(ctx context.Context, cursor *int, after *int) (Window, error)
+	MemoryImage(ctx context.Context, entryID string, index int) ([]byte, string, error)
+}
+
 // QueueRestorer is a client that hands back its queued messages when a stop retires it.
 type QueueRestorer interface {
 	QueuedMessagesForStop() (Queue, bool)

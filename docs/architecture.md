@@ -37,6 +37,10 @@ A session that moves alone runs on a private copy of its repository, in the help
 
 `gripi sudo` in a session on a worker runs sudo where setuid works, outside every view: main runs `gripi worker sudo` under the worker user's systemd, from where it may start sudo in the session's cgroup. sudo runs `nsenter`, which enters the mount namespace of the session's Pi. Each time that sudo asks for the password, its askpass program, gripi, asks the helper, which asks main over the control channel, so that main can ask the user again after sudo rejected a password, as it does for sudo on main.
 
+## Scratch sessions
+
+A scratch session starts with `StartOptions.Scratch`, for which the Pi adapter starts Pi with `--no-session`. Pi then names no session file, so the session keeps the pending key that `agent.StartNewSession` gives it, and the server's `scratchSessions` (`internal/server/scratch_routes.go`) keep it out of every list and refuse the routes that need a saved session. Its key stays a scratch key after it ends, so that a request already under way can't start a saved session under it, and the registry's factory refuses scratch keys, as Pi would save a session that it started again. Pages read its history through the optional `agent.MemoryHistory`, which the Pi client implements with two commands of Gripi's extension, `gripi_history` and `gripi_history_image`, and the session file renderer over the entries in memory (`Store.WindowFromEntries`). Prompt bodies and forms stay in memory, so a scratch prompt's images never reach a file.
+
 ## Pi-shaped parts
 
 - The browser still reads Pi's formats: live events and snapshots, model settings, fork messages and session trees. The adapter returns them as opaque JSON that the core and server pass through without reading; only what the server itself reads is typed. Server-rendered history uses the core's `Message`, whose vocabulary is still Pi's. The Hermes adapter therefore turns ACP's updates into Pi's live events, and projects the same updates onto `Message`s for the history.

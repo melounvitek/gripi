@@ -100,15 +100,38 @@
     body:not(.hermes-replied) .hermes-tab:focus-visible .hermes-tab-line { background: var(--muted); }
     @media (hover: hover) and (pointer: fine) { body:not(.hermes-replied) .hermes-tab:hover .hermes-tab-line { background: var(--muted); } }
     /* The header of the page that the panel shows. */
-    .hermes-panel-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-weight: 500; letter-spacing: 0; line-height: 1; text-transform: none; }
+    .hermes-panel-action, .scratch-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-weight: 500; letter-spacing: 0; line-height: 1; text-transform: none; }
     .hermes-panel-header h1 svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--gold); }
     .hermes-panel-header h1 { display: flex; align-items: center; gap: 0.45rem; }
-    @media (hover: hover) and (pointer: fine) { .hermes-panel-action:hover { background: #ffffff08; color: var(--text); } }
+    @media (hover: hover) and (pointer: fine) { :is(.hermes-panel-action, .scratch-action):hover { background: #ffffff08; color: var(--text); } }
     .hermes-panel-back { display: none; align-items: center; gap: 0.15rem; min-height: 2.75rem; margin: 0 0.5rem 0 -0.4rem; padding: 0 0.5rem 0 0.15rem; border: 0; background: transparent; color: var(--accent); font: 500 0.9rem var(--mono); letter-spacing: 0; text-transform: none; }
     .hermes-panel-back svg { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     /* On a touch screen, a big way back to Gripi takes the small ×'s place. */
     @media (pointer: coarse) { body.hermes-panel-framed .hermes-panel-back { display: inline-flex; } .hermes-panel-action[data-hermes-close] { display: none; } }
     body:not(.hermes-panel-framed) :is([data-hermes-close], [data-hermes-pop-out]) { display: none; }
+    /* The scratch overlay shows the scratch session's page in a window over the page, and on a phone in a sheet below a
+       strip of the page, which hides it when tapped. */
+    .scratch-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 1rem; background: #0000008c; backdrop-filter: blur(3px); }
+    .scratch-overlay[hidden] { display: none; }
+    .scratch-window { position: relative; width: min(52rem, 100%); height: min(84dvh, 100%); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: var(--bg); box-shadow: 0 18px 48px #00000073; }
+    .scratch-window iframe { display: block; width: 100%; height: 100%; border: 0; }
+    .scratch-loading { display: none; }
+    .scratch-overlay.is-loading .scratch-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin: 0; color: var(--muted); font: 0.86rem var(--mono); }
+    .scratch-overlay.is-loading iframe { visibility: hidden; }
+    @media (max-width: 760px) {
+      .scratch-overlay { place-items: stretch; padding: calc(2.5rem + env(safe-area-inset-top)) 0 0; }
+      .scratch-window { width: 100%; height: 100%; border-width: 1px 0 0; border-radius: 0.6rem 0.6rem 0 0; }
+    }
+    @media (pointer: coarse) { .scratch-action { min-width: 2.75rem; min-height: 2.75rem; } }
+    .scratch-glyph { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .sidebar-scratch-button { display: inline-flex; margin-left: auto; align-items: center; }
+    .sidebar-scratch-button + .sidebar-new-session-button { margin-left: 0; }
+    .sidebar-scratch-button.is-active { color: var(--accent); }
+    .scratch-page-header h1 { display: flex; align-items: center; gap: 0.45rem; }
+    .scratch-page-header h1 .scratch-glyph { color: var(--accent); }
+    .scratch-note { color: var(--muted); font: 400 0.75rem var(--mono); }
+    .scratch-gone-notice { grid-column: 1 / -1; margin: 0.4rem 0 0; color: var(--muted); font: 0.8rem var(--mono); }
+    body.scratch-gone .prompt-form { display: none; }
     /* The panel has a column of its own on wide screens, lies over the conversation on narrower ones, and fills a phone's screen. */
     /* Dragging the tab sets the panel's width, which leaves the sessions, while they show, and a narrow conversation room
        beside it. */
