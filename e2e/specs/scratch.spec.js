@@ -88,7 +88,7 @@ test("a scratch session opens over the page, keeps its conversation and images, 
 
   // Discard ends it.
   await scratchButton(page).click();
-  await scratch(page).getByRole("button", { name: "discard" }).click();
+  await scratch(page).getByRole("button", { name: "Discard the scratch session" }).click();
   await expect(overlay(page)).toBeHidden();
   await expect(scratchButton(page)).not.toHaveClass(/is-active/);
   await openScratch(page);

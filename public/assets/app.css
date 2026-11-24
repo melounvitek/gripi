@@ -128,6 +128,15 @@
     .sidebar-scratch-button + .sidebar-new-session-button { margin-left: 0; }
     .sidebar-scratch-button.is-active { color: var(--accent); }
     .scratch-page-header h1 { display: flex; align-items: center; gap: 0.45rem; }
+    /* Like a window's title bar, the scratch window hides and closes in its corner. */
+    .session-header.scratch-page-header { padding-right: 6.5rem; }
+    .scratch-window-controls { position: absolute; top: 0; right: 0; display: flex; }
+    .scratch-window-controls button, .scratch-window-controls button:hover { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; height: 2.75rem; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--muted); }
+    .scratch-window-controls svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+    @media (hover: hover) and (pointer: fine) {
+      .scratch-window-controls button:hover { background: #ffffff0f; color: var(--text); }
+      .scratch-window-controls .scratch-window-close:hover { background: var(--danger-soft); color: var(--danger); }
+    }
     .scratch-page-header h1 .scratch-glyph { color: var(--accent); }
     .scratch-note { color: var(--muted); font: 400 0.75rem var(--mono); }
     .scratch-gone-notice { grid-column: 1 / -1; margin: 0.4rem 0 0; color: var(--muted); font: 0.8rem var(--mono); }
