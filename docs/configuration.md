@@ -225,6 +225,16 @@ Add tags with the tag icon in the conversation header, **Tags…** in a session�
 
 Tags are lowercased, up to 64 characters long, and limited to 32 per session. They are stored in `~/.pi/gripi/session-tags.json`, not in Pi’s session files, and are private to each user in multi-user mode.
 
+## Scratch sessions
+
+A scratch session is for a quick question to Pi outside any project. The incognito button next to **New session** in the sidebar, Ctrl+Shift+N, or **Scratch session** in the Ctrl+K palette opens it in a window over the page, which stays as it is. Esc or × hides the window, also while Pi works, and **discard** ends the session. The button is orange while you have one. Each user has one scratch session at a time.
+
+Gripi starts Pi with `--no-session`, so Pi keeps the session only in memory, and Gripi keeps nothing of it either: it is never listed, searched or shown by `gripi` commands, and it has no read state, pins, tags, notifications, drafts or saved images. Images stay in memory too, up to 32 MB in one message. Pi runs in an empty temporary folder, `gripi-scratch-<uid>` in the system's temporary folder, where its tools may write files; discard removes it.
+
+The session lives as long as its Pi process: changed environment variables and the idle timeout don't stop it, but a gateway restart or update, or Pi crashing, ends it. A reloaded page reads the conversation from Pi, its last 16 MB. Commands that need a session file, such as `/fork`, `/tree`, `/name` and `/export`, aren't offered, and `gripi sudo` and sub-sessions don't work there, because Pi sets no `PI_SESSION_FILE`.
+
+In a browser tab, Ctrl+Shift+N opens the browser's own private window instead; it works in the desktop app.
+
 ## Project resource approval
 
 Gripi starts Pi with `--approve`, so project-local settings, extensions, skills, prompts, themes, system prompts, and packages load without asking. Pi CLI asks before trusting a project. Project extensions and package installation scripts can run any code as the gateway OS user, so only open projects you trust.
