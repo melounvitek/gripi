@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,6 +106,9 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 	})
 	// Without the agent's own commands, the palette still lists those of the gateway.
 	commands := composer.Commands()
+	if app.scratch.contains(path) {
+		commands = slices.DeleteFunc(commands, func(command agent.Command) bool { return slices.Contains(scratchRefusedCommands, command.Name) })
+	}
 	if err == nil {
 		commands = append(commands, agentCommands...)
 	} else if !commandCatalogFallbackError(err) && app.writeRPCError(response, err) {

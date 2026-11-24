@@ -214,3 +214,43 @@ func TestAScratchSessionEndsWithItsPi(t *testing.T) {
 		t.Fatalf("Pi saved %v", saved)
 	}
 }
+
+// What needs a saved session, or keeps something about it, isn't offered for a scratch session.
+func TestScratchSessionRefusesWhatNeedsASavedSession(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	cfg, _, _, _ := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	scratch := startScratch(t, handler)
+	session := url.QueryEscape(scratch.Session)
+
+	for _, target := range []string{"/sessions/fork_messages?session=" + session, "/sessions/tree_entries?session=" + session, "/sessions/tags?session=" + session} {
+		if response := serveAction(handler, getActionRequest(target)); response.Code != http.StatusConflict {
+			t.Errorf("GET %s = %d %s", target, response.Code, response.Body.String())
+		}
+	}
+	for _, target := range []string{"/sessions/new", "/sessions/rename", "/sessions/delete", "/sessions/tree", "/sessions/tree/label", "/sessions/fork", "/sessions/clone", "/sessions/export", "/sessions/takeover", "/sessions/pin", "/sessions/tags", "/sessions/mark_read", "/workers/move", "/workers/return", "/workers/forward", "/workers/unforward"} {
+		fields := map[string]string{"session": scratch.Session, "name": "Renamed", "entry_id": "x", "pinned": "true", "tags": "work", "worker": "box", "port": "3000"}
+		if response := serveAction(handler, formActionRequest(target, fields, true)); response.Code != http.StatusConflict {
+			t.Errorf("POST %s = %d %s", target, response.Code, response.Body.String())
+		}
+	}
+	for _, message := range []string{"/name Renamed", "/fork", "/tree", "/new", "/clone"} {
+		response := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": message}, true))
+		var result struct {
+			Message string `json:"message"`
+		}
+		decodeActionJSON(t, response, &result)
+		if response.Code != http.StatusOK || !strings.Contains(result.Message, "isn’t available in a scratch session") {
+			t.Errorf("prompt %q = %d %+v", message, response.Code, result)
+		}
+	}
+	commands := serveAction(handler, getActionRequest("/commands?session="+session)).Body.String()
+	for _, name := range []string{"name", "export", "fork", "tree", "clone", "new"} {
+		if strings.Contains(commands, `data-command-name="`+name+`"`) {
+			t.Errorf("the scratch session's commands offer /%s", name)
+		}
+	}
+	if !strings.Contains(commands, `data-command-name="compact"`) {
+		t.Fatalf("commands = %s", commands)
+	}
+}

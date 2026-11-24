@@ -361,7 +361,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		app.registerVoiceRoutes(mux)
 	}
 
-	var handler http.Handler = mux
+	handler := app.refuseScratchRoutes(mux)
 	handler = app.enforceWorkspaceAccess(handler)
 	handler = app.enforceBrowserAccess(handler)
 	handler = app.protectUnsafeRequestOrigin(handler)

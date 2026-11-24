@@ -32,6 +32,29 @@ type scratchSession struct {
 
 var errScratchGone = &agent.RequestError{Message: "This scratch session has ended."}
 
+// scratchRefusedRoutes need a saved session or keep something about it. Discard ends a scratch session instead of
+// delete. Pi itself would offer more of them for a session that it keeps only in memory.
+var scratchRefusedRoutes = map[string]bool{
+	"POST /sessions/new": true, "POST /sessions/rename": true, "POST /sessions/delete": true, "GET /sessions/fork_messages": true,
+	"GET /sessions/tree_entries": true, "POST /sessions/tree": true, "POST /sessions/tree/label": true, "POST /sessions/fork": true,
+	"POST /sessions/clone": true, "POST /sessions/export": true, "POST /sessions/takeover": true, "POST /sessions/pin": true,
+	"GET /sessions/tags": true, "POST /sessions/tags": true, "POST /sessions/mark_read": true, "POST /workers/move": true,
+	"POST /workers/return": true, "POST /workers/forward": true, "POST /workers/unforward": true,
+}
+
+// scratchRefusedCommands are the slash commands of the refused routes.
+var scratchRefusedCommands = []string{"name", "export", "fork", "tree", "clone", "new"}
+
+func (app *application) refuseScratchRoutes(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if _, pattern := mux.Handler(request); scratchRefusedRoutes[pattern] && app.scratch.contains(request.FormValue("session")) {
+			http.Error(response, "A scratch session doesn’t offer this.", http.StatusConflict)
+			return
+		}
+		mux.ServeHTTP(response, request)
+	})
+}
+
 func (scratch *scratchSessions) session(owner string) *scratchSession {
 	scratch.mu.Lock()
 	defer scratch.mu.Unlock()

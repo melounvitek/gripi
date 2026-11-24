@@ -135,6 +135,9 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if behavior != "follow_up" {
 		command = composer.SlashCommand(message)
 	}
+	if app.scratch.contains(path) && slices.Contains(scratchRefusedCommands, command.Name) {
+		command.Unavailable = "`/" + command.Name + "` isn’t available in a scratch session."
+	}
 	if command.Unavailable != "" {
 		app.writePromptResult(response, request, path, map[string]any{"command": command.Name, "message": command.Unavailable})
 		return
