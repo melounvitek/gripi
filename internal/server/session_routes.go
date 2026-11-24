@@ -453,6 +453,10 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 }
 
 func (app *application) gatewayStateSessionPath(path string) (string, bool) {
+	// Gripi keeps nothing about a scratch session, such as its sub-sessions.
+	if app.scratch.contains(path) {
+		return "", false
+	}
 	if session, persisted := app.sessionStore.Session(path); persisted {
 		return session.Path, true
 	}

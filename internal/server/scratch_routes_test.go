@@ -71,7 +71,7 @@ func TestScratchSessionIsNeverListedOrSaved(t *testing.T) {
 	if again := startScratch(t, handler); again.Session != scratch.Session {
 		t.Fatalf("a second scratch session started: %s, then %s", scratch.Session, again.Session)
 	}
-	page := "/?" + url.Values{"session": {scratch.Session}, "session_only": {"1"}}.Encode()
+	page := "/?" + url.Values{"scratch": {"1"}, "session": {scratch.Session}, "session_only": {"1"}}.Encode()
 	if scratch.Redirect != page {
 		t.Fatalf("redirect = %s", scratch.Redirect)
 	}
@@ -122,8 +122,10 @@ func TestScratchSessionIsNeverListedOrSaved(t *testing.T) {
 	if len(sessions) != 0 {
 		t.Fatalf("discard kept %v", sessions)
 	}
-	if page := serveAction(handler, getActionRequest(scratch.Redirect)); strings.Contains(page.Body.String(), shown) {
-		t.Fatal("a discarded scratch session still shows")
+	// The overlay's page of a scratch session that ended says so, and shows no other session in its place.
+	ended := serveAction(handler, getActionRequest(scratch.Redirect))
+	if body := ended.Body.String(); !strings.Contains(body, "data-scratch-gone>") || strings.Contains(body, url.QueryEscape(alpha)) || !strings.Contains(ended.Header().Get("Content-Security-Policy"), "frame-ancestors 'self'") {
+		t.Fatalf("the page of a discarded scratch session = %s", body)
 	}
 	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Again"}, true)); prompt.Code != http.StatusNotFound {
 		t.Fatalf("prompt to a discarded scratch session = %d %s", prompt.Code, prompt.Body.String())
@@ -241,6 +243,10 @@ func TestScratchSessionRefusesWhatNeedsASavedSession(t *testing.T) {
 			t.Errorf("POST %s = %d %s", target, response.Code, response.Body.String())
 		}
 	}
+	// A scratch session can't be a sub-session's parent, which Gripi would keep.
+	if response := serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": t.TempDir(), "parent": scratch.Session}, true)); response.Code == http.StatusOK {
+		t.Errorf("a sub-session of the scratch session started: %s", response.Body.String())
+	}
 	for _, message := range []string{"/name Renamed", "/fork", "/tree", "/new", "/clone"} {
 		response := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": message}, true))
 		var result struct {
@@ -333,5 +339,25 @@ func TestScratchSessionImagesNeverReachDisk(t *testing.T) {
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	if large := serveAction(handler, request); large.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("36 MiB of images = %d %s", large.Code, large.Body.String())
+	}
+	// Quotes take twice their size in the line.
+	request = multipartRequest(t, "/prompt", map[string]string{"session": scratch.Session, "message": strings.Repeat(`"`, 25<<20)}, "images", "image.png", "image/png", png)
+	if large := serveAction(handler, request); large.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("25 MiB of quotes = %d %s", large.Code, large.Body.String())
+	}
+	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Still there?"}, true)); prompt.Code != http.StatusOK {
+		t.Fatalf("prompt after refused ones = %d %s", prompt.Code, prompt.Body.String())
+	}
+}
+
+// Refusing a scratch session's routes leaves a malformed request to another session refused as before.
+func TestScratchRefusalsKeepRefusingMalformedRequests(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	cfg, alpha, _, _ := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:4567/sessions/rename", strings.NewReader("session="+url.QueryEscape(alpha)+"&name=Renamed&bad=%ZZ"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if response := serveAction(handler, request); response.Code != http.StatusBadRequest {
+		t.Fatalf("malformed rename = %d %s", response.Code, response.Body.String())
 	}
 }

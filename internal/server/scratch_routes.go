@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -46,9 +48,19 @@ type scratchImage struct {
 const (
 	scratchHandBackBytes = 64 << 20
 	// Pi repeats a prompt as one line of its output, which Gripi reads up to 65 MiB, and a Pi lost to a longer one
-	// would take the session with it.
-	scratchPromptImageBytes = 32 << 20
+	// would take the session with it. 44 MiB leaves room for the rest of the line.
+	scratchPromptBytes = 44 << 20
 )
+
+// scratchPromptTooLarge tells whether a prompt's text and images take more than scratchPromptBytes in Pi's output.
+func scratchPromptTooLarge(message string, images []*multipart.FileHeader) bool {
+	text, _ := json.Marshal(message)
+	size := len(text)
+	for _, image := range images {
+		size += base64.StdEncoding.EncodedLen(int(image.Size))
+	}
+	return size > scratchPromptBytes
+}
 
 var errScratchGone = &agent.RequestError{Message: "This scratch session has ended."}
 
@@ -67,9 +79,17 @@ var scratchRefusedCommands = []string{"name", "export", "fork", "tree", "clone",
 
 func (app *application) refuseScratchRoutes(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if _, pattern := mux.Handler(request); scratchRefusedRoutes[pattern] && app.scratch.contains(request.FormValue("session")) {
-			http.Error(response, "A scratch session doesn’t offer this.", http.StatusConflict)
-			return
+		if _, pattern := mux.Handler(request); scratchRefusedRoutes[pattern] {
+			if !parseForm(response, request) {
+				return
+			}
+			if request.MultipartForm != nil {
+				defer request.MultipartForm.RemoveAll()
+			}
+			if app.scratch.contains(request.FormValue("session")) {
+				http.Error(response, "A scratch session doesn’t offer this.", http.StatusConflict)
+				return
+			}
 		}
 		mux.ServeHTTP(response, request)
 	})
@@ -338,7 +358,7 @@ func (app *application) endScratchSessions() error {
 
 // showScratchSession sends the browser to the scratch session's page, which the scratch overlay shows.
 func (app *application) showScratchSession(response http.ResponseWriter, request *http.Request, key string) {
-	target := "/?" + url.Values{"session": {key}, "session_only": {"1"}}.Encode()
+	target := "/?" + url.Values{"scratch": {"1"}, "session": {key}, "session_only": {"1"}}.Encode()
 	if wantsJSON(request) {
 		writeJSON(response, map[string]string{"session": key, "redirect": target})
 		return

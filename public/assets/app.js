@@ -1970,6 +1970,8 @@ async function pollEvents() {
     const response = await fetch(eventsUrl, { signal: controller.signal });
     // A server error, such as a proxy's 502 while the gateway is down, fails the poll like no answer; a 4xx is the gateway's answer.
     if (response.status >= 500) throw new Error(`Event poll failed with HTTP ${response.status}`);
+    // A scratch session ended elsewhere, such as in another tab or with the gateway, is no longer there.
+    if (response.status === 404) scratchController.gone();
     if (!response.ok || !eventPollCurrent(generation, sessionViewGeneration)) return;
 
     const payload = await response.json();
@@ -3534,13 +3536,25 @@ function focusPromptAfterDesktopServerActivation() {
   syncComposerFocus();
 }
 
-window.addEventListener("gripi:new-session-requested", () => openNewSessionModal());
+// The desktop app's menu finds in the scratch session while its overlay shows, and leaves it for the rest.
+window.addEventListener("gripi:new-session-requested", () => {
+  scratchController.hide();
+  openNewSessionModal();
+});
 window.addEventListener("gripi:scratch-session-requested", () => scratchController.toggle());
-window.addEventListener("gripi:current-session-find-requested", requestCurrentSessionFind);
-window.addEventListener("gripi:current-session-find-navigation-requested", (event) => requestCurrentSessionFindNavigation(event.detail));
-window.addEventListener("gripi:session-search-requested", requestSessionSearch);
+window.addEventListener("gripi:current-session-find-requested", (event) => {
+  if (!scratchController.passToFrame(event)) requestCurrentSessionFind();
+});
+window.addEventListener("gripi:current-session-find-navigation-requested", (event) => {
+  if (!scratchController.passToFrame(event)) requestCurrentSessionFindNavigation(event.detail);
+});
+window.addEventListener("gripi:session-search-requested", () => {
+  scratchController.hide();
+  requestSessionSearch();
+});
 // The desktop app's menu, like Ctrl+K, which the menu only gets when the page leaves it unhandled.
 window.addEventListener("gripi:command-palette-requested", () => {
+  scratchController.hide();
   if (!sessionSwitching()) commandPaletteController.toggle();
 });
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);

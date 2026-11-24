@@ -153,7 +153,15 @@ export class ScratchController {
     return true;
   }
 
-  // Pi ended, such as after a crash, and the session with it.
+  // A desktop app's menu event, for the scratch session while its overlay shows.
+  passToFrame(event) {
+    if (!this.shown()) return false;
+    const frameWindow = this.frame.contentWindow;
+    frameWindow?.dispatchEvent(new frameWindow.CustomEvent(event.type, { detail: event.detail }));
+    return true;
+  }
+
+  // The session ended, such as with its Pi or in another tab.
   gone() {
     if (!this.page) return;
     this.document.body.classList.add("scratch-gone");

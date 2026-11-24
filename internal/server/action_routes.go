@@ -92,12 +92,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	scratch := app.scratch.contains(path)
-	imageBytes := int64(0)
-	for _, file := range imageFiles {
-		imageBytes += file.Size
-	}
-	if scratch && imageBytes > scratchPromptImageBytes {
-		writeText(response, http.StatusRequestEntityTooLarge, "A message in a scratch session takes up to 32 MB of images.")
+	if scratch && scratchPromptTooLarge(message, imageFiles) {
+		writeText(response, http.StatusRequestEntityTooLarge, "This message is too large for a scratch session, which takes about 30 MB of text and images at once.")
 		return
 	}
 	if strings.TrimSpace(message) == "" && len(imageFiles) == 0 {

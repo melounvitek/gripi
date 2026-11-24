@@ -57,7 +57,7 @@ func (app *application) securityHeaders(next http.Handler) http.Handler {
 		frameAncestors := "'none'"
 		query := request.URL.Query()
 		sessionOnly := request.URL.Path == "/" && query.Get("session_only") == "1"
-		if strings.HasPrefix(request.URL.Path, "/hermes") || sessionOnly && (app.agentOf(query.Get("session")) == "hermes" || app.scratch.contains(query.Get("session"))) {
+		if strings.HasPrefix(request.URL.Path, "/hermes") || sessionOnly && (app.agentOf(query.Get("session")) == "hermes" || query.Get("scratch") == "1") {
 			frameAncestors = "'self'"
 		}
 		policy := strings.Join([]string{

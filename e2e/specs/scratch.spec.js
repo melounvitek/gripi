@@ -116,3 +116,27 @@ test("Ctrl+K and Ctrl+N in a scratch session reach the page around it", async ({
   await expect(overlay(page)).toBeHidden();
   await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeVisible();
 });
+
+test("a scratch session that ends elsewhere says so in its overlay", async ({ page }) => {
+  await openScratch(page);
+  expect((await page.request.post("/scratch/discard", { headers: { Accept: "application/json" } })).ok()).toBe(true);
+  await expect(scratch(page).getByText("This scratch session has ended.")).toBeVisible();
+  await expect(scratch(page).getByLabel(/^Message to Pi$/)).toBeHidden();
+
+  await scratch(page).getByRole("button", { name: "Start a new one" }).click();
+  await expect(scratch(page).getByLabel(/^Message to Pi$/)).toBeVisible();
+  await expect(scratch(page).getByText("This scratch session has ended.")).toBeHidden();
+});
+
+test("the desktop app's menu finds in a scratch session while its overlay shows, and leaves it for a new session", async ({ page }) => {
+  await openScratch(page);
+  await sendPrompt(scratch(page), question);
+  await expectRunFinished(scratch(page));
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("gripi:current-session-find-requested")));
+  await expect(scratch(page).locator("[data-current-session-find]")).toBeVisible();
+  await expect(page.locator("[data-current-session-find]")).toBeHidden();
+
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("gripi:new-session-requested")));
+  await expect(overlay(page)).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeVisible();
+});

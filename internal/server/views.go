@@ -135,9 +135,10 @@ type pageView struct {
 	HermesPanel   bool
 	// VoiceEnabled offers Hermes sessions a voice conversation.
 	VoiceEnabled bool
-	// ScratchPage is the page of the user's scratch session, which the scratch overlay shows. ScratchExists tells that
-	// the user has one.
+	// ScratchPage is the page of the user's scratch session, which the scratch overlay shows, and ScratchGone tells that
+	// the session has ended. ScratchExists tells that the user has one.
 	ScratchPage   bool
+	ScratchGone   bool
 	ScratchExists bool
 	// SubSession tells that the selected session is linked under another, so its page leaves notifying to the sidebar,
 	// which shows only the replies to the user's own turns as completed.
@@ -179,8 +180,10 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	hermesPanel := params.Get("session_only") == "1" && app.agentOf(params.Get("session")) == "hermes"
-	// Pages never list a scratch session; only the scratch overlay's page shows it.
-	scratchPanel := params.Get("session_only") == "1" && app.ownsScratch(request, params.Get("session"))
+	// Pages never list a scratch session; only the scratch overlay's page shows it, and once it has ended, that page
+	// says so rather than show another session, also of a key that names one.
+	scratchPage := params.Get("session_only") == "1" && params.Get("scratch") == "1"
+	scratchOwned := scratchPage && app.ownsScratch(request, params.Get("session"))
 	// Pages don't list Hermes's conversations, so the Hermes panel's page adds its own.
 	if hermesPanel {
 		if session, saved := app.sessionStore.Session(params.Get("session")); saved {
@@ -248,9 +251,11 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		selectedProject = ""
 	}
 	var selected *agent.Session
-	if scratchPanel {
+	if scratchOwned {
 		cwd, _ := app.pendingSessions.CWD(params.Get("session"))
 		selected = &agent.Session{Path: params.Get("session"), CWD: cwd, DisplayName: "Scratch", Agent: app.agentOf(params.Get("session"))}
+	} else if scratchPage {
+		selected = &agent.Session{DisplayName: "Scratch"}
 	} else if params.Get("no_session") != "1" {
 		for _, session := range all {
 			if session.Path == params.Get("session") {
@@ -290,7 +295,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	markRead := (request.URL.Path != "/sidebar" || params.Get("session") != "") && params.Get("mark_read") != "0"
 	// Gripi keeps nothing about a scratch session, such as whether it was read.
 	observed := selected
-	if scratchPanel {
+	if scratchPage {
 		observed = nil
 	}
 	unread, pinned, err := app.gatewayState.ReadAndObservePending(all, observed, markRead, externalFollow, unresolvedPendingCWDs)
@@ -301,7 +306,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
-	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil, ScratchPage: scratchPanel, ScratchExists: app.scratch.key(currentWorkspaceID(request)) != ""}
+	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil, ScratchPage: scratchPage, ScratchGone: scratchPage && !scratchOwned, ScratchExists: app.scratch.key(currentWorkspaceID(request)) != ""}
 	view.ExternalFollow = externalFollow
 	if notifier := app.completionNotifications; notifier != nil {
 		notifier.mu.Lock()
@@ -398,7 +403,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			read = func() (agent.Window, error) {
 				return app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
 			}
-		} else if scratchPanel {
+		} else if scratchOwned {
 			read = func() (agent.Window, error) {
 				window, err := app.scratchWindow(request.Context(), selected.Path, nil, nil)
 				// Without its history, such as when Pi doesn't answer in time, the page shows the live run.
