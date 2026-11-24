@@ -935,7 +935,12 @@ func (writer *commandWriter) Write(value []byte) (int, error) {
 
 func writeImageCommand(writer io.Writer, value map[string]any, images []agent.PromptImage) error {
 	files := make([]*os.File, 0, len(images))
+	readers := make([]io.Reader, 0, len(images))
 	for _, image := range images {
+		if image.Data != nil {
+			readers = append(readers, bytes.NewReader(image.Data))
+			continue
+		}
 		file, err := os.Open(image.Path)
 		if err == nil {
 			var info os.FileInfo
@@ -954,6 +959,7 @@ func writeImageCommand(writer io.Writer, value map[string]any, images []agent.Pr
 			return err
 		}
 		files = append(files, file)
+		readers = append(readers, file)
 	}
 	defer func() {
 		for _, file := range files {
@@ -1003,7 +1009,7 @@ func writeImageCommand(writer io.Writer, value map[string]any, images []agent.Pr
 			return err
 		}
 		encoder := base64.NewEncoder(base64.StdEncoding, writer)
-		copied, copyErr := io.Copy(encoder, io.LimitReader(files[index], image.Size+1))
+		copied, copyErr := io.Copy(encoder, io.LimitReader(readers[index], image.Size+1))
 		if copyErr != nil {
 			_ = encoder.Close()
 			return copyErr

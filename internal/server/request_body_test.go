@@ -392,3 +392,59 @@ func (body *trackedReadCloser) Close() error {
 	body.closed = true
 	return nil
 }
+
+// A prompt may carry a scratch session's images, which must not reach a file, so its body and form stay in memory.
+func TestPromptBodiesStayInMemory(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	image := bytes.Repeat([]byte{0x89}, 1<<20)
+	var contents bytes.Buffer
+	writer := multipart.NewWriter(&contents)
+	if err := writer.WriteField("message", "Look"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("images", "image.png")
+	if err == nil {
+		_, err = part.Write(image)
+	}
+	if err != nil || writer.Close() != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "http://example.com/prompt", nil)
+	request.Body = io.NopCloser(bytes.NewReader(contents.Bytes()))
+	request.ContentLength = -1
+	request.TransferEncoding = []string{"chunked"}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	files := func() []string {
+		matches, _ := filepath.Glob(filepath.Join(tempDir, "*"))
+		return matches
+	}
+	response := httptest.NewRecorder()
+	next := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if written := files(); len(written) != 0 {
+			t.Fatalf("the prompt's body was written to %v", written)
+		}
+		if err := parseRequestForm(request); err != nil {
+			t.Fatal(err)
+		}
+		defer request.MultipartForm.RemoveAll()
+		if written := files(); len(written) != 0 {
+			t.Fatalf("the prompt's form was written to %v", written)
+		}
+		file, err := request.MultipartForm.File["images"][0].Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		if read, _ := io.ReadAll(file); request.FormValue("message") != "Look" || !bytes.Equal(read, image) {
+			t.Fatal("the prompt's form changed")
+		}
+		response.WriteHeader(http.StatusNoContent)
+	})
+
+	(&application{unknownBodySpools: make(chan struct{}, unknownBodySpoolLimit)}).limitRequestBody(next).ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("response = %d %s", response.Code, response.Body.String())
+	}
+}

@@ -1,12 +1,19 @@
 package server_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"html"
 	"io/fs"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
@@ -277,5 +284,54 @@ func TestScratchSessionShowsItsConversationAfterAReload(t *testing.T) {
 	decodeActionJSON(t, older, &payload)
 	if older.Code != http.StatusOK || !strings.Contains(payload.HTML, "Remember scratchpad") || strings.Contains(payload.HTML, "message--assistant") {
 		t.Fatalf("older messages = %d %s", older.Code, payload.HTML)
+	}
+}
+
+// A scratch session's images stay in memory: in the prompt, in Pi, and on their way to the page.
+func TestScratchSessionImagesNeverReachDisk(t *testing.T) {
+	temporary := t.TempDir()
+	t.Setenv("TMPDIR", temporary)
+	cfg, _, _, _ := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	scratch := startScratch(t, handler)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{1}, 2<<20)...)
+
+	request := multipartRequest(t, "/prompt", map[string]string{"session": scratch.Session, "message": "Look"}, "images", "image.png", "image/png", png)
+	request.Header.Set("Accept", "application/json")
+	prompt := serveAction(handler, request)
+	if prompt.Code != http.StatusOK {
+		t.Fatalf("image prompt = %d %s", prompt.Code, prompt.Body.String())
+	}
+	waitForFakePiSettled(t, handler, scratch.Session, 0)
+	if attachments := writtenFiles(t, cfg.AttachmentsRoot); len(attachments) != 0 {
+		t.Fatalf("the image was saved to %v", attachments)
+	}
+	if written, _ := filepath.Glob(filepath.Join(temporary, "multipart-*")); len(written) != 0 {
+		t.Fatalf("the upload was written to %v", written)
+	}
+
+	page := serveAction(handler, getActionRequest(scratch.Redirect)).Body.String()
+	source := regexp.MustCompile(`/session_images/[^"]+`).FindString(page)
+	if source == "" {
+		t.Fatalf("the page shows no image: %s", page)
+	}
+	image := serveAction(handler, getActionRequest(html.UnescapeString(source)))
+	if image.Code != http.StatusOK || image.Header().Get("Content-Type") != "image/png" || !bytes.Equal(image.Body.Bytes(), png) {
+		t.Fatalf("image = %d %s, %d bytes", image.Code, image.Header().Get("Content-Type"), image.Body.Len())
+	}
+
+	// Pi takes a prompt and repeats it as one line of its output, which Gripi reads up to 65 MiB.
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("session", scratch.Session)
+	for index := range 4 {
+		part, _ := writer.CreatePart(textproto.MIMEHeader{"Content-Disposition": {fmt.Sprintf(`form-data; name="images"; filename="%d.png"`, index)}, "Content-Type": {"image/png"}})
+		_, _ = part.Write(bytes.Repeat([]byte{2}, 9<<20))
+	}
+	_ = writer.Close()
+	request = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:4567/prompt", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	if large := serveAction(handler, request); large.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("36 MiB of images = %d %s", large.Code, large.Body.String())
 	}
 }

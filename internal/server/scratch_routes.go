@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
@@ -29,7 +32,23 @@ type scratchSessions struct {
 type scratchSession struct {
 	key string
 	dir string
+	// images are copies of the latest prompts' images, oldest first, which a page fetches to put a prompt back in the
+	// editor when Pi refuses it after it left. The oldest go once they take more than scratchHandBackBytes.
+	images []scratchImage
 }
+
+type scratchImage struct {
+	token    string
+	data     []byte
+	mimeType string
+}
+
+const (
+	scratchHandBackBytes = 64 << 20
+	// Pi repeats a prompt as one line of its output, which Gripi reads up to 65 MiB, and a Pi lost to a longer one
+	// would take the session with it.
+	scratchPromptImageBytes = 32 << 20
+)
 
 var errScratchGone = &agent.RequestError{Message: "This scratch session has ended."}
 
@@ -119,9 +138,83 @@ func (app *application) scratchWindow(ctx context.Context, key string, cursor, a
 	return window, err
 }
 
+// keepImage keeps a copy of an image of a prompt to the scratch session key, and returns where a page gets it.
+func (scratch *scratchSessions) keepImage(key string, data []byte, mimeType string) (string, error) {
+	token, err := randomBrowserToken()
+	if err != nil {
+		return "", err
+	}
+	scratch.mu.Lock()
+	defer scratch.mu.Unlock()
+	for _, session := range scratch.byOwner {
+		if session.key != key {
+			continue
+		}
+		session.images = append(session.images, scratchImage{token: token, data: data, mimeType: mimeType})
+		total := 0
+		for index := len(session.images) - 1; index >= 0; index-- {
+			if total += len(session.images[index].data); total > scratchHandBackBytes {
+				session.images = slices.Clone(session.images[index+1:])
+				break
+			}
+		}
+		return "/scratch/images/" + token, nil
+	}
+	return "", errScratchGone
+}
+
+func (scratch *scratchSessions) image(owner, token string) (scratchImage, bool) {
+	scratch.mu.Lock()
+	defer scratch.mu.Unlock()
+	session := scratch.byOwner[owner]
+	if session == nil || scratch.ended[session.key] {
+		return scratchImage{}, false
+	}
+	index := slices.IndexFunc(session.images, func(image scratchImage) bool { return image.token == token })
+	if index < 0 {
+		return scratchImage{}, false
+	}
+	return session.images[index], true
+}
+
 func (app *application) registerScratchRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /scratch/new", app.newScratchSession)
 	mux.HandleFunc("POST /scratch/discard", app.discardScratchSession)
+	mux.HandleFunc("GET /scratch/images/{token}", app.scratchPromptImage)
+}
+
+// scratchPromptImages reads the images of a prompt to a scratch session into memory, and keeps copies that a page can
+// put back in the editor.
+func (app *application) scratchPromptImages(key string, files []*multipart.FileHeader) ([]agent.PromptImage, error) {
+	images := make([]agent.PromptImage, 0, len(files))
+	for _, header := range files {
+		file, err := header.Open()
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(file)
+		file.Close()
+		if err != nil {
+			return nil, err
+		}
+		mimeType := header.Header.Get("Content-Type")
+		source, err := app.scratch.keepImage(key, data, mimeType)
+		if err != nil {
+			return nil, err
+		}
+		images = append(images, agent.PromptImage{Data: data, MIMEType: mimeType, Size: int64(len(data)), Src: source})
+	}
+	return images, nil
+}
+
+func (app *application) scratchPromptImage(response http.ResponseWriter, request *http.Request) {
+	image, ok := app.scratch.image(currentWorkspaceID(request), request.PathValue("token"))
+	if !ok {
+		http.NotFound(response, request)
+		return
+	}
+	response.Header().Set("Content-Type", image.mimeType)
+	_, _ = response.Write(image.data)
 }
 
 // ownsScratch tells whether path is the scratch session of the browser that asks. gripi commands and workers never

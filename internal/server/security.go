@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -114,6 +115,22 @@ func (app *application) limitRequestBody(next http.Handler) http.Handler {
 
 		originalBody := request.Body
 		defer originalBody.Close()
+		// A prompt may carry a scratch session's images, which must not reach a file either.
+		if path.Clean(request.URL.Path) == "/prompt" {
+			contents, err := io.ReadAll(io.LimitReader(originalBody, maxRequestBodyBytes+1))
+			if err != nil {
+				writeText(response, http.StatusBadRequest, "Invalid request body")
+				return
+			}
+			if int64(len(contents)) > maxRequestBodyBytes {
+				writeText(response, http.StatusRequestEntityTooLarge, "Request body too large")
+				return
+			}
+			request.Body = io.NopCloser(bytes.NewReader(contents))
+			request.ContentLength = int64(len(contents))
+			next.ServeHTTP(response, request)
+			return
+		}
 		bodyFile, err := os.CreateTemp("", "gripi-request-body-*")
 		if err != nil {
 			writeText(response, http.StatusInternalServerError, "Internal Server Error")
@@ -407,6 +424,10 @@ func (app *application) writeSecurityError(response http.ResponseWriter, status 
 func parseRequestForm(request *http.Request) error {
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err == nil && mediaType == "multipart/form-data" {
+		// limitRequestBody bounds the body, so a prompt's images, which may be a scratch session's, stay in memory.
+		if path.Clean(request.URL.Path) == "/prompt" {
+			return request.ParseMultipartForm(maxRequestBodyBytes)
+		}
 		return request.ParseMultipartForm(0)
 	}
 	return request.ParseForm()
