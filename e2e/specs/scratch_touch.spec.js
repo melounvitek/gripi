@@ -46,7 +46,7 @@ test("on a phone, a scratch session opens in a sheet that one tap hides or disca
   await expect(composer).toBeInViewport();
   await page.setViewportSize(viewport);
 
-  await scratch(page).getByRole("button", { name: "discard" }).tap();
+  await scratch(page).getByRole("button", { name: "Discard the scratch session" }).tap();
   await expect(overlay(page)).toBeHidden();
   await page.locator('label[aria-label="Open sessions"]').tap();
   await expect(page.getByRole("button", { name: "Scratch session, not saved" })).not.toHaveClass(/is-active/);
