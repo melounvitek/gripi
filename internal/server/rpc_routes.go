@@ -44,6 +44,9 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	} else {
 		payload["session_sync"] = map[string]any{"mode": agent.SyncAvailable, "revision": nil, "error": nil, "gateway_busy": app.rpcClients.Busy(path)}
 	}
+	if app.scratch.contains(path) && app.scratchGone(path) {
+		payload["gone"] = true
+	}
 	writeJSON(response, payload)
 }
 
@@ -568,8 +571,9 @@ func (app *application) retireStaleRPCClient(request *http.Request, path string)
 	}
 	if _, pending := app.pendingSessions.CWD(path); pending && !app.sessionStore.Exists(path) {
 		// An unsaved Hermes session lives only in the Hermes that all Hermes sessions share, so it gets the variables
-		// once saved, when its client retires like a saved session's.
-		if app.agentOf(path) == "hermes" {
+		// once saved, when its client retires like a saved session's. A scratch session lives only in its Pi, so it
+		// keeps the variables that it started with.
+		if app.agentOf(path) == "hermes" || app.scratch.contains(path) {
 			return nil
 		}
 		_, err := agent.RestartUnsavedSession(request.Context(), path, changedAt, app.rpcClients, app.pendingSessions)

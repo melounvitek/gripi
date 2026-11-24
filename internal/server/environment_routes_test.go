@@ -622,3 +622,29 @@ func (fixture *environmentFixture) piStarts(t *testing.T) []piStart {
 	}
 	return starts
 }
+
+// A scratch session lives only in its Pi, so changed variables don't start it again, which would lose it.
+func TestChangedVariablesKeepAScratchSessionsPi(t *testing.T) {
+	temporary := t.TempDir()
+	t.Setenv("TMPDIR", temporary)
+	fixture := newEnvironmentFixture(t, false)
+	fixture.save(t, "", "ENVTEST_TOKEN", "first")
+	created := fixture.post("/scratch/new", nil, "")
+	var payload struct {
+		Session string `json:"session"`
+	}
+	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &payload) != nil || payload.Session == "" {
+		t.Fatalf("new scratch session = %d %s", created.Code, created.Body.String())
+	}
+
+	fixture.save(t, "", "ENVTEST_TOKEN", "second")
+	fixture.prompt(t, payload.Session, "Hello", "")
+	starts := fixture.piStarts(t)
+	if len(starts) != 1 || starts[0].environment["ENVTEST_TOKEN"] != "first" || !strings.Contains(starts[0].arguments, "--no-session") {
+		t.Fatalf("Pi starts = %+v", starts)
+	}
+	// Pi's temporary files, such as long tool output, stay in the scratch session's folder.
+	if tmp := starts[0].environment["TMPDIR"]; !strings.HasPrefix(tmp, filepath.Join(temporary, "gripi-scratch-")) || filepath.Base(tmp) != "tmp" {
+		t.Fatalf("Pi's TMPDIR = %q", tmp)
+	}
+}

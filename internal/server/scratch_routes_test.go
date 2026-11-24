@@ -1,11 +1,14 @@
 package server_test
 
 import (
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -50,6 +53,7 @@ func TestScratchSessionIsNeverListedOrSaved(t *testing.T) {
 	temporary := t.TempDir()
 	t.Setenv("TMPDIR", temporary)
 	cfg, alpha, _, _ := fakePiConfig(t)
+	cfg.RPCIdleTimeout, cfg.RPCIdleSweep = time.Millisecond, 5*time.Millisecond
 	handler := startGateway(t, cfg)
 	stateRoot := filepath.Dir(cfg.ReadStatePath)
 	// The first page load writes what the gateway keeps about the existing sessions.
@@ -71,6 +75,12 @@ func TestScratchSessionIsNeverListedOrSaved(t *testing.T) {
 	prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Hello"}, true))
 	if prompt.Code != http.StatusOK {
 		t.Fatalf("prompt = %d %s", prompt.Code, prompt.Body.String())
+	}
+	// Pi isn't stopped for being idle, which would lose the session.
+	waitForFakePiSettled(t, handler, scratch.Session, 0)
+	time.Sleep(50 * time.Millisecond)
+	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Still there?"}, true)); prompt.Code != http.StatusOK {
+		t.Fatalf("prompt after the idle timeout = %d %s", prompt.Code, prompt.Body.String())
 	}
 
 	for _, target := range []string{"/sidebar", "/sessions/palette", "/?session=" + url.QueryEscape(alpha), "/?session=" + url.QueryEscape(scratch.Session)} {
@@ -158,5 +168,49 @@ func TestScratchSessionsBelongToTheirWorkspace(t *testing.T) {
 	own.Header.Set("Cookie", "gripi_workspace=workspace-a")
 	if page := serveAction(handler, own); !strings.Contains(page.Body.String(), shown) {
 		t.Fatalf("its own workspace doesn't see the scratch session: %d", page.Code)
+	}
+}
+
+// Pi keeps a scratch session only in memory, so it is gone once its Pi ends, such as after a crash.
+func TestAScratchSessionEndsWithItsPi(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	cfg, _, _, _ := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	scratch := startScratch(t, handler)
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(cfg.ReadStatePath), "fake-pi.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var started struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal([]byte(strings.SplitN(string(contents), "\n", 2)[0]), &started); err != nil || started.PID == 0 {
+		t.Fatalf("fake Pi log %q: %v", contents, err)
+	}
+	if err := syscall.Kill(started.PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		response := serveAction(handler, getActionRequest("/events?session="+url.QueryEscape(scratch.Session)))
+		var events struct {
+			Gone bool `json:"gone"`
+		}
+		decodeActionJSON(t, response, &events)
+		if events.Gone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("events after Pi ended = %d %s", response.Code, response.Body.String())
+		}
+	}
+	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Hello"}, true)); prompt.Code == http.StatusOK {
+		t.Fatalf("a prompt started the ended scratch session again: %s", prompt.Body.String())
+	}
+	if next := startScratch(t, handler); next.Session == scratch.Session {
+		t.Fatal("the ended scratch session was opened again")
+	}
+	if saved, _ := filepath.Glob(filepath.Join(cfg.SessionsRoot, "*", "*.jsonl")); len(saved) != 0 {
+		t.Fatalf("Pi saved %v", saved)
 	}
 }

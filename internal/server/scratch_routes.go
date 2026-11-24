@@ -62,6 +62,13 @@ func (scratch *scratchSessions) contains(key string) bool {
 	return false
 }
 
+// scratchGone tells whether the Pi of a scratch session has ended, such as after it crashed, which lost the session.
+func (app *application) scratchGone(key string) bool {
+	client := app.rpcClients.Client(key)
+	exiter, ok := client.(agent.Exiter)
+	return client == nil || ok && exiter.Exited()
+}
+
 func (app *application) registerScratchRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /scratch/new", app.newScratchSession)
 	mux.HandleFunc("POST /scratch/discard", app.discardScratchSession)
@@ -84,7 +91,7 @@ func (app *application) newScratchSession(response http.ResponseWriter, request 
 	defer app.scratch.changing.Unlock()
 	owner := currentWorkspaceID(request)
 	if current := app.scratch.session(owner); current != nil {
-		if app.rpcClients.Active(current.key) && app.scratch.key(owner) == current.key {
+		if !app.scratchGone(current.key) && app.scratch.key(owner) == current.key {
 			app.showScratchSession(response, request, current.key)
 			return
 		}
