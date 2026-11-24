@@ -54,6 +54,54 @@ func TestScratchFoldersBelongToTheirGateway(t *testing.T) {
 	}
 }
 
+// A fresh cache would take Pi most of its start to fill.
+func TestScratchSessionsStartWithACopyOfTheGatewaysJitiCache(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "jiti"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "jiti", "extension.mjs"), []byte("compiled"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	folders, err := openScratchFolders(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer folders.Close()
+	session, err := folders.create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(session, "tmp", "jiti", "extension.mjs")); err != nil || string(data) != "compiled" {
+		t.Fatalf("jiti cache = %q, %v", data, err)
+	}
+
+	// What the session compiles, such as extensions of its own, stays in its folder.
+	if err := os.WriteFile(filepath.Join(session, "tmp", "jiti", "session.mjs"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "jiti", "session.mjs")); !os.IsNotExist(err) {
+		t.Fatalf("the session's compiled code reached the gateway's cache: %v", err)
+	}
+
+	// A cache that links elsewhere could hold anything.
+	linked := t.TempDir()
+	if err := os.Symlink(filepath.Join(base, "jiti"), filepath.Join(linked, "jiti")); err != nil {
+		t.Fatal(err)
+	}
+	linkedFolders, err := openScratchFolders(linked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer linkedFolders.Close()
+	if session, err = linkedFolders.create(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(session, "tmp", "jiti")); !os.IsNotExist(err) {
+		t.Fatalf("a linked jiti cache was copied: %v", err)
+	}
+}
+
 func TestScratchFoldersNeedAPrivateFolder(t *testing.T) {
 	base := t.TempDir()
 	if err := os.Mkdir(filepath.Join(base, scratchRootName()), 0o755); err != nil {

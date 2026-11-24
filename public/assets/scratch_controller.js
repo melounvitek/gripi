@@ -2,11 +2,9 @@
 // frame over the page, which stays as it is. On that page, the controller passes on to the overlay what the page's
 // buttons and keys ask for.
 export class ScratchController {
-  constructor(documentObject, windowObject, toggleCommandPalette, openNewSessionModal, focusConversation) {
+  constructor(documentObject, windowObject, focusConversation) {
     this.document = documentObject;
     this.window = windowObject;
-    this.toggleCommandPalette = toggleCommandPalette;
-    this.openNewSessionModal = openNewSessionModal;
     this.focusConversation = focusConversation;
     this.page = documentObject.body.classList.contains("scratch-page");
     this.overlay = null;
@@ -38,14 +36,7 @@ export class ScratchController {
       if (event.origin !== this.window.location.origin || event.source !== this.frame.contentWindow) return;
       if (event.data === "gripi:scratch-hide") this.hide();
       if (event.data === "gripi:scratch-discarded") this.discarded();
-      if (event.data === "gripi:scratch-command-palette") {
-        this.hide();
-        this.toggleCommandPalette();
-      }
-      if (event.data === "gripi:scratch-new-session") {
-        this.hide();
-        this.openNewSessionModal();
-      }
+      if (event.data === "gripi:scratch-new-session") this.requestNewSession();
     });
   }
 
@@ -66,7 +57,13 @@ export class ScratchController {
     this.setPageInert(true);
     const drawer = this.document.getElementById("mobile-session-toggle");
     if (drawer) drawer.checked = false;
-    // The gateway answers with the scratch session there is, or starts one, such as after the last one's Pi ended.
+    await this.load();
+  }
+
+  // The gateway answers with the scratch session there is, or starts one, such as after the last one's Pi ended.
+  async load() {
+    // The overlay says that the session starts, unless it shows one already.
+    if ((this.frame.getAttribute("src") || "about:blank") === "about:blank") this.overlay.classList.add("is-loading");
     const response = await this.window.fetch("/scratch/new", { method: "POST", headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error(`Scratch session failed with HTTP ${response.status}`);
     const { redirect } = await response.json();
@@ -87,6 +84,15 @@ export class ScratchController {
     if (this.returnFocus?.isConnected && this.returnFocus !== this.document.body) this.returnFocus.focus({ preventScroll: true });
     else this.focusConversation();
     this.returnFocus = null;
+  }
+
+  // The frame leaves the session before it ends, so that its page doesn't say that it has ended.
+  async startOver() {
+    this.frame.src = "about:blank";
+    this.overlay.classList.add("is-loading");
+    await this.window.fetch("/scratch/discard", { method: "POST", headers: { Accept: "application/json" } });
+    this.markExists(false);
+    await this.load();
   }
 
   discarded() {
@@ -132,24 +138,23 @@ export class ScratchController {
     this.window.location.replace(redirect);
   }
 
-  // Esc hides the overlay, once nothing on the page takes it, and never stops Pi.
+  // On its page, Esc hides the overlay, once nothing there takes it, and never stops Pi.
   hideFromEscape() {
-    if (this.page) this.tellOverlay("gripi:scratch-hide");
-    else if (this.shown()) this.hide();
-    else return false;
-    return true;
-  }
-
-  // The scratch page has no palette or sessions, so Ctrl+K and Ctrl+N there reach the page around it.
-  requestCommandPalette() {
     if (!this.page) return false;
-    this.tellOverlay("gripi:scratch-command-palette");
+    this.tellOverlay("gripi:scratch-hide");
     return true;
   }
 
+  // While the overlay shows, the page around it keeps its palette and session search closed, and its page has none.
+  blocksPageShortcuts() {
+    return this.page || this.shown();
+  }
+
+  // Ctrl+N starts the scratch session over while its overlay shows, but not while the overlay loads one.
   requestNewSession() {
-    if (!this.page) return false;
-    this.tellOverlay("gripi:scratch-new-session");
+    if (this.page) this.tellOverlay("gripi:scratch-new-session");
+    else if (!this.shown()) return false;
+    else if (!this.overlay.classList.contains("is-loading")) this.startOver().catch(() => this.hide());
     return true;
   }
 
