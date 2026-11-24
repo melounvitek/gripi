@@ -30,6 +30,14 @@ async function openScratch(page) {
   await expect(scratch(page).getByRole("heading", { name: /Scratch/ })).toBeVisible();
 }
 
+function scratchKey(page) {
+  return page.locator("[data-scratch-overlay] iframe").evaluate((frame) => new URL(frame.src).searchParams.get("session"));
+}
+
+async function expectStartedOver(page, key) {
+  await expect.poll(async () => { const next = await scratchKey(page); return !!next && next !== key; }).toBe(true);
+}
+
 async function expectLoadedImage(image) {
   await expect(image).toBeVisible();
   await expect.poll(() => image.evaluate((element) => element.naturalWidth)).toBeGreaterThan(0);
@@ -64,8 +72,9 @@ test("a scratch session opens over the page, keeps its conversation and images, 
   await expect(overlay(page)).toBeVisible();
   await expect(message(scratch(page), "assistant", replies.standard)).toBeVisible();
   await expectLoadedImage(message(scratch(page), "user", question).locator("img"));
-  const key = new URL(await page.locator("[data-scratch-overlay] iframe").getAttribute("src"), page.url()).searchParams.get("session");
+  const key = await scratchKey(page);
   await page.keyboard.press("Escape");
+  await expect(overlay(page)).toBeHidden();
 
   // No list shows it, and the browser keeps nothing of it.
   await page.keyboard.press("Control+K");
@@ -101,20 +110,46 @@ test("Esc hides a scratch session that works, which goes on", async ({ page }) =
   await expect(frame.locator(".composer-state")).not.toHaveAttribute("data-state", "running");
 });
 
-test("Ctrl+K and Ctrl+N in a scratch session reach the page around it", async ({ page }) => {
+test("in a scratch session, Ctrl+K does nothing and Ctrl+N starts it over", async ({ page }) => {
   await openScratch(page);
-  await expect(scratch(page).getByLabel(/^Message to Pi$/)).toBeFocused();
+  await sendPrompt(scratch(page), question);
+  await expectRunFinished(scratch(page));
+  const key = await scratchKey(page);
 
+  // Ctrl+K before Ctrl+N, so that a palette that opened would take Ctrl+N.
   await page.keyboard.press("Control+K");
-  await expect(overlay(page)).toBeHidden();
-  await expect(page.getByRole("dialog", { name: "Go to or run" })).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  await openScratch(page);
-  await expect(scratch(page).getByLabel(/^Message to Pi$/)).toBeFocused();
   await page.keyboard.press("Control+N");
+  await expectStartedOver(page, key);
+  await expect(overlay(page)).not.toHaveClass(/is-loading/);
+  await expect(scratch(page).getByLabel(/^Message to Pi$/)).toBeFocused();
+  await expect(message(scratch(page), "user", question)).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Go to or run" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeHidden();
+  await expect(scratchButton(page)).toHaveClass(/is-active/);
+});
+
+test("while a scratch session starts, its overlay says so, and keys around it only hide it", async ({ page }) => {
+  let start;
+  const started = new Promise((resolve) => { start = resolve; });
+  await page.route("**/scratch/new", async (route) => {
+    await started;
+    await route.continue();
+  });
+  await page.keyboard.press("Control+f");
+  const find = page.locator("[data-current-session-find]");
+  await expect(find).toBeVisible();
+
+  await scratchButton(page).click();
+  await expect(overlay(page).getByText("Starting a scratch session…")).toBeVisible();
+  for (const key of ["Control+K", "Control+Shift+F", "Control+N", "Escape"]) await page.keyboard.press(key);
   await expect(overlay(page)).toBeHidden();
-  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeVisible();
+  await expect(find).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Go to or run" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeHidden();
+  await expect(page.locator('input[name="session_search"]')).toBeHidden();
+
+  start();
+  await expect(scratchButton(page)).toHaveClass(/is-active/);
 });
 
 test("a scratch session that ends elsewhere says so in its overlay", async ({ page }) => {
@@ -128,7 +163,7 @@ test("a scratch session that ends elsewhere says so in its overlay", async ({ pa
   await expect(scratch(page).getByText("This scratch session has ended.")).toBeHidden();
 });
 
-test("the desktop app's menu finds in a scratch session while its overlay shows, and leaves it for a new session", async ({ page }) => {
+test("the desktop app's menu finds in a scratch session and starts it over while its overlay shows, and does nothing else", async ({ page }) => {
   await openScratch(page);
   await sendPrompt(scratch(page), question);
   await expectRunFinished(scratch(page));
@@ -136,7 +171,18 @@ test("the desktop app's menu finds in a scratch session while its overlay shows,
   await expect(scratch(page).locator("[data-current-session-find]")).toBeVisible();
   await expect(page.locator("[data-current-session-find]")).toBeHidden();
 
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("gripi:command-palette-requested"));
+    window.dispatchEvent(new CustomEvent("gripi:session-search-requested"));
+  });
+  await expect(overlay(page)).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Go to or run" })).toBeHidden();
+  await expect(page.locator('input[name="session_search"]')).toBeHidden();
+
+  const key = await scratchKey(page);
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("gripi:new-session-requested")));
-  await expect(overlay(page)).toBeHidden();
-  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeVisible();
+  await expectStartedOver(page, key);
+  await expect(overlay(page)).not.toHaveClass(/is-loading/);
+  await expect(message(scratch(page), "user", question)).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeHidden();
 });

@@ -68,7 +68,7 @@ const hermesPanelController = new HermesPanelController(document, window, curren
   notificationPresenceController.reportCurrent();
   markCurrentSessionRead();
 });
-const scratchController = new ScratchController(document, window, () => commandPaletteController.toggle(), openNewSessionModal, focusConversation);
+const scratchController = new ScratchController(document, window, focusConversation);
 // The Hermes panel's page and the scratch overlay's share sessionStorage with the page around them, so they keep their
 // notification identity apart. Gripi notifies of nothing in a scratch session, so its page reports none.
 const notificationPresenceController = new NotificationPresenceController(document, window, scratchController.page ? () => "" : currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : scratchController.page ? ":scratch" : "", () => hermesPanelController.lookedAt());
@@ -384,7 +384,7 @@ function currentSessionFindShortcut(event) {
 }
 
 function requestSessionSearch() {
-  if (sessionSwitching() || modalIsOpen()) return false;
+  if (sessionSwitching() || modalIsOpen() || scratchController.blocksPageShortcuts()) return false;
   return sidebarController.openSearch();
 }
 
@@ -3536,10 +3536,9 @@ function focusPromptAfterDesktopServerActivation() {
   syncComposerFocus();
 }
 
-// The desktop app's menu finds in the scratch session while its overlay shows, and leaves it for the rest.
+// While the scratch overlay shows, the desktop app's menu finds in its session and starts it over, and does nothing else.
 window.addEventListener("gripi:new-session-requested", () => {
-  scratchController.hide();
-  openNewSessionModal();
+  if (!scratchController.requestNewSession()) openNewSessionModal();
 });
 window.addEventListener("gripi:scratch-session-requested", () => scratchController.toggle());
 window.addEventListener("gripi:current-session-find-requested", (event) => {
@@ -3548,14 +3547,10 @@ window.addEventListener("gripi:current-session-find-requested", (event) => {
 window.addEventListener("gripi:current-session-find-navigation-requested", (event) => {
   if (!scratchController.passToFrame(event)) requestCurrentSessionFindNavigation(event.detail);
 });
-window.addEventListener("gripi:session-search-requested", () => {
-  scratchController.hide();
-  requestSessionSearch();
-});
+window.addEventListener("gripi:session-search-requested", () => requestSessionSearch());
 // The desktop app's menu, like Ctrl+K, which the menu only gets when the page leaves it unhandled.
 window.addEventListener("gripi:command-palette-requested", () => {
-  scratchController.hide();
-  if (!sessionSwitching()) commandPaletteController.toggle();
+  if (!sessionSwitching() && !scratchController.blocksPageShortcuts()) commandPaletteController.toggle();
 });
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
@@ -3595,7 +3590,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   // A held key toggles once, and its repeats stay away from the browser's own Ctrl+K.
-  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || commandPaletteController.toggle() || hermesPanelController.requestCommandPalette() || scratchController.requestCommandPalette())) {
+  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || scratchController.blocksPageShortcuts() || commandPaletteController.toggle() || hermesPanelController.requestCommandPalette())) {
     event.preventDefault();
     return;
   }
@@ -3603,6 +3598,15 @@ document.addEventListener("keydown", (event) => {
   handlePickerListKey(event);
   handleModalTab(event);
   if (modalIsOpen()) return;
+
+  // Around the scratch overlay, such as while it loads, Esc hides it, and only Ctrl+N and Ctrl+Shift+N go on.
+  if (scratchController.shown() && !isCtrlOrMetaShortcut(event, "n")) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      scratchController.hide();
+    }
+    return;
+  }
 
   if (handleSessionSearchShortcut(event)) return;
   if (sidebarController.closeSearch(event)) {
@@ -3619,7 +3623,7 @@ document.addEventListener("keydown", (event) => {
 
   if (isCtrlOrMetaShortcut(event, "n") && !event.shiftKey) {
     event.preventDefault();
-    if (!scratchController.requestNewSession()) openNewSessionModal();
+    if (!event.repeat && !scratchController.requestNewSession()) openNewSessionModal();
     return;
   }
 
@@ -3646,7 +3650,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  // Esc hides the scratch overlay rather than stopping Pi there.
+  // Esc on the scratch session's page hides its overlay rather than stopping Pi there.
   if (event.key === "Escape" && !event.defaultPrevented && scratchController.hideFromEscape()) {
     event.preventDefault();
     return;
