@@ -18,6 +18,8 @@ import (
 type scratchFolders struct {
 	dir  string
 	lock *os.File
+	// temp is the temporary folder of the gateway's other Pis, with their caches.
+	temp string
 }
 
 func scratchRootName() string { return fmt.Sprintf("gripi-scratch-%d", os.Getuid()) }
@@ -50,7 +52,7 @@ func openScratchFolders(base string) (*scratchFolders, error) {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	return &scratchFolders{dir: dir, lock: lock}, nil
+	return &scratchFolders{dir: dir, lock: lock, temp: base}, nil
 }
 
 func removeAbandonedScratchFolders(root string) {
@@ -83,6 +85,13 @@ func (folders *scratchFolders) create() (string, error) {
 			_ = os.RemoveAll(dir)
 			return "", err
 		}
+	}
+	// Pi starts with a copy of the gateway's other Pis' cache of their compiled extensions, as compiling them again
+	// would take most of its start. A link there could lead to any folder, so it isn't followed. Without the copy, Pi
+	// only starts slower.
+	cache := filepath.Join(folders.temp, "jiti")
+	if info, err := os.Lstat(cache); err == nil && info.IsDir() {
+		_ = os.CopyFS(filepath.Join(dir, "tmp", "jiti"), os.DirFS(cache))
 	}
 	return dir, nil
 }
