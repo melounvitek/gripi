@@ -250,6 +250,7 @@ test("popup find stays local while popup session search activates the shell gate
         onFindInSessionNavigationRequested(callback) { callbacks.navigation = callback; },
         onGatewayActivationRequested() {},
         onNewSessionRequested() {},
+        onScratchSessionRequested() {},
         onNextGatewayRequested() {},
         onRemoveGatewayRequested() {},
         onRenameGatewayRequested() {},
@@ -326,12 +327,14 @@ test("desktop shortcuts separate new sessions from server management", () => {
   assert.match(main, /label: "New Session…"/);
   assert.match(main, /accelerator: "CmdOrCtrl\+N"/);
   assert.match(main, /gateway:new-session-requested/);
-  assert.match(main, /label: "Add Server…"/);
-  assert.match(main, /accelerator: "CmdOrCtrl\+Shift\+N"/);
+  assert.match(main, /label: "Scratch Session",\n\s*accelerator: "CmdOrCtrl\+Shift\+N",\n[^}]*gateway:scratch-session-requested/);
+  assert.match(main, /label: "Add Server…",\n\s*click/);
   assert.match(main, /accelerator: "Ctrl\+Tab"/);
   assert.match(main, /guestContents\.on\("before-input-event", \(event, input\) => \{\n    if \(input\.type !== "keyDown" \|\| !input\.control \|\| input\.shift \|\| input\.alt \|\| input\.meta \|\| input\.key !== "Tab"\) return;\n\n    event\.preventDefault\(\);\n    if \(mainWindow\) mainWindow\.webContents\.send\("gateway:activate-next-requested"\);\n  \}\);/);
   assert.match(main, /gateway:activate-next-requested/);
   assert.match(preload, /onNewSessionRequested/);
+  assert.match(preload, /onScratchSessionRequested/);
+  assert.match(shell, /onScratchSessionRequested\(\(\) => \{\n  dispatchActiveGatewayEvent\("gripi:scratch-session-requested"\);/);
   assert.match(preload, /onNextGatewayRequested/);
   assert.match(shell, /onNewSessionRequested/);
   assert.match(shell, /openActiveGatewayNewSessionModal/);
@@ -421,6 +424,7 @@ test("desktop shell gives the server view keyboard focus once it loads", async (
         onFindInSessionNavigationRequested() {},
         onGatewayActivationRequested() {},
         onNewSessionRequested() {},
+        onScratchSessionRequested() {},
         onNextGatewayRequested() {},
         onRemoveGatewayRequested() {},
         onRenameGatewayRequested() {},

@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("gripiDesktop", {
   onNewSessionRequested: (callback) => {
     ipcRenderer.on("gateway:new-session-requested", callback);
   },
+  onScratchSessionRequested: (callback) => {
+    ipcRenderer.on("gateway:scratch-session-requested", callback);
+  },
   onNextGatewayRequested: (callback) => {
     ipcRenderer.on("gateway:activate-next-requested", callback);
   },
