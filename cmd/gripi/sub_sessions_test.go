@@ -159,6 +159,10 @@ func TestNewRefusesAParentThatCannotHaveSubSessions(t *testing.T) {
 	if code, stdout, stderr := runCLI("new", directory, "--parent", "zzz"); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
 		t.Fatalf("gripi new under an unknown parent = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
+	// A scratch session has no file, so "$PI_SESSION_FILE" names none there.
+	if code, stdout, stderr := runCLI("new", directory, "Run the tests", "--parent", ""); code != 2 || stdout != "" || !strings.Contains(stderr, "--parent") {
+		t.Fatalf("gripi new under an empty parent = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
 	if _, err := os.Stat(os.Getenv("GRIPI_E2E_FAKE_PI_LOG")); !os.IsNotExist(err) {
 		t.Fatalf("a refused gripi new started Pi (%v)", err)
 	}
