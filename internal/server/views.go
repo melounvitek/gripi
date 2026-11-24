@@ -135,6 +135,10 @@ type pageView struct {
 	HermesPanel   bool
 	// VoiceEnabled offers Hermes sessions a voice conversation.
 	VoiceEnabled bool
+	// ScratchPage is the page of the user's scratch session, which the scratch overlay shows. ScratchExists tells that
+	// the user has one.
+	ScratchPage   bool
+	ScratchExists bool
 	// SubSession tells that the selected session is linked under another, so its page leaves notifying to the sidebar,
 	// which shows only the replies to the user's own turns as completed.
 	SubSession bool
@@ -297,7 +301,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
-	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil}
+	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil, ScratchPage: scratchPanel, ScratchExists: app.scratch.key(currentWorkspaceID(request)) != ""}
 	view.ExternalFollow = externalFollow
 	if notifier := app.completionNotifications; notifier != nil {
 		notifier.mu.Lock()
@@ -797,7 +801,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return relationData{view, session, current}
 		},
 		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
-		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph, "serverIcon": serverIcon,
+		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph, "scratchGlyph": scratchGlyph, "serverIcon": serverIcon,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
@@ -1348,6 +1352,11 @@ func agentLabel(name string) string {
 }
 
 // hermesGlyph is Hermes's caduceus, which marks the Hermes panel and its button.
+// scratchGlyph is an incognito hat and glasses, as browsers show their private windows.
+func scratchGlyph() template.HTML {
+	return `<svg class="scratch-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 10 8 4.5h8L17.5 10"/><path d="M3 10.5h18"/><circle cx="7.5" cy="16" r="2.8"/><circle cx="16.5" cy="16" r="2.8"/><path d="M10.3 16q1.7-1.2 3.4 0"/></svg>`
+}
+
 func hermesGlyph() template.HTML {
 	return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="M12 5.5C10 3.5 6.5 3.2 3.5 4.5c2.3 1.4 5.4 2 8.5 2.5M12 5.5c2-2 5.5-2.3 8.5-1-2.3 1.4-5.4 2-8.5 2.5"/><path d="M9 10c0 1.8 6 1.4 6 3.5S9 15.7 9 17.5s4.5 1.9 6 1.5"/></svg>`
 }

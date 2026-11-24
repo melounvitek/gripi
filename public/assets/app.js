@@ -57,6 +57,7 @@ import { NotificationPresenceController } from "./notification_presence.js";
 import { WebPushController } from "./web_push.js";
 import { VoiceCallController } from "./voice_call_controller.js";
 import { HermesPanelController } from "./hermes_panel_controller.js";
+import { ScratchController } from "./scratch_controller.js";
 import { SudoPromptController } from "./sudo_prompt_controller.js";
 import { WorkerController } from "./worker_controller.js";
 import { WorkerPickerController } from "./worker_picker_controller.js";
@@ -67,8 +68,10 @@ const hermesPanelController = new HermesPanelController(document, window, curren
   notificationPresenceController.reportCurrent();
   markCurrentSessionRead();
 });
-// The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
-const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "", () => hermesPanelController.lookedAt());
+const scratchController = new ScratchController(document, window, () => commandPaletteController.toggle(), openNewSessionModal, focusConversation);
+// The Hermes panel's page and the scratch overlay's share sessionStorage with the page around them, so they keep their
+// notification identity apart. Gripi notifies of nothing in a scratch session, so its page reports none.
+const notificationPresenceController = new NotificationPresenceController(document, window, scratchController.page ? () => "" : currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : scratchController.page ? ":scratch" : "", () => hermesPanelController.lookedAt());
 const webPushController = new WebPushController(window, navigator);
 const notifyAccessRequest = (title, body, tag) =>
   showGripiNotification(title, body, window.location.href, tag).catch(() => {});
@@ -446,6 +449,7 @@ function commandPaletteCommands() {
     ]],
     ["Gripi", [
       { label: "New session…", keys: "ctrl+n", run: openNewSessionModal },
+      { label: "Scratch session", keys: "ctrl+shift+n", run: () => scratchController.toggle() },
       { label: "Environment…", run: () => environmentController.open() },
       // On narrow screens the sidebar is a drawer instead.
       window.matchMedia("(min-width: 761px)").matches && { label: sidebarHidden ? "Show sidebar" : "Hide sidebar", run: () => sidebarController.setDesktopVisibility(!sidebarHidden, true) },
@@ -515,7 +519,7 @@ function syncComposerFocus(state = composerState?.dataset.state) {
   if (!automaticComposerFocusEnabled() || modalIsOpen() || sudoPromptController.shown || sudoPromptController.dismissed || workerController.shown) return;
   // The Hermes panel's page and the page around it keep the focus each has, but don't take it from each other, such as
   // while you type to Pi or to Hermes.
-  if (window.parent !== window ? !document.hasFocus() : hermesPanelController.keepsFocus()) return;
+  if (window.parent !== window ? !document.hasFocus() : hermesPanelController.keepsFocus() || scratchController.shown()) return;
   if (document.activeElement?.matches?.('[data-tool-output-body][role="region"]')) return;
 
   const agentBusy = ["running", "sending", "exporting"].includes(state);
@@ -964,7 +968,7 @@ function finalAssistantReplyKey(sessionPath, message) {
 }
 
 function notifyFinalAssistantReply(message) {
-  if (liveOutput?.dataset.sessionSyncMode === "external_follow" || liveOutput?.dataset.subSession === "true" || webPushController.enabled()) return;
+  if (scratchController.page || liveOutput?.dataset.sessionSyncMode === "external_follow" || liveOutput?.dataset.subSession === "true" || webPushController.enabled()) return;
   if (!message || (typeof message.stopReason === "string" && !["", "stop", "length"].includes(message.stopReason))) return;
   if (!liveMessageParser.finalAssistantReplySegments(message).length) return;
 
@@ -1787,7 +1791,8 @@ function abortEventPoll() {
 }
 
 function composerDraftStorageKey(session = promptSessionInput?.value || "") {
-  return session ? `gripi:composer-draft:${session}` : null;
+  // Gripi keeps nothing of a scratch session, not even a draft.
+  return session && !scratchController.page ? `gripi:composer-draft:${session}` : null;
 }
 
 function loadStoredComposerDraft() {
@@ -1969,6 +1974,10 @@ async function pollEvents() {
 
     const payload = await response.json();
     if (!eventPollCurrent(generation, sessionViewGeneration)) return;
+    if (payload.gone) {
+      scratchController.gone();
+      return;
+    }
     // Polling can resume after sleep without a wake event, and an empty batch then hides what the gap missed.
     const stale = !document.hidden && Date.now() - lastSessionSyncAt >= STALE_SESSION_REFRESH_AFTER_MS;
     const refreshRequired = stale || sessionSyncRefreshRequired(payload.session_sync) || payload.missed;
@@ -3098,6 +3107,7 @@ function currentSessionPath() {
 }
 
 async function markCurrentSessionRead(readState = null) {
+  if (scratchController.page) return;
   const pending = readState || {
     sessionPath: currentSessionPath(),
     responseCount: liveOutput?.dataset.assistantResponseCount,
@@ -3525,6 +3535,7 @@ function focusPromptAfterDesktopServerActivation() {
 }
 
 window.addEventListener("gripi:new-session-requested", () => openNewSessionModal());
+window.addEventListener("gripi:scratch-session-requested", () => scratchController.toggle());
 window.addEventListener("gripi:current-session-find-requested", requestCurrentSessionFind);
 window.addEventListener("gripi:current-session-find-navigation-requested", (event) => requestCurrentSessionFindNavigation(event.detail));
 window.addEventListener("gripi:session-search-requested", requestSessionSearch);
@@ -3570,7 +3581,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   // A held key toggles once, and its repeats stay away from the browser's own Ctrl+K.
-  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || commandPaletteController.toggle() || hermesPanelController.requestCommandPalette())) {
+  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || commandPaletteController.toggle() || hermesPanelController.requestCommandPalette() || scratchController.requestCommandPalette())) {
     event.preventDefault();
     return;
   }
@@ -3594,7 +3605,13 @@ document.addEventListener("keydown", (event) => {
 
   if (isCtrlOrMetaShortcut(event, "n") && !event.shiftKey) {
     event.preventDefault();
-    openNewSessionModal();
+    if (!scratchController.requestNewSession()) openNewSessionModal();
+    return;
+  }
+
+  if (isCtrlOrMetaShortcut(event, "n") && event.shiftKey) {
+    event.preventDefault();
+    if (!event.repeat) scratchController.toggle();
     return;
   }
 
@@ -3615,6 +3632,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  // Esc hides the scratch overlay rather than stopping Pi there.
+  if (event.key === "Escape" && !event.defaultPrevented && scratchController.hideFromEscape()) {
+    event.preventDefault();
+    return;
+  }
   if (event.key === "Escape" && !event.defaultPrevented && confirmOrStopRunningTask(event)) return;
 
   if (event.key === "Control") {
@@ -3900,6 +3922,7 @@ function bootstrapPage() {
   sessionActionsController.initialize();
   sessionTagsController.initialize();
   hermesPanelController.initialize();
+  scratchController.initialize();
   bindPageLifetimeControls();
   bindSessionDom();
   bindSessionControls();

@@ -52,10 +52,12 @@ func (app *application) securityHeaders(next http.Handler) http.Handler {
 			http.Error(response, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		// The Hermes panel shows the session-only page of its conversation in a frame, which /hermes leads to.
+		// The Hermes panel shows the session-only page of its conversation in a frame, which /hermes leads to, and the
+		// scratch overlay the page of the scratch session.
 		frameAncestors := "'none'"
 		query := request.URL.Query()
-		if strings.HasPrefix(request.URL.Path, "/hermes") || request.URL.Path == "/" && query.Get("session_only") == "1" && app.agentOf(query.Get("session")) == "hermes" {
+		sessionOnly := request.URL.Path == "/" && query.Get("session_only") == "1"
+		if strings.HasPrefix(request.URL.Path, "/hermes") || sessionOnly && (app.agentOf(query.Get("session")) == "hermes" || app.scratch.contains(query.Get("session"))) {
 			frameAncestors = "'self'"
 		}
 		policy := strings.Join([]string{
