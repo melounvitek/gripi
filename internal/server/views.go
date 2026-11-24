@@ -175,6 +175,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	hermesPanel := params.Get("session_only") == "1" && app.agentOf(params.Get("session")) == "hermes"
+	// Pages never list a scratch session; only the scratch overlay's page shows it.
+	scratchPanel := params.Get("session_only") == "1" && app.ownsScratch(request, params.Get("session"))
 	// Pages don't list Hermes's conversations, so the Hermes panel's page adds its own.
 	if hermesPanel {
 		if session, saved := app.sessionStore.Session(params.Get("session")); saved {
@@ -194,7 +196,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		if app.rpcClients.Registered(pending.Path) && (app.ownsSession == nil || app.ownsSession(request, pending.Path)) {
 			unresolvedPendingCWDs[pending.CWD] = true
 		}
-		if knownPaths[pending.Path] {
+		if knownPaths[pending.Path] || app.scratch.contains(pending.Path) {
 			continue
 		}
 		all = append(all, &agent.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt, Agent: app.agentOf(pending.Path)})
@@ -242,7 +244,10 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		selectedProject = ""
 	}
 	var selected *agent.Session
-	if params.Get("no_session") != "1" {
+	if scratchPanel {
+		cwd, _ := app.pendingSessions.CWD(params.Get("session"))
+		selected = &agent.Session{Path: params.Get("session"), CWD: cwd, DisplayName: "Scratch", Agent: app.agentOf(params.Get("session"))}
+	} else if params.Get("no_session") != "1" {
 		for _, session := range all {
 			if session.Path == params.Get("session") {
 				selected = session
@@ -279,7 +284,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	// Browsers ask with mark_read=0 while their window has no focus.
 	markRead := (request.URL.Path != "/sidebar" || params.Get("session") != "") && params.Get("mark_read") != "0"
-	unread, pinned, err := app.gatewayState.ReadAndObservePending(all, selected, markRead, externalFollow, unresolvedPendingCWDs)
+	// Gripi keeps nothing about a scratch session, such as whether it was read.
+	observed := selected
+	if scratchPanel {
+		observed = nil
+	}
+	unread, pinned, err := app.gatewayState.ReadAndObservePending(all, observed, markRead, externalFollow, unresolvedPendingCWDs)
 	if err != nil {
 		return nil, err
 	}

@@ -1685,6 +1685,9 @@ func (app *application) validOwnedSessionPath(request *http.Request, path string
 	if path == "" || len(path) > maximumSessionPathBytes || !app.sessionStore.ValidKey(path) || strings.ContainsRune(path, 0) || !reachesSession(request, path) {
 		return false
 	}
+	if app.scratch.contains(path) {
+		return app.ownsScratch(request, path)
+	}
 	return app.ownsSession == nil || app.ownsSession(request, path)
 }
 

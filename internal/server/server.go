@@ -89,8 +89,9 @@ type application struct {
 	workerWaits    map[string]string
 	failedRestarts map[string]func(context.Context) error
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
-	voice  *hermesdashboard.Client
-	hermes hermesConversation
+	voice   *hermesdashboard.Client
+	hermes  hermesConversation
+	scratch scratchSessions
 	// commandRoutes serve gripi commands, as Local does, and the reports to parent sessions.
 	commandRoutes http.Handler
 }
@@ -156,6 +157,9 @@ func (handler *Handler) Close(ctx context.Context) error {
 	}
 	if err := handler.app.rpcClients.Shutdown(ctx); err != nil {
 		return err
+	}
+	if err := handler.app.endScratchSessions(); err != nil {
+		logInternalError("end scratch sessions", err)
 	}
 	if handler.app.completionNotifications != nil {
 		if err := handler.app.completionNotifications.Close(ctx); err != nil {
@@ -236,6 +240,10 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		unknownBodySpools:    make(chan struct{}, unknownBodySpoolLimit),
 		knownSessionHashes:   make(map[string]bool),
 		pendingSessions:      agent.NewPendingSessionRegistry(nil),
+		scratch:              scratchSessions{byOwner: make(map[string]*scratchSession), ended: make(map[string]bool)},
+	}
+	if app.scratch.folders, err = openScratchFolders(os.TempDir()); err != nil {
+		logInternalError("open scratch session folders", err)
 	}
 	if cfg.HermesDashboardURL != "" {
 		app.voice = hermesdashboard.New(cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword)
@@ -263,6 +271,10 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		app.subSessionReports.Observe(client, lifecycle)
 	}
 	app.rpcClients = agent.NewRegistry(func(sessionPath string) (agent.Client, error) {
+		// Pi would save a scratch session that it started again.
+		if app.scratch.contains(sessionPath) {
+			return nil, errScratchGone
+		}
 		// Pi exits at once when a session's folder is gone, so such a session stays read-only.
 		if app.sessionFolderMissing(sessionPath) {
 			return nil, errSessionFolderMissing
@@ -294,6 +306,9 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	}
 	if cfg.MultiUserMode {
 		app.ownsSession = func(request *http.Request, path string) bool {
+			if app.scratch.contains(path) {
+				return app.ownsScratch(request, path)
+			}
 			owned, err := app.ownershipStore.OwnedBy(path, currentWorkspaceID(request))
 			return err == nil && owned
 		}
@@ -338,6 +353,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.registerActionRoutes(mux)
 	app.registerEnvironmentRoutes(mux)
 	app.registerWorkerRoutes(mux)
+	app.registerScratchRoutes(mux)
 	if cfg.HermesPath != "" {
 		app.registerHermesRoutes(mux)
 	}

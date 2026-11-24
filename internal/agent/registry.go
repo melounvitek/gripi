@@ -642,6 +642,12 @@ func (registry *Registry) RetireQueuedClient(path string, client Client) (bool, 
 	}, nil)
 	return retired, queued, err
 }
+
+// CloseClient closes the client of path even while it works, such as when its session ends.
+func (registry *Registry) CloseClient(path string) (bool, error) {
+	return registry.closeWhen(path, func(*clientEntry) bool { return true }, nil)
+}
+
 func (registry *Registry) CloseClientIfIdle(path string) (bool, error) {
 	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests == 0 && !working(entry.client) }, nil)
 }
