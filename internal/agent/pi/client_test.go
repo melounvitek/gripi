@@ -30,7 +30,7 @@ func TestStartedClientsNameThemselvesInTheirEvents(t *testing.T) {
 	stdoutReader, stdoutWriter := io.Pipe()
 	t.Cleanup(func() { _ = stdinReader.Close(); _ = stdoutWriter.Close() })
 	observed := make(chan agent.Client, 1)
-	client, err := start(func(client agent.Client, _ agent.Lifecycle) { observed <- client }, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+	client, err := start("", func(client agent.Client, _ agent.Lifecycle) { observed <- client }, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
 		return rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: observer}), nil
 	})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestStepsReportedBeforeStartReturnsCanUseTheClient(t *testing.T) {
 	stdoutReader, stdoutWriter := io.Pipe()
 	t.Cleanup(func() { _ = stdinReader.Close(); _ = stdoutWriter.Close() })
 	observed := make(chan int64, 1)
-	client, err := start(func(client agent.Client, _ agent.Lifecycle) { observed <- client.EventSequence() }, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+	client, err := start("", func(client agent.Client, _ agent.Lifecycle) { observed <- client.EventSequence() }, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
 		rpcClient := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: observer})
 		if _, err := io.WriteString(stdoutWriter, `{"type":"agent_start"}`+"\n"); err != nil {
 			return nil, err

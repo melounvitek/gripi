@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -90,6 +91,32 @@ func (app *application) scratchGone(key string) bool {
 	client := app.rpcClients.Client(key)
 	exiter, ok := client.(agent.Exiter)
 	return client == nil || ok && exiter.Exited()
+}
+
+// scratchHistory reads from the scratch session's Pi, which keeps the session only in memory. It doesn't wait for
+// what Pi is doing, because Pi answers Gripi's extension at once.
+func (app *application) scratchHistory(ctx context.Context, key string, read func(agent.MemoryHistory) error) error {
+	called := false
+	err := app.rpcClients.WithActiveClient(ctx, key, false, func(client agent.Client) error {
+		history, ok := client.(agent.MemoryHistory)
+		if !ok {
+			return agent.ErrInvalidResponse
+		}
+		called = true
+		return read(history)
+	})
+	if err == nil && !called {
+		return errScratchGone
+	}
+	return err
+}
+
+func (app *application) scratchWindow(ctx context.Context, key string, cursor, after *int) (window agent.Window, err error) {
+	err = app.scratchHistory(ctx, key, func(history agent.MemoryHistory) error {
+		window, err = history.MemoryWindow(ctx, cursor, after)
+		return err
+	})
+	return window, err
 }
 
 func (app *application) registerScratchRoutes(mux *http.ServeMux) {

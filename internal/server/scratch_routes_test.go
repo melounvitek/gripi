@@ -254,3 +254,28 @@ func TestScratchSessionRefusesWhatNeedsASavedSession(t *testing.T) {
 		t.Fatalf("commands = %s", commands)
 	}
 }
+
+// Pi keeps a scratch session only in memory, so a page shows its conversation from Pi.
+func TestScratchSessionShowsItsConversationAfterAReload(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	cfg, _, _, _ := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	scratch := startScratch(t, handler)
+	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Remember scratchpad"}, true)); prompt.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", prompt.Code, prompt.Body.String())
+	}
+	waitForFakePiSettled(t, handler, scratch.Session, 0)
+
+	page := serveAction(handler, getActionRequest(scratch.Redirect)).Body.String()
+	if !strings.Contains(page, "Remember scratchpad") || !strings.Contains(page, "message--assistant") {
+		t.Fatalf("scratch page after the reply = %s", page)
+	}
+	older := serveAction(handler, getActionRequest("/conversation_older?session="+url.QueryEscape(scratch.Session)+"&cursor=1"))
+	var payload struct {
+		HTML string `json:"html"`
+	}
+	decodeActionJSON(t, older, &payload)
+	if older.Code != http.StatusOK || !strings.Contains(payload.HTML, "Remember scratchpad") || strings.Contains(payload.HTML, "message--assistant") {
+		t.Fatalf("older messages = %d %s", older.Code, payload.HTML)
+	}
+}

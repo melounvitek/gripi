@@ -95,7 +95,7 @@ func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Cli
 	if err != nil {
 		return nil, err
 	}
-	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+	return start(adapter.store.Home, options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
 		return rpc.Start(key, options.CWD, command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})
 }
@@ -105,7 +105,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	if err != nil {
 		return nil, err
 	}
-	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+	return start(adapter.store.Home, options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
 		return rpc.StartInCWD(cwd, forkFrom, options.Scratch, command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})
 }

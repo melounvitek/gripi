@@ -2,6 +2,7 @@ package pi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +12,15 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 )
 
 // Client serves a session through Pi's RPC mode.
-type Client struct{ *rpc.Client }
+type Client struct {
+	*rpc.Client
+	// home is the user's home folder, which rendered history shortens to ~.
+	home string
+}
 
 // The gateway finds the optional interfaces by type assertion and falls back without them, so check them at compile
 // time on the client that Start returns.
@@ -35,12 +41,13 @@ var (
 	_ agent.TreeNavigator            = (*Client)(nil)
 	_ agent.ModelSelector            = (*Client)(nil)
 	_ agent.Responder                = (*Client)(nil)
+	_ agent.MemoryHistory            = (*Client)(nil)
 	_ rpc.SessionEntriesReader       = (*Client)(nil)
 )
 
 // start runs a Pi RPC client whose run steps name the Client that serves it, even those Pi sends before run returns.
-func start(observe func(agent.Client, agent.Lifecycle), run func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error)) (agent.Client, error) {
-	client := &Client{}
+func start(home string, observe func(agent.Client, agent.Lifecycle), run func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error)) (agent.Client, error) {
+	client := &Client{home: home}
 	// Pi can report a step before run returns, so whichever comes first sets the RPC client the observer may use.
 	var bind sync.Once
 	var observer func(*rpc.Client, map[string]any)
@@ -58,6 +65,33 @@ func start(observe func(agent.Client, agent.Lifecycle), run func(observer func(*
 	}
 	bind.Do(func() { client.Client = rpcClient })
 	return client, nil
+}
+
+// MemoryWindow renders a window of a session that Pi keeps only in memory, from its latest entries, which Gripi's
+// extension reports.
+func (client *Client) MemoryWindow(ctx context.Context, cursor *int, after *int) (agent.Window, error) {
+	response, err := client.History(ctx)
+	if err := answer(response, err); err != nil {
+		return agent.Window{}, err
+	}
+	entries, ok := responseData(response)["entries"].([]any)
+	if !ok {
+		return agent.Window{}, agent.ErrInvalidResponse
+	}
+	return sessionfile.Store{Home: client.home}.WindowFromEntries(entries, cursor, after)
+}
+
+func (client *Client) MemoryImage(ctx context.Context, entryID string, index int) ([]byte, string, error) {
+	response, err := client.HistoryImage(ctx, entryID, index)
+	if err := answer(response, err); err != nil {
+		return nil, "", err
+	}
+	image := responseData(response)
+	data, err := base64.StdEncoding.Strict().DecodeString(stringValue(image["data"]))
+	if err != nil {
+		return nil, "", err
+	}
+	return data, stringValue(image["mimeType"]), nil
 }
 
 func (client *Client) State(ctx context.Context) (agent.State, error) {

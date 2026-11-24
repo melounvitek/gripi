@@ -389,14 +389,29 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
 		window := agent.Window{}
+		var read func() (agent.Window, error)
 		if saved {
+			read = func() (agent.Window, error) {
+				return app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
+			}
+		} else if scratchPanel {
+			read = func() (agent.Window, error) {
+				window, err := app.scratchWindow(request.Context(), selected.Path, nil, nil)
+				// Without its history, such as when Pi doesn't answer in time, the page shows the live run.
+				if err != nil {
+					logInternalError("read scratch session history", err)
+				}
+				return window, nil
+			}
+		}
+		if read != nil {
 			// A run that starts or ends during the read would pair its messages with the other run state, so read
 			// again until the state holds across a read. An idle agent also must not have had events, which a whole
 			// run would leave; a running one has them for every streamed delta. The snapshot stays the earlier one:
 			// its event cursor must not skip anything the window lacks.
 			for attempt := 1; ; attempt++ {
 				var err error
-				window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
+				window, err = read()
 				if err != nil {
 					return nil, err
 				}
