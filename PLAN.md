@@ -128,7 +128,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - HTTPS, or loopback without a trusted forwarded scheme.
 
   Without them, or in multi-user mode, or with access approval disabled, the answer is 403 `{"error"}`.
-- `POST /pc/link`, body `{"link": "<id>"}`, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). Another link polling within 35 s (`PCLinkStale`) gets 409.
+- `POST /pc/link`, body `{"link": "<id>"}`, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). Another link polling within 35 s (`PCLinkStale`) gets 409. When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
 - `POST /pc/link/reply`, body `{"link", "id", "message": "<base64>"}` or `{"link", "id", "error": "<text>"}`, answers `200 {}`, 409 when the link isn't the current one, or 404 for an unknown request (already cancelled or timed out).
 - `POST /pc/link/close`, body `{"link"}`, releases the link if it is the current one, and fails its waiting requests with 503.
 
@@ -147,6 +147,14 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
 - **Requests** are handled concurrently while dialogs stay one at a time. More than 5 waiting are denied.
 - **Before signing or spawning**, it checks again after each dialog that access is still on, the link is the same and the request isn't cancelled.
 - **Clearing:** pending approvals and grants are cleared when access is turned off, the URL changes, the link is lost, or the app closes.
+- **A lost link** is any failed poll: a network error, any status but 200, or a malformed body. The app then aborts that link's requests, dialogs and polkit check, closes its agent connections, clears its grants, sends a best-effort close, and polls again with a new link ID after backing off.
+- **Limits** against a compromised gateway:
+  - an 8 MiB response cap and a 40 s deadline per request;
+  - messages checked before use;
+  - duplicate in-flight request IDs refused;
+  - 32 agent connections per link, and 8 waiting messages per connection;
+  - session names cut to 200 characters for display, and logins over 256 bytes refused.
+- **The approval turn** lasts through polkit, under one 2-minute deadline from when the dialog appears.
 - **Runners:** `spawn` with no shell, `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true`, and the app's own environment, not the gateway's. With no terminal, `pkexec` fails closed without a polkit agent. A cancel kills the process group.
 - **Display:** control and bidirectional characters are escaped, as `shellWords` does.
 
@@ -189,7 +197,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
 **`electron/main.js`:**
 - the menu checkbox with the warning, and a menu rebuild on `gateway-config:activate`;
 - starting and stopping links;
-- gateway requests from the main process with Node's `http`/`https` and a `Cookie` header built from the partition's cookies (`session.cookies.get`, which returns HttpOnly ones too):
+- gateway requests from the main process with `linkRequest` from `pc_access.js` (Node's `http`/`https`, which the E2E spec uses too) and a `Cookie` header built from the partition's cookies (`session.cookies.get`, which returns HttpOnly ones too):
   - Node's client never follows redirects.
   - Electron's `net.request` and `ses.fetch` are out, because they send `Sec-Fetch-Site: none` (phase 0).
   - `Set-Cookie` replies aren't saved back, which the link doesn't need.
