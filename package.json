@@ -11,7 +11,7 @@
   },
   "scripts": {
     "desktop": "electron .",
-    "desktop:check": "node --test electron/*.test.js && node --check electron/main.js && node --check electron/preload.js && node --check electron/gateway_preload.js && node --check electron/shell.js",
+    "desktop:check": "node --test electron/*.test.js && node --check electron/main.js && node --check electron/pc_access.js && node --check electron/ssh_agent_guard.js && node --check electron/preload.js && node --check electron/gateway_preload.js && node --check electron/shell.js",
     "frontend:check": "node --test test/frontend*.test.mjs test/demo.test.mjs && for file in public/assets/*.js; do node --input-type=module --check < \"$file\" || { echo \"Syntax error in $file\" >&2; exit 1; }; done && for file in demo/*.js; do node --check \"$file\" || exit 1; done",
     "pi-extension:check": "node --test test/pi_extension.test.mjs test/pi_worker_extension.test.mjs",
     "scripts:check": "node --test test/scripts.test.mjs",

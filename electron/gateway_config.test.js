@@ -6,6 +6,7 @@ const path = require("node:path");
 const {
   DEFAULT_GATEWAY_URL,
   addGateway,
+  allowsPcAccess,
   readGatewayConfig,
   readOrCreateGatewayConfig,
   removeGateway,
@@ -156,6 +157,38 @@ test("refuses to remove an unknown gateway", () => {
 
     assert.throws(() => removeGateway(config, "missing"), /Server not found/);
   });
+});
+
+test("persists PC access for the gateway's origin", () => {
+  withTempConfig((file) => {
+    const gateway = { id: "home", name: "Home", url: "https://home.example.test/pi", pcAccessOrigin: "https://home.example.test" };
+    writeGatewayConfig(file, { gateways: [gateway], activeGatewayId: "home" });
+
+    assert.deepEqual(readGatewayConfig(file).gateways, [gateway]);
+  });
+});
+
+test("turns PC access off when the gateway's origin changes", () => {
+  const config = {
+    gateways: [{ id: "home", name: "Home", url: "https://home.example.test/", pcAccessOrigin: "https://home.example.test" }],
+    activeGatewayId: "home"
+  };
+
+  assert.equal(saveGateway(config, { ...config.gateways[0], url: "https://home.example.test/other" }).gateways[0].pcAccessOrigin, "https://home.example.test");
+  assert.equal(saveGateway(config, { ...config.gateways[0], url: "https://other.example.test/" }).gateways[0].pcAccessOrigin, undefined);
+  assert.equal(saveGateway(config, { ...config.gateways[0], url: "http://home.example.test/" }).gateways[0].pcAccessOrigin, undefined);
+});
+
+test("allows PC access only over HTTPS or loopback HTTP", () => {
+  for (const url of ["https://home.example.test/", "http://localhost:4567/", "http://127.0.0.1:4567/", "http://127.1.2.3/", "http://[::1]:4567/"]) {
+    assert.equal(allowsPcAccess(url), true, url);
+  }
+  for (const url of ["http://100.64.0.10:4567/", "http://home.example.test/", "http://localhost.example.test/", "http://128.0.0.1/"]) {
+    assert.equal(allowsPcAccess(url), false, url);
+  }
+
+  const gateway = { id: "mini", name: "Mini", url: "http://100.64.0.10:4567/", pcAccessOrigin: "http://100.64.0.10:4567" };
+  assert.equal(saveGateway({ gateways: [], activeGatewayId: null }, gateway).gateways[0].pcAccessOrigin, undefined);
 });
 
 test("refuses invalid gateway URLs", () => {
