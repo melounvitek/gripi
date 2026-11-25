@@ -15,8 +15,8 @@ description = "Run the Go web gateway in development mode on port 4567"
 run = "APP_ENV=development GRIPI_BIND_HOST=127.0.0.1 go run ./cmd/gripi serve"
 
 [tasks.test]
-description = "Run the Go gateway, frontend, shell script, and Pi extension tests"
-run = "go test ./... && npm run frontend:check && npm run scripts:check && npm run pi-extension:check"
+description = "Run the Go gateway, frontend, shell script, Pi extension, and desktop tests"
+run = "go test ./... && npm run frontend:check && npm run scripts:check && npm run pi-extension:check && npm run desktop:check"
 
 [tasks.test-go]
 description = "Run the Go gateway tests"

@@ -208,6 +208,48 @@ sudo chmod 440 /etc/sudoers.d/gripi
 
 Root on a worker is root over everything on that machine, not just over the session’s copy: other users’ files, Docker, and every other session that runs there. Approve commands on a worker as carefully as on main.
 
+## Using your computer's SSH keys
+
+An agent in a Pi or Hermes session can log in over SSH with the keys of your computer, the one where the [desktop app](../README.md#desktop-app) runs, such as to push to a server for which the gateway has no key:
+
+```sh
+gripi pc ssh -- git push
+```
+
+`ssh` and Git run on the gateway, with its SSH configuration, and only ask your computer, through the desktop app, to sign each login, so the private keys never leave it. Each login asks there first. The app comes to the front with a notification and shows the session that asks, the key, the server and the login name, with **Deny**, **Allow once** and **Allow for 5 minutes**; then polkit’s password dialog confirms that it is you. Enter and Escape choose **Deny**. A denial, 2 minutes without an answer, or a request while 5 others wait refuses the login: the command then fails as it would without the key, such as with `Permission denied (publickey)`, and `gripi pc:` says why.
+
+**Allow for 5 minutes** lets the same session log in again with the same key and login name to a server with the same host key, without asking, for 5 minutes from your approval. Servers that share a host key count as one. Meanwhile, anything on the gateway that claims to be that session can use the key on that server, because a command can claim any session, as with `gripi sudo`. The app keeps the approval only in memory, and forgets it when PC access is turned off, its link to the server is lost, or the app quits.
+
+To set it up, on your computer:
+
+1. In the desktop app, turn on **File → Allow PC Access for This Server** for the server shown. The app offers it only for `https://` servers and `http://` ones on the computer itself, such as `localhost`, and warns first. It stays on for that server while its URL keeps its scheme, host and port, and works only while the app is open, also when another server is shown.
+2. Load your keys into an SSH agent. On Arch Linux:
+
+   ```sh
+   systemctl --user enable --now ssh-agent
+   export SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/ssh-agent.socket
+   ssh-add
+   ```
+
+   Put the `export` line in your shell’s startup file too. The app uses the `SSH_AUTH_SOCK` it was started with, or `$XDG_RUNTIME_DIR/ssh-agent.socket` without one. `ssh-add` loads the keys until the agent stops, such as when you log out.
+3. Make sure that the computer knows each server’s host key, in `~/.ssh/known_hosts` or `/etc/ssh/ssh_known_hosts`, such as by connecting once with `ssh` from the computer and checking the fingerprint. It must be a key of the type that the gateway’s `ssh` gets from the server, which follows the gateway’s own `known_hosts`: when the gateway knows a server by its Ed25519 key and the computer only by its RSA key, the login is refused. The refusal names the type and fingerprint of the key to add.
+
+The gateway must run in single-user mode with [access approval](#access-approval) on, and the app must reach it over HTTPS or from the gateway machine itself. A reverse proxy on the gateway machine must say that the request came over HTTPS, with `X-Forwarded-Proto` and [trusted proxy headers](#reverse-proxy): one that passes on plain HTTP without saying so looks local to the gateway. The gateway refuses PC access in [multi-user mode](#multi-user-mode), where all users’ agents run as one OS user, with approval [disabled](#disabling-approval), and over plain HTTP from another machine, even with `GRIPI_ALLOW_INSECURE_REMOTE_HTTP`.
+
+Plain `ssh` keeps using the gateway’s own keys. Pi in Gripi learns about `gripi pc` from the [built-in skill](#built-in-skill); with the skill off, or for Hermes, tell the agent, as for [`gripi sudo`](#running-commands-as-root). Like `gripi sudo`, it is Gripi’s own, and Pi CLI in a terminal knows nothing of it.
+
+Requirements and limits:
+
+- Linux only: the app doesn’t offer it on macOS yet. polkit asks as its policy for running programs as root says, by default for an administrator’s password every time, which on your own computer is usually yours. A local polkit rule that skips the password skips it here too, and without a polkit authentication agent, which desktop environments run, every login is refused. The dialog asks to run `/usr/bin/true`, which does nothing: Gripi runs it only so that polkit checks that it is you, and never sees the password.
+- The computer signs only SSH logins with Ed25519, ECDSA or RSA keys, to servers whose host key is one of these types. Other key types are refused, and so is signing anything else, such as Git commits with `ssh-keygen -Y sign`, changing the agent’s keys, and logging in through agent forwarding (`ssh -A`) from the gateway, which the computer tells by a mark that OpenSSH's `ssh` sets but that isn't signed, so it stops ordinary forwarding, not a hostile gateway. A server known only through a host certificate (`@cert-authority`) counts as unknown, and a `@revoked` host key is refused.
+- You approve a login, not a command: once logged in, the gateway can do whatever the key may do on that server, such as push to any repository that the key can write to. An SSH connection that stays open, such as a `ControlMaster` one, outlives **Allow once** and the 5 minutes, which only stop new logins.
+- The gateway sees every public key in your SSH agent, with its comment.
+- One desktop app can use a gateway at a time. Another one connects once the first quits, or about 35 seconds after it lost its connection.
+- A `gripi pc ssh` that is killed abruptly, such as with `SIGKILL`, can leave its agent connections counted against the app's limit of 32 until the app's link to the server drops. Turning PC access off and on again clears them.
+- Sessions on a [worker](#workers) can’t use it yet, nor can `!` commands, nested subagents and [scratch sessions](#scratch-sessions), as with `gripi sudo`.
+
+This keeps your private keys and password on your computer. It doesn’t protect against a hostile agent: anything that runs as the gateway’s OS user can ask in any session’s name. Check the server and the login name before you allow one, and turn PC access off for a server that you no longer trust with your keys.
+
 ## Pinned session directories
 
 List frequently used directories in `~/.config/gripi/pinned-dirs` to keep them available in the New Session dialog:
@@ -260,7 +302,7 @@ The selected runtime must already work, authenticated and configured, for the ga
 
 ## Built-in skill
 
-Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root) or to start sub-sessions when you ask. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
+Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root), to use [your computer’s SSH keys](#using-your-computers-ssh-keys), or to start sub-sessions when you ask. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
 
 A skill of your own named `gripi`, such as `~/.pi/agent/skills/gripi/SKILL.md`, replaces it, because Pi keeps the first skill of a name and the skills it finds come before those passed with `--skill`. To leave the skill out:
 

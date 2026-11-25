@@ -86,7 +86,16 @@ function normalizeGatewayOrNull(gateway) {
   if (!id) return null;
 
   const name = String(gateway.name || "").trim() || new URL(url).host;
-  return { id, name, url };
+  // PC access stays on only for the origin it was allowed for.
+  if (gateway.pcAccessOrigin !== new URL(url).origin || !allowsPcAccess(url)) return { id, name, url };
+  return { id, name, url, pcAccessOrigin: gateway.pcAccessOrigin };
+}
+
+// PC access needs HTTPS, or plain HTTP on this computer, which the gateway checks too.
+function allowsPcAccess(gatewayUrl) {
+  const { protocol, hostname } = new URL(gatewayUrl);
+  if (protocol === "https:") return true;
+  return protocol === "http:" && (hostname === "localhost" || hostname === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(hostname));
 }
 
 function normalizeGatewayUrl(candidate) {
@@ -112,6 +121,7 @@ function readRawConfig(configPath) {
 module.exports = {
   DEFAULT_GATEWAY_URL,
   addGateway,
+  allowsPcAccess,
   normalizeGatewayUrl,
   readGatewayConfig,
   readOrCreateGatewayConfig,

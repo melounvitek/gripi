@@ -318,12 +318,17 @@ func (app *application) enforceSecureRemoteTransport(next http.Handler) http.Han
 		return next
 	}
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if app.secureTransport(request) || (isLoopbackClient(request.RemoteAddr) && app.trustedForwardedScheme(request) == "") {
+		if app.secureOrLocalTransport(request) {
 			next.ServeHTTP(response, request)
 			return
 		}
 		writeText(response, http.StatusForbidden, "Remote Gripi access requires HTTPS. See docs/configuration.md.")
 	})
+}
+
+// secureOrLocalTransport reports whether a request came over HTTPS, or from this machine and not through a proxy.
+func (app *application) secureOrLocalTransport(request *http.Request) bool {
+	return app.secureTransport(request) || (isLoopbackClient(request.RemoteAddr) && app.trustedForwardedScheme(request) == "")
 }
 
 func (app *application) secureTransport(request *http.Request) bool {

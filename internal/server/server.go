@@ -81,6 +81,7 @@ type application struct {
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
 	sudoRequests            sudoRequests
+	pcLinks                 pcLinks
 	// workers move sessions to workers and back, which gripi commands can't ask for when it is nil.
 	workers Workers
 	// workerWaits name the sessions on this machine that the moves and returns of sessions wait for, by the moving
@@ -356,6 +357,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.registerEnvironmentRoutes(mux)
 	app.registerWorkerRoutes(mux)
 	app.registerScratchRoutes(mux)
+	app.registerPCRoutes(mux)
 	if cfg.HermesPath != "" {
 		app.registerHermesRoutes(mux)
 	}

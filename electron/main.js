@@ -1,8 +1,9 @@
-const { app, BrowserWindow, Menu, Notification, clipboard, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, session, shell } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
   addGateway,
+  allowsPcAccess,
   readOrCreateGatewayConfig,
   removeGateway,
   saveGateway,
@@ -12,11 +13,13 @@ const { gatewayUrl } = require("./gateway_url");
 const { configureSessionExportDownload } = require("./downloads");
 const { allowsGatewayNavigation } = require("./navigation");
 const { installGatewayPermissionHandlers } = require("./permissions");
+const { createPcAccess, linkRequest } = require("./pc_access");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const GATEWAY_PRELOAD_PATH = path.join(__dirname, "gateway_preload.js");
 const SHELL_PAGE_PATH = path.join(__dirname, "shell.html");
 const WINDOW_ICON_PATH = path.join(__dirname, "assets", "icons", "1024x1024.png");
+const PC_ACCESS_SUPPORTED = process.platform === "linux";
 const popupWindows = new Set();
 const gatewayWebContents = new Map();
 const downloadHandlerSessions = new WeakSet();
@@ -24,10 +27,12 @@ const downloadHandlerSessions = new WeakSet();
 let config = null;
 let mainWindow = null;
 let pendingWebviews = [];
+let pcAccessReleased = false;
+const pcAccess = createPcAccess({ request: pcLinkRequest, confirm: confirmPcAccess });
 
 function createWindow() {
   config = readOrCreateGatewayConfig(gatewayConfigPath());
-  config = applyLaunchUrlOverride(config);
+  applyConfig(applyLaunchUrlOverride(config));
 
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -81,6 +86,17 @@ function applyLaunchUrlOverride(currentConfig) {
   return saveGateway(currentConfig, { ...activeGateway, url: effectiveUrl });
 }
 
+function applyConfig(nextConfig) {
+  config = nextConfig;
+  if (PC_ACCESS_SUPPORTED) {
+    for (const gateway of config.gateways) {
+      if (gateway.pcAccessOrigin) pcAccess.start(gateway);
+      else pcAccess.stop(gateway.id);
+    }
+  }
+  installAppMenu();
+}
+
 function activeGatewayFrom(currentConfig) {
   return currentConfig.gateways.find((gateway) => gateway.id === currentConfig.activeGatewayId) || currentConfig.gateways[0];
 }
@@ -104,22 +120,25 @@ function registerGatewayConfigIpc() {
     const gateway = config.gateways.find((existingGateway) => existingGateway.id === id);
     if (!gateway) return config;
 
-    config = writeGatewayConfig(gatewayConfigPath(), { ...config, activeGatewayId: gateway.id });
+    applyConfig(writeGatewayConfig(gatewayConfigPath(), { ...config, activeGatewayId: gateway.id }));
     return config;
   });
 
+  // Only the File menu turns PC access on, after its warning, so these keep what the menu set.
   ipcMain.handle("gateway-config:add-gateway", (_event, gateway) => {
-    config = writeGatewayConfig(gatewayConfigPath(), addGateway(config, gateway));
+    applyConfig(writeGatewayConfig(gatewayConfigPath(), addGateway(config, { ...gateway, pcAccessOrigin: undefined })));
     return config;
   });
 
   ipcMain.handle("gateway-config:save-gateway", (_event, gateway) => {
-    config = writeGatewayConfig(gatewayConfigPath(), saveGateway(config, gateway));
+    const pcAccessOrigin = config.gateways.find((existingGateway) => existingGateway.id === gateway?.id)?.pcAccessOrigin;
+    applyConfig(writeGatewayConfig(gatewayConfigPath(), saveGateway(config, { ...gateway, pcAccessOrigin })));
     return config;
   });
 
   ipcMain.handle("gateway-config:remove-gateway", async (_event, id) => {
-    config = writeGatewayConfig(gatewayConfigPath(), removeGateway(config, id));
+    applyConfig(writeGatewayConfig(gatewayConfigPath(), removeGateway(config, id)));
+    pcAccess.stop(id);
     await clearGatewaySession(id).catch((error) => {
       console.warn(`Could not clear session data for removed gateway ${id}:`, error);
     });
@@ -135,6 +154,7 @@ async function clearGatewaySession(id) {
 
 function installAppMenu() {
   const isMac = process.platform === "darwin";
+  const activeGateway = config ? activeGatewayFrom(config) : null;
   const template = [
     ...(isMac ? [{ role: "appMenu" }] : []),
     {
@@ -179,6 +199,18 @@ function installAppMenu() {
             if (mainWindow) mainWindow.webContents.send("gateway:activate-next-requested");
           }
         },
+        ...(PC_ACCESS_SUPPORTED ? [
+          { type: "separator" },
+          {
+            label: "Allow PC Access for This Server",
+            type: "checkbox",
+            checked: Boolean(activeGateway?.pcAccessOrigin),
+            enabled: Boolean(activeGateway),
+            click: (menuItem) => {
+              setPcAccess(activeGateway, menuItem.checked).catch((error) => console.warn("Could not change PC access:", error));
+            }
+          }
+        ] : []),
         { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" }
       ]
@@ -240,6 +272,75 @@ function installAppMenu() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+async function setPcAccess(gateway, enabled) {
+  const pcAccessOrigin = enabled && await confirmPcAccessOptIn(gateway) ? new URL(gateway.url).origin : undefined;
+  const gateways = config.gateways.map((existingGateway) => (
+    existingGateway.id === gateway.id ? { ...existingGateway, pcAccessOrigin } : existingGateway
+  ));
+  applyConfig(writeGatewayConfig(gatewayConfigPath(), { ...config, gateways }));
+}
+
+async function confirmPcAccessOptIn(gateway) {
+  if (!allowsPcAccess(gateway.url)) {
+    await dialog.showMessageBox(mainWindow, {
+      type: "error",
+      message: "PC access needs a secure connection",
+      detail: "Gripi allows it only for https:// servers, and for http:// servers on this computer."
+    });
+    return false;
+  }
+
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    message: `Allow ${gateway.name} to use this computer?`,
+    detail: [
+      "Agents on this server can then ask to use this computer's SSH keys. Each use needs your approval here and your password.",
+      "The server sees every public key in your SSH agent, with its comment.",
+      "It works only while Gripi is open."
+    ].join("\n\n"),
+    buttons: ["Cancel", "Allow"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  });
+  return response === 1;
+}
+
+async function pcLinkRequest(gateway, pathname, body, signal) {
+  const url = new URL(pathname, gateway.url);
+  const cookies = await session.fromPartition(`persist:gripi-${gateway.id}`).cookies.get({ url: url.toString() });
+  return linkRequest(url, body, { cookie: cookies.map(({ name, value }) => `${name}=${value}`).join("; "), signal });
+}
+
+async function confirmPcAccess({ gateway, sessionName, key, server, login, signal }) {
+  if (!mainWindow || mainWindow.isDestroyed()) return "deny";
+
+  const message = `${gateway.name} wants to use your SSH key`;
+  if (Notification.isSupported()) new Notification({ title: message, body: `Session: ${sessionName}`, icon: WINDOW_ICON_PATH }).show();
+  mainWindow.show();
+  mainWindow.focus();
+  const detail = [
+    `Session:  ${sessionName}`,
+    `Key:      ${key.type} ${key.fingerprint}${key.comment ? ` (${key.comment})` : ""}`,
+    `Server:   ${server.names.join(", ") || "known host"} (in your known_hosts)`,
+    `Host key: ${server.hostKeyFingerprint}`,
+    `Login:    ${login}`,
+    "",
+    "Allow for 5 minutes lets this session use this key on this server without asking again."
+  ].join("\n");
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    message,
+    detail,
+    buttons: ["Deny", "Allow once", "Allow for 5 minutes"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    signal
+  });
+  return ["deny", "once", "grant"][response];
 }
 
 function routeGatewayShortcut(browserWindow, channel, eventName, detail) {
@@ -423,6 +524,15 @@ app.whenReady().then(() => {
   registerGatewayConfigIpc();
   installAppMenu();
   createWindow();
+});
+
+// Releases the links, so the next start needn't wait for them to go stale, without holding up the quit for long.
+app.on("before-quit", (event) => {
+  if (!PC_ACCESS_SUPPORTED || pcAccessReleased) return;
+
+  event.preventDefault();
+  pcAccessReleased = true;
+  Promise.race([pcAccess.stopAll(), new Promise((resolve) => setTimeout(resolve, 2000))]).then(() => app.quit());
 });
 
 app.on("window-all-closed", () => {
