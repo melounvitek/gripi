@@ -1,7 +1,5 @@
 const { app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, session, shell } = require("electron");
 const { spawn } = require("node:child_process");
-const http = require("node:http");
-const https = require("node:https");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -16,15 +14,13 @@ const { gatewayUrl } = require("./gateway_url");
 const { configureSessionExportDownload } = require("./downloads");
 const { allowsGatewayNavigation } = require("./navigation");
 const { installGatewayPermissionHandlers } = require("./permissions");
-const { createPcAccess } = require("./pc_access");
+const { createPcAccess, linkRequest } = require("./pc_access");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const GATEWAY_PRELOAD_PATH = path.join(__dirname, "gateway_preload.js");
 const SHELL_PAGE_PATH = path.join(__dirname, "shell.html");
 const WINDOW_ICON_PATH = path.join(__dirname, "assets", "icons", "1024x1024.png");
 const PC_ACCESS_SUPPORTED = process.platform === "linux";
-// Longer than the gateway's 25-second link poll.
-const PC_LINK_TIMEOUT_MS = 40 * 1000;
 const popupWindows = new Set();
 const gatewayWebContents = new Map();
 const downloadHandlerSessions = new WeakSet();
@@ -313,33 +309,10 @@ async function confirmPcAccessOptIn(gateway) {
   return response === 1;
 }
 
-// Node's client, unlike Electron's, sends no Sec-Fetch-* headers (the gateway refuses requests that have them), and never
-// follows a redirect, which would take the cookies and the link header elsewhere.
 async function pcLinkRequest(gateway, pathname, body, signal) {
   const url = new URL(pathname, gateway.url);
   const cookies = await session.fromPartition(`persist:gripi-${gateway.id}`).cookies.get({ url: url.toString() });
-  const payload = JSON.stringify(body);
-  const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload), "X-Gripi-PC-Link": "1" };
-  if (cookies.length > 0) headers.Cookie = cookies.map(({ name, value }) => `${name}=${value}`).join("; ");
-
-  return new Promise((resolve, reject) => {
-    const client = url.protocol === "https:" ? https : http;
-    const request = client.request(url, { method: "POST", headers, signal, timeout: PC_LINK_TIMEOUT_MS }, (response) => {
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("error", reject);
-      response.on("end", () => {
-        try {
-          resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
-        } catch (_error) {
-          resolve({ status: response.statusCode, body: null });
-        }
-      });
-    });
-    request.on("timeout", () => request.destroy(new Error("the server did not answer in time")));
-    request.on("error", reject);
-    request.end(payload);
-  });
+  return linkRequest(url, body, { cookie: cookies.map(({ name, value }) => `${name}=${value}`).join("; "), signal });
 }
 
 async function confirmPcAccess({ gateway, sessionName, key, server, login, signal }) {

@@ -147,11 +147,11 @@ test("refuses session-binds with SHA-1 RSA, certificate, unknown or invalid host
   for (const bind of binds) assert.equal(createConnectionGuard().check(bind).action, "refuse");
 });
 
-test("accepts session IDs from 1 to 256 bytes", () => {
-  for (const length of [32, 48, 64, 256, 0, 257]) {
+test("accepts only session IDs of 32, 48 or 64 bytes", () => {
+  for (const length of [32, 48, 64, 0, 31, 33, 47, 65, 256]) {
     const sessionId = crypto.randomBytes(length);
     const result = createConnectionGuard().check(sessionBind(edHostKey.blob, sessionId, edHostKey.sign(sessionId)));
-    assert.equal(result.action, length > 0 && length <= 256 ? "forward" : "refuse", `${length} bytes`);
+    assert.equal(result.action, [32, 48, 64].includes(length) ? "forward" : "refuse", `${length} bytes`);
   }
 });
 
@@ -238,6 +238,24 @@ test("refuses sign requests that aren't a login to the bound session with the re
   };
   for (const [name, message] of Object.entries(refused)) assert.equal(guard.check(message).action, "refuse", name);
   assert.equal(guard.check(signRequest(key, login())).action, "sign");
+});
+
+test("returns the login as ssh sent it, and refuses one that is too long, not UTF-8 or has NUL", () => {
+  const key = userKey("ssh-ed25519");
+  const sign = (user) => {
+    const { guard, sessionId } = boundGuard();
+    return guard.check(signRequest(key, loginData({ sessionId, key, user })));
+  };
+  for (const user of ["jiří", "\ufeffgit", "a".repeat(256)]) assert.equal(sign(user).user, user);
+
+  const refused = {
+    "257 bytes": "a".repeat(257),
+    "257 bytes in UTF-8": "ř".repeat(128) + "a",
+    "invalid UTF-8": Buffer.from([0x67, 0xff, 0x74]),
+    "a lone surrogate": Buffer.from([0xed, 0xa0, 0x80]),
+    NUL: "git\u0000"
+  };
+  for (const [name, user] of Object.entries(refused)) assert.equal(sign(user).action, "refuse", name);
 });
 
 test("refuses every session-bind after the first", () => {

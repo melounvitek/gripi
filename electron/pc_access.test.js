@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createPcAccess } = require("./pc_access");
+const http = require("node:http");
+const { createPcAccess, linkRequest } = require("./pc_access");
 
 const GATEWAY = { id: "home", name: "home-server", url: "https://home.example.test/" };
 const SESSION = "/home/vitek/.pi/sessions/a.jsonl";
@@ -156,7 +157,7 @@ test("asks with the request's details, escaped, and signs nothing when denied", 
 
   await h.deliver(
     ssh("1", LIST),
-    ssh("2", sign({ user: "git\u0000" }), { session_name: "Fix \u202elogin\n" })
+    ssh("2", sign({ user: "git\u001b" }), { session_name: "Fix \u202elogin\n" })
   );
 
   const { answer, signal, ...prompt } = h.prompts[0];
@@ -165,7 +166,7 @@ test("asks with the request's details, escaped, and signs nothing when denied", 
     sessionName: "Fix \\u202elogin\\u000a",
     key: { type: "ssh-ed25519", fingerprint: "SHA256:key-a", comment: "key-a@laptop" },
     server: { names: ["github.com"], hostKeyFingerprint: "SHA256:host-gh" },
-    login: "git\\u0000"
+    login: "git\\u001b"
   });
 
   await h.answer("deny");
@@ -173,6 +174,73 @@ test("asks with the request's details, escaped, and signs nothing when denied", 
   assert.deepEqual(h.replies().at(-1), { link: h.link(), id: "2", error: "denied on the PC" });
   assert.equal(h.agents[0].requests.length, 1);
   assert.equal(h.auths, 0);
+});
+
+test("shows at most 200 characters of a session name, escaped first", async (t) => {
+  const h = setup(t);
+
+  await h.deliver(ssh("1", sign(), { session_name: `Fix \u202e${"x".repeat(300)}` }));
+
+  assert.equal(h.prompts[0].sessionName, `Fix \\u202e${"x".repeat(189)}…`);
+});
+
+test("ignores malformed messages", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const h = setup(t);
+  const link = h.link();
+
+  await h.deliver(
+    null,
+    { type: "run", id: "1" },
+    ssh(2, LIST),
+    ssh("3", LIST, { session: "/".repeat(4097) }),
+    ssh("4", LIST, { connection: "" }),
+    ssh("5", LIST, { session_name: ["Fix"] }),
+    ssh("6", "not base64!"),
+    ssh("7", "Cw"),
+    ssh("8", ""),
+    ssh("9", Buffer.alloc(256 * 1024 + 1, 11).toString("base64")),
+    ssh("10", Buffer.alloc(256 * 1024, 11).toString("base64"))
+  );
+
+  assert.deepEqual(h.replies().map((reply) => reply.id), ["10"]);
+  assert.equal(h.link(), link);
+});
+
+test("refuses a request whose ID is in progress, and still cancels the first", async (t) => {
+  const h = setup(t);
+
+  await h.deliver(ssh("1", sign()));
+  await h.deliver(ssh("1", LIST, { connection: "c2" }));
+
+  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "another request with this ID is in progress on the PC" }]);
+  assert.equal(h.agents.length, 0);
+
+  await h.deliver({ type: "cancel", id: "1" });
+
+  assert.equal(h.prompts[0].signal.aborted, true);
+  assert.equal(h.replies().length, 1);
+});
+
+test("refuses more than 32 agent connections at a time", async (t) => {
+  const h = setup(t);
+
+  await h.deliver(...Array.from({ length: 33 }, (_, index) => ssh(String(index), LIST, { connection: `c${index}` })));
+
+  assert.equal(h.agents.length, 32);
+  assert.deepEqual(h.replies().find((reply) => reply.id === "32"), { link: h.link(), id: "32", error: "too many SSH agent connections are open on the PC" });
+
+  await h.deliver({ type: "ssh_close", session: SESSION, connection: "c0" }, ssh("33", LIST, { connection: "c32" }));
+
+  assert.deepEqual(h.replies().at(-1), { link: h.link(), id: "33", message: agentReply(LIST) });
+});
+
+test("refuses more than 8 messages waiting on one agent connection", async (t) => {
+  const h = setup(t);
+
+  await h.deliver(...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((id) => ssh(String(id), sign())));
+
+  assert.deepEqual(h.replies(), [{ link: h.link(), id: "9", error: "too many SSH agent messages wait on this connection on the PC" }]);
 });
 
 test("allow once signs after the password check and asks again next time", async (t) => {
@@ -230,6 +298,23 @@ test("a failed password check denies and grants nothing", async (t) => {
 
   await h.deliver(ssh("2", sign(), { connection: "c2" }));
 
+  assert.equal(h.prompts.length, 2);
+});
+
+test("shows the next dialog only once the password check of the one before has ended", async (t) => {
+  let authenticated;
+  const h = setup(t, { authenticate: () => new Promise((resolve) => { authenticated = resolve; }) });
+
+  await h.deliver(ssh("1", sign()), ssh("2", sign({ user: "deploy" }), { connection: "c2" }));
+  await h.answer("once");
+
+  assert.equal(h.auths, 1);
+  assert.equal(h.prompts.length, 1);
+
+  authenticated({ ok: true });
+  await settle();
+
+  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", message: agentReply(sign()) }]);
   assert.equal(h.prompts.length, 2);
 });
 
@@ -306,10 +391,29 @@ test("a dialog nobody answers in 2 minutes is denied", async (t) => {
   assert.equal(h.agents.length, 0);
 });
 
+test("the 2 minutes cover the password check, which is stopped when they end", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let authSignal;
+  const h = setup(t, {
+    authenticate: (signal) => new Promise((resolve) => {
+      authSignal = signal;
+      signal.addEventListener("abort", () => resolve({ ok: false, reason: "pkexec was stopped" }));
+    })
+  });
+
+  await h.deliver(ssh("1", sign()));
+  t.mock.timers.tick(60 * 1000);
+  await h.answer("once");
+  t.mock.timers.tick(60 * 1000);
+  await settle();
+
+  assert.equal(authSignal.aborted, true);
+  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "denied on the PC: nobody answered there in 2 minutes" }]);
+});
+
 test("backs off on network errors from 1 second to 30, and polls at once after a success", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t);
-  const link = h.link();
 
   for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
     h.polls.shift().reject(new Error("offline"));
@@ -319,34 +423,94 @@ test("backs off on network errors from 1 second to 30, and polls at once after a
   assert.equal(h.polls.length, 1);
   h.polls.shift().reject(new Error("offline"));
   await expectPollAfter(t, h, 1000);
-
-  assert.equal(h.link(), link);
 });
 
-test("retries after a minute when refused, keeping the link", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = setup(t);
-  const link = h.link();
+const failedPolls = [
+  ["a network error", 1000, (poll) => poll.reject(new Error("offline"))],
+  ["a refusal", 60 * 1000, (poll) => poll.resolve({ status: 403, body: { error: "refused" } })],
+  ["another app's link", 10 * 1000, (poll) => poll.resolve({ status: 409, body: { error: "another link" } })],
+  ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null })],
+  ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } })]
+];
+for (const [failure, retryMs, fail] of failedPolls) {
+  test(`${failure} loses the link: it closes its dialogs and agent connections, forgets grants and retries with a new ID`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const h = setup(t);
+    const link = h.link();
+    await h.deliver(ssh("1", LIST), ssh("2", sign()));
+    await h.answer("grant");
+    await h.deliver(ssh("3", sign({ user: "deploy" }), { connection: "c2" }));
 
-  h.polls.shift().resolve({ status: 403, body: { error: "refused" } });
-  await expectPollAfter(t, h, 60 * 1000);
+    fail(h.polls.shift());
+    await settle();
 
-  assert.equal(h.link(), link);
+    assert.equal(h.prompts[1].signal.aborted, true);
+    assert.equal(h.agents[0].closed, true);
+    assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+    await expectPollAfter(t, h, retryMs);
+    assert.notEqual(h.link(), link);
+    await h.deliver(ssh("4", sign()));
+
+    assert.equal(h.prompts.length, 3);
+    assert.deepEqual(h.replies().map((reply) => reply.id), ["1", "2"]);
+  });
+}
+
+async function listen(t, handler) {
+  const server = http.createServer(handler);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+test("linkRequest posts JSON with the link header and cookies, and doesn't follow redirects", async (t) => {
+  const received = [];
+  const origin = await listen(t, (request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      received.push({ url: request.url, headers: request.headers, body });
+      if (request.url === "/moved") response.writeHead(302, { Location: "/pc/link" }).end();
+      else response.end(JSON.stringify({ messages: [] }));
+    });
+  });
+
+  assert.deepEqual(await linkRequest(new URL("/pc/link", origin), { link: "l1" }, { cookie: "a=1; b=2" }), { status: 200, body: { messages: [] } });
+  assert.deepEqual(await linkRequest(new URL("/moved", origin), { link: "l1" }), { status: 302, body: null });
+
+  assert.deepEqual(received.map(({ url }) => url), ["/pc/link", "/moved"]);
+  const { headers, body } = received[0];
+  assert.equal(body, '{"link":"l1"}');
+  assert.equal(headers["content-type"], "application/json");
+  assert.equal(headers["x-gripi-pc-link"], "1");
+  assert.equal(headers.cookie, "a=1; b=2");
+  assert.equal(received[1].headers.cookie, undefined);
 });
 
-test("a link taken by another app is lost: it retries after 10 seconds with a new ID and forgets grants", async (t) => {
+test("linkRequest gives up on an answer over 8 MiB, or one that takes longer than 40 seconds", { timeout: 10 * 1000 }, async (t) => {
+  let trickling;
+  const origin = await listen(t, (request, response) => {
+    request.resume();
+    if (request.url === "/large") {
+      response.end(Buffer.alloc(8 * 1024 * 1024 + 1, " "));
+      return;
+    }
+    response.write("{");
+    trickling = setInterval(() => response.write(" "), 5);
+    t.after(() => clearInterval(trickling));
+  });
+
+  await assert.rejects(linkRequest(new URL("/large", origin), {}), /the server's answer is too large/);
+
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = setup(t);
-  const link = h.link();
-  await h.deliver(ssh("1", sign()));
-  await h.answer("grant");
+  const slow = linkRequest(new URL("/slow", origin), {});
+  while (!trickling) await new Promise(setImmediate);
+  t.mock.timers.tick(40 * 1000);
 
-  h.polls.shift().resolve({ status: 409, body: { error: "another link" } });
-  await expectPollAfter(t, h, 10 * 1000);
-  assert.notEqual(h.link(), link);
-  await h.deliver(ssh("2", sign()));
-
-  assert.equal(h.prompts.length, 2);
+  await assert.rejects(slow, /the server did not answer in time/);
 });
 
 async function expectPollAfter(t, h, delay) {

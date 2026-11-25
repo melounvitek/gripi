@@ -1,6 +1,8 @@
 const crypto = require("node:crypto");
 const { once } = require("node:events");
 const fs = require("node:fs");
+const http = require("node:http");
+const https = require("node:https");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,7 +10,15 @@ const timersPromises = require("node:timers/promises");
 
 const GRANT_MS = 5 * 60 * 1000;
 const DIALOG_TIMEOUT_MS = 2 * 60 * 1000;
-const MAX_WAITING_DIALOGS = 5;
+const MAX_WAITING_APPROVALS = 5;
+const MAX_AGENT_CONNECTIONS = 32;
+const MAX_WAITING_MESSAGES = 8;
+const MAX_FIELD_LENGTH = 4096;
+const MAX_AGENT_MESSAGE_BYTES = 256 * 1024;
+const MAX_SESSION_NAME_LENGTH = 200;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+// Longer than the gateway's 25-second link poll.
+const REQUEST_TIMEOUT_MS = 40 * 1000;
 const MAX_BACKOFF_MS = 30 * 1000;
 const LINK_TAKEN_RETRY_MS = 10 * 1000;
 const REFUSED_RETRY_MS = 60 * 1000;
@@ -25,8 +35,8 @@ function createPcAccess({
 }) {
   const { createConnectionGuard, findKnownHost, fingerprint, keyType } = sshAgentGuard;
   const gateways = new Map();
-  let dialogTurn = Promise.resolve();
-  let waitingDialogs = 0;
+  let approvalTurn = Promise.resolve();
+  let waitingApprovals = 0;
 
   function start(gateway) {
     const running = gateways.get(gateway.id);
@@ -46,8 +56,7 @@ function createPcAccess({
 
     gateways.delete(id);
     entry.controller.abort();
-    dropLink(entry.link);
-    await request(entry.gateway, "/pc/link/close", { link: entry.link.id }).catch(() => {});
+    await dropLink(entry, entry.link);
   }
 
   async function stopAll() {
@@ -61,7 +70,7 @@ function createPcAccess({
       const link = entry.link;
       let response;
       try {
-        response = await request(entry.gateway, "/pc/link", { link: link.id }, signal);
+        response = await request(entry.gateway, "/pc/link", { link: link.id }, link.controller.signal);
       } catch (_error) {
         response = null;
       }
@@ -70,10 +79,14 @@ function createPcAccess({
       if (response?.status === 200 && Array.isArray(response.body?.messages)) {
         backoff = 0;
         for (const message of response.body.messages) receive(entry, link, message);
-      } else if (response?.status === 409) {
-        // Another link holds the gateway, so this one is lost: what it was asked and allowed goes with it.
-        dropLink(link);
-        entry.link = newLink();
+        continue;
+      }
+
+      // Any failed poll may have lost the link, for example to another app or a restarted gateway, so what it was
+      // asked and allowed goes with it.
+      entry.link = newLink();
+      dropLink(entry, link);
+      if (response?.status === 409) {
         await sleep(LINK_TAKEN_RETRY_MS, signal);
       } else if (response?.status === 403) {
         await sleep(REFUSED_RETRY_MS, signal);
@@ -85,11 +98,13 @@ function createPcAccess({
   }
 
   function receive(entry, link, message) {
-    if (message?.type === "ssh") {
+    if (!validMessage(message)) {
+      console.warn("PC access: ignored a malformed message from the server");
+    } else if (message.type === "ssh") {
       receiveSsh(entry, link, message);
-    } else if (message?.type === "ssh_close") {
+    } else if (message.type === "ssh_close") {
       closeConnection(link, connectionKey(message));
-    } else if (message?.type === "cancel") {
+    } else {
       link.requests.get(message.id)?.controller.abort();
     }
   }
@@ -97,43 +112,56 @@ function createPcAccess({
   function receiveSsh(entry, link, message) {
     const key = connectionKey(message);
     let connection = link.connections.get(key);
+    const refuse = (error) => reply(entry, link, message.id, { error }, link.controller.signal);
+    if (link.requests.has(message.id)) return refuse("another request with this ID is in progress on the PC");
+    if (!connection && link.connections.size >= MAX_AGENT_CONNECTIONS) return refuse("too many SSH agent connections are open on the PC");
+    if (connection?.waiting >= MAX_WAITING_MESSAGES) return refuse("too many SSH agent messages wait on this connection on the PC");
+
     if (!connection) {
-      connection = { guard: createConnectionGuard(), agent: null, queue: Promise.resolve() };
+      connection = { guard: createConnectionGuard(), agent: null, queue: Promise.resolve(), waiting: 0 };
       link.connections.set(key, connection);
     }
-
     const controller = new AbortController();
+    const signal = AbortSignal.any([link.controller.signal, controller.signal]);
     link.requests.set(message.id, { controller, connectionKey: key });
+    connection.waiting += 1;
     connection.queue = connection.queue
-      .then(() => handleSsh(entry, link, connection, message, controller.signal))
+      .then(() => handleSsh(entry, link, connection, message, signal))
       .catch((error) => console.warn("PC access: could not handle an SSH agent message:", error))
-      .finally(() => link.requests.delete(message.id));
+      .finally(() => {
+        connection.waiting -= 1;
+        link.requests.delete(message.id);
+      });
   }
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
+  function reply(entry, link, id, fields, signal) {
+    if (signal.aborted) return;
+    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).catch(() => {});
+  }
+
   async function handleSsh(entry, link, connection, message, signal) {
-    const reply = async (fields) => {
-      if (signal.aborted) return;
-      await request(entry.gateway, "/pc/link/reply", { link: link.id, id: message.id, ...fields }).catch(() => {});
-    };
+    const answerWith = (fields) => reply(entry, link, message.id, fields, signal);
     if (signal.aborted) return;
 
     try {
       const body = Buffer.from(message.message, "base64");
       const decision = connection.guard.check(body);
-      if (decision.action === "refuse") return reply({ error: decision.reason });
+      if (decision.action === "refuse") return answerWith({ error: decision.reason });
       if (decision.action === "sign") {
         const refusal = await approveSign(entry, link, connection, message, decision, signal);
-        if (refusal) return reply({ error: refusal });
+        if (refusal) return answerWith({ error: refusal });
         if (signal.aborted) return;
       }
 
       connection.agent ||= connectAgent();
-      const answer = await (await connection.agent).request(body);
+      const agent = await connection.agent;
+      if (signal.aborted) return;
+      const answer = await agent.request(body);
       connection.guard.observe(body, answer);
-      await reply({ message: answer.toString("base64") });
+      await answerWith({ message: answer.toString("base64") });
     } catch (error) {
-      await reply({ error: error.message });
+      await answerWith({ error: error.message });
     }
   }
 
@@ -147,44 +175,50 @@ function createPcAccess({
 
     const grantKey = JSON.stringify([message.session, fingerprint(key), fingerprint(hostKey), user]);
     if (link.grants.get(grantKey) > now()) return null;
-    if (waitingDialogs >= MAX_WAITING_DIALOGS) return "denied on the PC: too many requests are waiting for approval there";
+    if (waitingApprovals >= MAX_WAITING_APPROVALS) return "denied on the PC: too many requests are waiting for approval there";
 
-    const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), DIALOG_TIMEOUT_MS);
-    let answer;
-    try {
-      answer = await askInTurn({
-        gateway: entry.gateway,
-        sessionName: escapeForDisplay(message.session_name || message.session),
-        key: { type: keyType(key), fingerprint: fingerprint(key), comment: connection.guard.comment(key) },
-        server: { names: host.names, hostKeyFingerprint: fingerprint(hostKey) },
-        login: escapeForDisplay(user),
-        signal: AbortSignal.any([signal, timeout.signal])
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-    if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
-    if (answer !== "once" && answer !== "grant") return "denied on the PC";
+    const sessionName = [...escapeForDisplay(message.session_name || message.session)];
+    const prompt = {
+      gateway: entry.gateway,
+      sessionName: sessionName.length > MAX_SESSION_NAME_LENGTH
+        ? `${sessionName.slice(0, MAX_SESSION_NAME_LENGTH - 1).join("")}…`
+        : sessionName.join(""),
+      key: { type: keyType(key), fingerprint: fingerprint(key), comment: connection.guard.comment(key) },
+      server: { names: host.names, hostKeyFingerprint: fingerprint(hostKey) },
+      login: escapeForDisplay(user)
+    };
+    return inTurn(async () => {
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(), DIALOG_TIMEOUT_MS);
+      const approval = AbortSignal.any([signal, timeout.signal]);
+      try {
+        const answer = approval.aborted ? "deny" : await confirm({ ...prompt, signal: approval }).catch((error) => {
+          console.warn("PC access: the approval dialog failed:", error);
+          return "deny";
+        });
+        if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
+        if ((answer !== "once" && answer !== "grant") || approval.aborted) return "denied on the PC";
 
-    const auth = await authenticate(signal);
-    if (!auth.ok) return `denied on the PC: ${auth.reason}`;
-    if (answer === "grant" && !signal.aborted) link.grants.set(grantKey, now() + GRANT_MS);
-    return null;
+        const auth = await authenticate(approval);
+        if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
+        if (!auth.ok) return `denied on the PC: ${auth.reason}`;
+        if (answer === "grant" && !signal.aborted) link.grants.set(grantKey, now() + GRANT_MS);
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    });
   }
 
-  // Shows one dialog at a time. A request aborted while it waits for its turn is never shown.
-  async function askInTurn(prompt) {
-    waitingDialogs += 1;
-    const answer = dialogTurn.then(() => (prompt.signal.aborted ? "deny" : confirm(prompt)));
-    dialogTurn = answer.catch(() => {});
+  // Runs one approval at a time, from its dialog to the end of polkit's, so that one never covers the other.
+  async function inTurn(approve) {
+    waitingApprovals += 1;
+    const approval = approvalTurn.then(approve);
+    approvalTurn = approval.catch(() => {});
     try {
-      return await answer;
-    } catch (error) {
-      console.warn("PC access: the approval dialog failed:", error);
-      return "deny";
+      return await approval;
     } finally {
-      waitingDialogs -= 1;
+      waitingApprovals -= 1;
     }
   }
 
@@ -199,19 +233,51 @@ function createPcAccess({
     closeAgent(connection);
   }
 
-  function dropLink(link) {
-    for (const pending of link.requests.values()) pending.controller.abort();
+  // Releases the link on the gateway too, so the next one needn't wait for it to go stale.
+  function dropLink(entry, link) {
+    link.controller.abort();
     for (const connection of link.connections.values()) closeAgent(connection);
     link.requests.clear();
     link.connections.clear();
     link.grants.clear();
+    return request(entry.gateway, "/pc/link/close", { link: link.id }).catch(() => {});
   }
 
   return { start, stop, stopAll };
 }
 
 function newLink() {
-  return { id: crypto.randomBytes(16).toString("hex"), grants: new Map(), connections: new Map(), requests: new Map() };
+  return {
+    id: crypto.randomBytes(16).toString("hex"),
+    controller: new AbortController(),
+    grants: new Map(),
+    connections: new Map(),
+    requests: new Map()
+  };
+}
+
+// The gateway may be compromised, so its messages are checked before anything acts on them.
+function validMessage(message) {
+  const text = (value) => typeof value === "string" && value.length <= MAX_FIELD_LENGTH;
+  const field = (value) => text(value) && value !== "";
+  switch (message?.type) {
+    case "ssh":
+      return field(message.id) && field(message.session) && field(message.connection) &&
+        (message.session_name === undefined || text(message.session_name)) && validAgentMessage(message.message);
+    case "ssh_close":
+      return field(message.session) && field(message.connection);
+    case "cancel":
+      return field(message.id);
+    default:
+      return false;
+  }
+}
+
+function validAgentMessage(text) {
+  if (typeof text !== "string") return false;
+  const body = Buffer.from(text, "base64");
+  // Node's decoder skips what isn't base64, so only text that encodes back the same is.
+  return body.length > 0 && body.length <= MAX_AGENT_MESSAGE_BYTES && body.toString("base64") === text;
 }
 
 function connectionKey(message) {
@@ -220,6 +286,40 @@ function connectionKey(message) {
 
 function closeAgent(connection) {
   connection.agent?.then((agent) => agent.close(), () => {});
+}
+
+// Node's client, unlike Electron's, sends no Sec-Fetch-* headers (the gateway refuses requests that have them), and never
+// follows a redirect, which would take the cookies and the link header elsewhere.
+function linkRequest(url, body, { cookie, signal } = {}) {
+  const payload = JSON.stringify(body);
+  const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload), "X-Gripi-PC-Link": "1" };
+  if (cookie) headers.Cookie = cookie;
+
+  let timer;
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === "https:" ? https : http;
+    const request = client.request(url, { method: "POST", headers, signal }, (response) => {
+      const chunks = [];
+      let size = 0;
+      response.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > MAX_RESPONSE_BYTES) request.destroy(new Error("the server's answer is too large"));
+        else chunks.push(chunk);
+      });
+      response.on("error", reject);
+      response.on("end", () => {
+        try {
+          resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+        } catch (_error) {
+          resolve({ status: response.statusCode, body: null });
+        }
+      });
+    });
+    // A deadline for the whole request, as an idle timeout wouldn't stop an answer that keeps trickling in.
+    timer = setTimeout(() => request.destroy(new Error("the server did not answer in time")), REQUEST_TIMEOUT_MS);
+    request.on("error", reject);
+    request.end(payload);
+  }).finally(() => clearTimeout(timer));
 }
 
 function sleep(ms, signal) {
@@ -292,4 +392,4 @@ async function readLocalKnownHosts() {
   return texts.filter((text) => text !== null);
 }
 
-module.exports = { createPcAccess };
+module.exports = { createPcAccess, linkRequest };

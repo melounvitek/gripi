@@ -1,11 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
-import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { createPcAccess } from "../../electron/pc_access.js";
+import { createPcAccess, linkRequest } from "../../electron/pc_access.js";
 import { sessions } from "../support/contract.mjs";
 
 // The test plays the desktop app with its real link core, and an SSH server and agent of its own on this machine,
@@ -117,34 +116,13 @@ function gripiPc(command) {
   });
 }
 
-// Like main.js's pcLinkRequest: Node's client, with the approved browser's cookies.
-function linkRequest(cookie) {
-  return (gateway, pathname, body, signal) => new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body);
-    const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload), "X-Gripi-PC-Link": "1", Cookie: cookie };
-    const request = http.request(new URL(pathname, gateway.url), { method: "POST", headers, signal }, (response) => {
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("error", reject);
-      response.on("end", () => {
-        try {
-          resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
-        } catch {
-          resolve({ status: response.statusCode, body: null });
-        }
-      });
-    });
-    request.on("error", reject);
-    request.end(payload);
-  });
-}
-
 // Turns PC access on for the gateway, answering each approval dialog with answer, and returns what the user saw.
 async function allowPcAccess(context, gateway, answer) {
   const cookie = (await context.cookies(gateway.url)).map(({ name, value }) => `${name}=${value}`).join("; ");
   const seen = [];
   pcAccess = createPcAccess({
-    request: linkRequest(cookie),
+    // Like main.js, with the approved browser's cookies.
+    request: (target, pathname, body, signal) => linkRequest(new URL(pathname, target.url), body, { cookie, signal }),
     confirm: async ({ signal, ...prompt }) => {
       seen.push(prompt);
       return answer;

@@ -7,7 +7,11 @@ const SIGN_REQUEST = 13;
 const EXTENSION = 27;
 const USERAUTH_REQUEST = 50;
 const HOSTBOUND_METHOD = "publickey-hostbound-v00@openssh.com";
-const MAX_SESSION_ID = 256;
+// The key exchange's hash: SHA-256, SHA-384 or SHA-512.
+const SESSION_ID_LENGTHS = new Set([32, 48, 64]);
+const MAX_LOGIN_BYTES = 256;
+// ignoreBOM keeps a leading BOM in the login rather than dropping it unseen.
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 const CURVES = new Map([
   ["ecdsa-sha2-nistp256", { name: "nistp256", crv: "P-256", hash: "sha256", size: 32 }],
@@ -89,7 +93,7 @@ function createConnectionGuard() {
     forwarded = reader.byte() !== 0;
     reader.end();
     if (forwarded) return refuse("forwarded agent connection");
-    if (sessionId.length === 0 || sessionId.length > MAX_SESSION_ID) return refuse("bad session ID");
+    if (!SESSION_ID_LENGTHS.has(sessionId.length)) return refuse("bad session ID");
     if (!verifyHostSignature(hostKey, signature, sessionId)) return refuse("session-bind not verified");
     bound = { hostKey, sessionId };
     return { action: "forward" };
@@ -101,9 +105,13 @@ function createConnectionGuard() {
     const data = reader.string();
     const flags = reader.uint32();
     reader.end();
-    const user = loginUser(data, key, flags, bound);
-    if (user === null) return refuse("not an SSH login for the bound session");
-    return { action: "sign", key, hostKey: bound.hostKey, user };
+    const login = loginUser(data, key, flags, bound);
+    if (login === null) return refuse("not an SSH login for the bound session");
+    // The login is shown for approval and keys grants, so it must be shown whole and be the text that ssh sent.
+    if (login.length > MAX_LOGIN_BYTES) return refuse(`the login is longer than ${MAX_LOGIN_BYTES} bytes`);
+    if (login.includes(0)) return refuse("the login contains NUL");
+    // The decoder throws on invalid UTF-8, which check refuses as malformed.
+    return { action: "sign", key, hostKey: bound.hostKey, user: UTF8.decode(login) };
   }
 
   return {
@@ -143,7 +151,7 @@ function refuse(reason) {
 function loginUser(data, key, flags, bound) {
   const reader = new Reader(data);
   if (!reader.string().equals(bound.sessionId) || reader.byte() !== USERAUTH_REQUEST) return null;
-  const user = reader.text();
+  const user = reader.string();
   if (reader.text() !== "ssh-connection") return null;
   const method = reader.text();
   if (method !== "publickey" && method !== HOSTBOUND_METHOD) return null;
