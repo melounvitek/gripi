@@ -1,7 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const { once } = require("node:events");
 const http = require("node:http");
-const { createPcAccess, linkRequest } = require("./pc_access");
+const { authenticateWithPolkit, createPcAccess, linkRequest } = require("./pc_access");
 
 const GATEWAY = { id: "home", name: "home-server", url: "https://home.example.test/" };
 const SESSION = "/home/vitek/.pi/sessions/a.jsonl";
@@ -52,12 +54,13 @@ async function settle() {
   for (let round = 0; round < 5; round++) await new Promise(setImmediate);
 }
 
-function setup(t, { authenticate = async () => ({ ok: true }) } = {}) {
+function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false } = {}) {
   const harness = { polls: [], posts: [], prompts: [], agents: [], auths: 0, time: 0 };
   harness.pc = createPcAccess({
     request(_gateway, path, body, signal) {
       if (path !== "/pc/link") {
         harness.posts.push({ path, body });
+        if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
         return Promise.resolve({ status: 200, body: {} });
       }
       return new Promise((resolve, reject) => {
@@ -130,6 +133,22 @@ test("relays agent messages over one agent connection per relayed connection and
   await h.deliver({ type: "ssh_close", session: SESSION, connection: "c1" });
 
   assert.deepEqual(h.agents.map((agent) => agent.closed), [true, false]);
+});
+
+test("opens each link with its first poll and resumes it with the others", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const link = h.link();
+
+  assert.deepEqual(h.polls[0].body, { link, open: true });
+  await h.deliver();
+  assert.deepEqual(h.polls[0].body, { link });
+
+  h.polls.shift().resolve({ status: 409, body: { error: "the link is not open" } });
+  await expectPollAfter(t, h, 10 * 1000);
+
+  assert.notEqual(h.link(), link);
+  assert.deepEqual(h.polls[0].body, { link: h.link(), open: true });
 });
 
 test("passes on the guard's refusal without reaching the agent", async (t) => {
@@ -241,6 +260,26 @@ test("refuses more than 8 messages waiting on one agent connection", async (t) =
   await h.deliver(...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((id) => ssh(String(id), sign())));
 
   assert.deepEqual(h.replies(), [{ link: h.link(), id: "9", error: "too many SSH agent messages wait on this connection on the PC" }]);
+});
+
+test("a poll that would take the link over 256 requests in progress, refusals being sent included, loses it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t, { holdReplies: true });
+  const link = h.link();
+
+  // 32 connections take a request each, and the requests of the others are refused.
+  for (let poll = 0; poll < 4; poll++) {
+    await h.deliver(...Array.from({ length: 64 }, (_, index) => ssh(`${poll}.${index}`, LIST, { connection: `c${poll * 64 + index}` })));
+  }
+  assert.equal(h.replies().length, 256);
+  assert.equal(h.link(), link);
+
+  await h.deliver(ssh("last", LIST, { connection: "c256" }));
+
+  assert.equal(h.replies().length, 256);
+  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  await expectPollAfter(t, h, 1000);
+  assert.notEqual(h.link(), link);
 });
 
 test("allow once signs after the password check and asks again next time", async (t) => {
@@ -428,9 +467,13 @@ test("backs off on network errors from 1 second to 30, and polls at once after a
 const failedPolls = [
   ["a network error", 1000, (poll) => poll.reject(new Error("offline"))],
   ["a refusal", 60 * 1000, (poll) => poll.resolve({ status: 403, body: { error: "refused" } })],
-  ["another app's link", 10 * 1000, (poll) => poll.resolve({ status: 409, body: { error: "another link" } })],
+  ["a conflict over another app's link or one that a restarted server forgot", 10 * 1000, (poll) => poll.resolve({ status: 409, body: { error: "the link is not open" } })],
   ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null })],
-  ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } })]
+  ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } })],
+  ["a poll of more than 64 messages", 1000, (poll) => poll.resolve({
+    status: 200,
+    body: { messages: Array.from({ length: 65 }, (_, index) => ssh(`x${index}`, LIST, { connection: `x${index}` })) }
+  })]
 ];
 for (const [failure, retryMs, fail] of failedPolls) {
   test(`${failure} loses the link: it closes its dialogs and agent connections, forgets grants and retries with a new ID`, async (t) => {
@@ -455,6 +498,22 @@ for (const [failure, retryMs, fail] of failedPolls) {
     assert.deepEqual(h.replies().map((reply) => reply.id), ["1", "2"]);
   });
 }
+
+test("a cancelled password check ends only once pkexec has exited", async () => {
+  let pkexec;
+  // Like pkexec while polkit's dialog takes a moment to close.
+  const spawnShell = (_command, _args, options) => {
+    pkexec = spawn("sh", ["-c", "trap '' TERM; echo asking; sleep 0.2"], { ...options, stdio: ["ignore", "pipe", "ignore"] });
+    return pkexec;
+  };
+  const controller = new AbortController();
+  const checked = authenticateWithPolkit(controller.signal, spawnShell);
+  await once(pkexec.stdout, "data");
+  controller.abort();
+
+  assert.equal((await checked).ok, false);
+  assert.equal(pkexec.exitCode, 0);
+});
 
 async function listen(t, handler) {
   const server = http.createServer(handler);

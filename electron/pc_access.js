@@ -1,3 +1,4 @@
+const childProcess = require("node:child_process");
 const crypto = require("node:crypto");
 const { once } = require("node:events");
 const fs = require("node:fs");
@@ -13,6 +14,9 @@ const DIALOG_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_WAITING_APPROVALS = 5;
 const MAX_AGENT_CONNECTIONS = 32;
 const MAX_WAITING_MESSAGES = 8;
+const MAX_POLL_MESSAGES = 64;
+// Per link, counting refusals that are still being sent and the requests of closed connections until they end.
+const MAX_REQUESTS_IN_PROGRESS = 256;
 const MAX_FIELD_LENGTH = 4096;
 const MAX_AGENT_MESSAGE_BYTES = 256 * 1024;
 const MAX_SESSION_NAME_LENGTH = 200;
@@ -27,7 +31,7 @@ const AGENT_HINT = 'start one with "systemctl --user enable --now ssh-agent" and
 function createPcAccess({
   request,
   confirm,
-  authenticate,
+  authenticate = authenticateWithPolkit,
   connectAgent = connectLocalAgent,
   readKnownHosts = readLocalKnownHosts,
   now = Date.now,
@@ -68,22 +72,25 @@ function createPcAccess({
     let backoff = 0;
     while (!signal.aborted) {
       const link = entry.link;
+      // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart.
+      const body = link.opened ? { link: link.id } : { link: link.id, open: true };
+      link.opened = true;
       let response;
       try {
-        response = await request(entry.gateway, "/pc/link", { link: link.id }, link.controller.signal);
+        response = await request(entry.gateway, "/pc/link", body, link.controller.signal);
       } catch (_error) {
         response = null;
       }
       if (signal.aborted) return;
 
-      if (response?.status === 200 && Array.isArray(response.body?.messages)) {
+      const messages = response?.status === 200 ? response.body?.messages : null;
+      if (Array.isArray(messages) && messages.length <= MAX_POLL_MESSAGES && messages.every((message) => receive(entry, link, message))) {
         backoff = 0;
-        for (const message of response.body.messages) receive(entry, link, message);
         continue;
       }
 
       // Any failed poll may have lost the link, for example to another app or a restarted gateway, so what it was
-      // asked and allowed goes with it.
+      // asked and allowed goes with it. So does a poll with more messages than a link may take or have in progress.
       entry.link = newLink();
       dropLink(entry, link);
       if (response?.status === 409) {
@@ -97,22 +104,28 @@ function createPcAccess({
     }
   }
 
+  // Returns false for a request that would take the link over the requests it may have in progress.
   function receive(entry, link, message) {
     if (!validMessage(message)) {
       console.warn("PC access: ignored a malformed message from the server");
     } else if (message.type === "ssh") {
+      if (link.requests.size + link.refusals >= MAX_REQUESTS_IN_PROGRESS) return false;
       receiveSsh(entry, link, message);
     } else if (message.type === "ssh_close") {
       closeConnection(link, connectionKey(message));
     } else {
       link.requests.get(message.id)?.controller.abort();
     }
+    return true;
   }
 
   function receiveSsh(entry, link, message) {
     const key = connectionKey(message);
     let connection = link.connections.get(key);
-    const refuse = (error) => reply(entry, link, message.id, { error }, link.controller.signal);
+    const refuse = (error) => {
+      link.refusals += 1;
+      reply(entry, link, message.id, { error }, link.controller.signal).finally(() => { link.refusals -= 1; });
+    };
     if (link.requests.has(message.id)) return refuse("another request with this ID is in progress on the PC");
     if (!connection && link.connections.size >= MAX_AGENT_CONNECTIONS) return refuse("too many SSH agent connections are open on the PC");
     if (connection?.waiting >= MAX_WAITING_MESSAGES) return refuse("too many SSH agent messages wait on this connection on the PC");
@@ -135,9 +148,9 @@ function createPcAccess({
   }
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
-  function reply(entry, link, id, fields, signal) {
+  async function reply(entry, link, id, fields, signal) {
     if (signal.aborted) return;
-    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).catch(() => {});
+    await request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).catch(() => {});
   }
 
   async function handleSsh(entry, link, connection, message, signal) {
@@ -249,10 +262,12 @@ function createPcAccess({
 function newLink() {
   return {
     id: crypto.randomBytes(16).toString("hex"),
+    opened: false,
     controller: new AbortController(),
     grants: new Map(),
     connections: new Map(),
-    requests: new Map()
+    requests: new Map(),
+    refusals: 0
   };
 }
 
@@ -383,6 +398,23 @@ function agentClient(socket) {
   };
 }
 
+// polkit's own dialog confirms that it is the user, so Gripi never asks for the password itself. Node reports a cancel
+// as it signals pkexec, so the check ends only once pkexec has exited, and with it polkit's dialog.
+function authenticateWithPolkit(signal, spawn = childProcess.spawn) {
+  return new Promise((resolve) => {
+    const child = spawn("pkexec", ["--disable-internal-agent", "/usr/bin/true"], { stdio: "ignore", signal });
+    let failure;
+    child.on("error", (error) => {
+      failure ??= error;
+    });
+    child.on("close", (code) => {
+      if (failure) resolve({ ok: false, reason: failure.code === "ENOENT" ? "PC access needs polkit's pkexec" : failure.message });
+      else if (code === 0) resolve({ ok: true });
+      else resolve({ ok: false, reason: code === 126 ? "the password dialog was cancelled" : `pkexec failed with exit code ${code}` });
+    });
+  });
+}
+
 async function readLocalKnownHosts() {
   const files = [path.join(os.homedir(), ".ssh", "known_hosts"), "/etc/ssh/ssh_known_hosts"];
   const texts = await Promise.all(files.map((file) => fs.promises.readFile(file, "utf8").catch((error) => {
@@ -392,4 +424,4 @@ async function readLocalKnownHosts() {
   return texts.filter((text) => text !== null);
 }
 
-module.exports = { createPcAccess, linkRequest };
+module.exports = { authenticateWithPolkit, createPcAccess, linkRequest };

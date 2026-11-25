@@ -26,11 +26,15 @@ var PCReplyTimeout = 5 * time.Minute
 // pcMessageLimit is the size limit of an SSH agent message, as OpenSSH's agent has it.
 const pcMessageLimit = 256 << 10
 
+// pcPollMessages is the most messages that a poll carries, as the desktop app drops a link that sends more.
+const pcPollMessages = 64
+
 var (
 	errNoPCLink   = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
 	errPCLinkLost = errors.New("the computer's link to Gripi ended before it replied")
 	errPCTimeout  = errors.New("the computer did not reply in time")
 	errPCTaken    = errors.New("another Gripi desktop app is connected for PC access")
+	errPCUnknown  = errors.New("the link is not open, such as after the gateway restarted")
 	errPCEnded    = errors.New("the link ended")
 )
 
@@ -45,9 +49,10 @@ type pcMessage struct {
 }
 
 // pcLinkBody is what the desktop app sends on its link: a poll or a close names the link, and a reply also a request
-// and its message or error.
+// and its message or error. A link's first poll opens it.
 type pcLinkBody struct {
 	Link    string `json:"link"`
+	Open    bool   `json:"open"`
 	ID      string `json:"id"`
 	Message []byte `json:"message"`
 	Error   string `json:"error"`
@@ -91,19 +96,24 @@ func (links *pcLinks) end(link *pcLink) {
 	}
 }
 
-// poll waits up to PCLinkPoll for messages to the link with id, which becomes the current link unless another one is.
-func (links *pcLinks) poll(ctx context.Context, id string) ([]pcMessage, error) {
+// poll waits up to PCLinkPoll for messages to the current link with id. A poll that opens a link makes it the current
+// one unless another one is. Other polls of a link that isn't the current one, such as one from before a restart, are
+// refused, so that the desktop app drops what it allowed on it.
+func (links *pcLinks) poll(ctx context.Context, id string, open bool) ([]pcMessage, error) {
 	links.mu.Lock()
 	if links.stopped {
 		links.mu.Unlock()
 		return nil, errPCEnded
 	}
 	link := links.current
-	if link == nil {
+	switch {
+	case link == nil && open:
 		link = &pcLink{id: id, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]chan pcLinkBody)}
 		links.current = link
-	}
-	if link.id != id {
+	case link == nil:
+		links.mu.Unlock()
+		return nil, errPCUnknown
+	case link.id != id:
 		links.mu.Unlock()
 		return nil, errPCTaken
 	}
@@ -138,8 +148,11 @@ func (links *pcLinks) poll(ctx context.Context, id string) ([]pcMessage, error) 
 	if len(link.queue) == 0 || ctx.Err() != nil {
 		return nil, nil
 	}
-	messages := link.queue
-	link.queue, link.queued = nil, make(chan struct{})
+	messages := link.queue[:min(len(link.queue), pcPollMessages)]
+	link.queue = link.queue[len(messages):]
+	if len(link.queue) == 0 {
+		link.queue, link.queued = nil, make(chan struct{})
+	}
 	return messages, nil
 }
 
@@ -280,9 +293,9 @@ func (app *application) pollPCLink(response http.ResponseWriter, request *http.R
 	if !ok {
 		return
 	}
-	messages, err := app.pcLinks.poll(request.Context(), body.Link)
+	messages, err := app.pcLinks.poll(request.Context(), body.Link, body.Open)
 	switch err {
-	case errPCTaken:
+	case errPCTaken, errPCUnknown:
 		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	case errPCEnded:

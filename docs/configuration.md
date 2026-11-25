@@ -245,6 +245,7 @@ Requirements and limits:
 - You approve a login, not a command: once logged in, the gateway can do whatever the key may do on that server, such as push to any repository that the key can write to. An SSH connection that stays open, such as a `ControlMaster` one, outlives **Allow once** and the 5 minutes, which only stop new logins.
 - The gateway sees every public key in your SSH agent, with its comment.
 - One desktop app can use a gateway at a time. Another one connects once the first quits, or about 35 seconds after it lost its connection.
+- A `gripi pc ssh` that is killed abruptly, such as with `SIGKILL`, can leave its agent connections counted against the app's limit of 32 until the app's link to the server drops. Turning PC access off and on again clears them.
 - Sessions on a [worker](#workers) can’t use it yet, nor can `!` commands, nested subagents and [scratch sessions](#scratch-sessions), as with `gripi sudo`.
 
 This keeps your private keys and password on your computer. It doesn’t protect against a hostile agent: anything that runs as the gateway’s OS user can ask in any session’s name. Check the server and the login name before you allow one, and turn PC access off for a server that you no longer trust with your keys.

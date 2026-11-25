@@ -10,10 +10,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -98,18 +100,19 @@ func pcLinkSend(t *testing.T, address, route string, body any, change ...func(*h
 	return response.StatusCode, answer
 }
 
-func pcPoll(t *testing.T, address, link string) (int, pcLinkAnswer) {
-	return pcLinkSend(t, address, "/pc/link", map[string]string{"link": link})
+// pcPoll polls as link, which a poll with open opens and the others resume.
+func pcPoll(t *testing.T, address, link string, open bool) (int, pcLinkAnswer) {
+	return pcLinkSend(t, address, "/pc/link", map[string]any{"link": link, "open": open})
 }
 
-// pcDesktop plays the desktop app, which polls as link until stop is called or the test ends. It answers each ssh
-// message with what answer returns, unless answer is nil, and passes on every message. It returns once the link is
-// the current one.
+// pcDesktop plays the desktop app, which opens link and polls it until stop is called or the test ends. It answers
+// each ssh message with what answer returns, unless answer is nil, and passes on every message. It returns once the
+// link is the current one.
 func pcDesktop(t *testing.T, address, link string, answer func(pcMessage) map[string]any) (messages <-chan pcMessage, stop func()) {
 	t.Helper()
 	received := make(chan pcMessage, 100)
-	poll := func() bool {
-		status, polled := pcPoll(t, address, link)
+	poll := func(open bool) bool {
+		status, polled := pcPoll(t, address, link, open)
 		if status != http.StatusOK {
 			t.Errorf("poll of %s = %d %s", link, status, polled.Error)
 			return false
@@ -126,7 +129,7 @@ func pcDesktop(t *testing.T, address, link string, answer func(pcMessage) map[st
 		}
 		return true
 	}
-	if !poll() {
+	if !poll(true) {
 		t.FailNow()
 	}
 	stopped, done := make(chan struct{}), make(chan struct{})
@@ -138,7 +141,7 @@ func pcDesktop(t *testing.T, address, link string, answer func(pcMessage) map[st
 				return
 			default:
 			}
-			if !poll() {
+			if !poll(false) {
 				return
 			}
 		}
@@ -321,7 +324,7 @@ func TestPCSSHFailsWhenTheLinkEndsOrIsReplaced(t *testing.T) {
 	_, address := pcGateway(t)
 	const lost = "gripi pc: the computer's link to Gripi ended before it replied\n"
 	messages, stop := pcDesktop(t, address, "first", nil)
-	if status, _ := pcPoll(t, address, "second"); status != http.StatusConflict {
+	if status, _ := pcPoll(t, address, "second", true); status != http.StatusConflict {
 		t.Fatalf("a second link while the first polls = %d", status)
 	}
 
@@ -334,7 +337,7 @@ func TestPCSSHFailsWhenTheLinkEndsOrIsReplaced(t *testing.T) {
 	if answered := <-result; answered.code != 1 || !strings.Contains(answered.stderr, lost) {
 		t.Fatalf("gripi pc ssh when the link closed = %+v", answered)
 	}
-	if status, polled := pcPoll(t, address, "second"); status != http.StatusOK || len(polled.Messages) != 0 {
+	if status, polled := pcPoll(t, address, "second", true); status != http.StatusOK || len(polled.Messages) != 0 {
 		t.Fatalf("the second link after the first closed = %d %+v", status, polled)
 	}
 
@@ -345,7 +348,10 @@ func TestPCSSHFailsWhenTheLinkEndsOrIsReplaced(t *testing.T) {
 	if answered := <-result; answered.code != 1 || !strings.Contains(answered.stderr, lost) {
 		t.Fatalf("gripi pc ssh when the link stopped polling = %+v", answered)
 	}
-	if status, polled := pcPoll(t, address, "first"); status != http.StatusOK || len(polled.Messages) != 0 {
+	if status, _ := pcPoll(t, address, "second", false); status != http.StatusConflict {
+		t.Fatalf("a poll of the link that stopped polling = %d", status)
+	}
+	if status, polled := pcPoll(t, address, "first", true); status != http.StatusOK || len(polled.Messages) != 0 {
 		t.Fatalf("a new link after the second stopped polling = %d %+v", status, polled)
 	}
 	reply := map[string]any{"link": "second", "id": request.ID, "message": []byte{12}}
@@ -421,11 +427,22 @@ func TestPCSSHEndsAnAgentConnectionThatSendsAMessageBeforeTheReply(t *testing.T)
 	if _, err := agent.Read(make([]byte, 1)); err != io.EOF {
 		t.Fatalf("read of the connection after a second message = %v", err)
 	}
-	if cancel := nextPCMessage(t, messages, "cancel"); cancel.ID != request.ID {
-		t.Fatalf("the desktop app got %+v after the request %+v", cancel, request)
+	// The cancel and the close come from separate requests, in either order.
+	ended := map[string]pcMessage{}
+	for range 2 {
+		select {
+		case message := <-messages:
+			ended[message.Type] = message
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the desktop app got only %+v after the request %+v", ended, request)
+		}
 	}
-	if closed := nextPCMessage(t, messages, "ssh_close"); closed.Connection != request.Connection {
-		t.Fatalf("the desktop app got %+v after the request %+v", closed, request)
+	want := map[string]pcMessage{
+		"cancel":    {Type: "cancel", ID: request.ID},
+		"ssh_close": {Type: "ssh_close", Session: request.Session, Connection: request.Connection},
+	}
+	if !reflect.DeepEqual(ended, want) {
+		t.Fatalf("the desktop app got %+v after the request %+v", ended, request)
 	}
 }
 
@@ -441,7 +458,7 @@ func TestEndingThePCLinkWakesItsPollAndRequestsAndRefusesNewPolls(t *testing.T) 
 	gateway.PCLinkPoll = time.Minute
 	polled := make(chan int, 1)
 	go func() {
-		status, _ := pcPoll(t, address, "app")
+		status, _ := pcPoll(t, address, "app", false)
 		polled <- status
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -464,8 +481,52 @@ func TestEndingThePCLinkWakesItsPollAndRequestsAndRefusesNewPolls(t *testing.T) 
 	case <-timeout:
 		t.Fatal("gripi pc ssh still waits")
 	}
-	if status, _ := pcPoll(t, address, "app"); status != http.StatusServiceUnavailable {
+	if status, _ := pcPoll(t, address, "app", true); status != http.StatusServiceUnavailable {
 		t.Fatalf("a poll after the end = %d", status)
+	}
+}
+
+// A poll that doesn't open its link resumes only the current one, so that the desktop app learns when the gateway
+// forgot its link, such as in a restart, and drops what it allowed on it.
+func TestPCLinkResumesOnlyTheCurrentLink(t *testing.T) {
+	_, address := pcGateway(t)
+	for _, poll := range []struct {
+		open   bool
+		status int
+	}{{false, http.StatusConflict}, {true, http.StatusOK}, {false, http.StatusOK}} {
+		if status, polled := pcPoll(t, address, "app", poll.open); status != poll.status {
+			t.Fatalf("poll with open %v = %d %+v, want %d", poll.open, status, polled, poll.status)
+		}
+	}
+	if status, _ := pcLinkSend(t, address, "/pc/link/close", map[string]string{"link": "app"}); status != http.StatusOK {
+		t.Fatalf("close = %d", status)
+	}
+	if status, _ := pcPoll(t, address, "app", false); status != http.StatusConflict {
+		t.Fatalf("a poll of the closed link = %d", status)
+	}
+}
+
+// The desktop app drops a link whose poll carries more than 64 messages, so the others wait for the next poll.
+func TestPCLinkPollCarriesAtMost64Messages(t *testing.T) {
+	alpha, address := pcGateway(t)
+	gateway.PCLinkStale = time.Minute
+	if status, _ := pcPoll(t, address, "app", true); status != http.StatusOK {
+		t.Fatalf("poll = %d", status)
+	}
+	client, err := newGatewayClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := &sshAgentRelay{client: client}
+	for index := range 65 {
+		if _, err := relay.post(context.Background(), url.Values{"session": {alpha}, "connection": {strconv.Itoa(index)}, "close": {"1"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, want := range []int{64, 1} {
+		if status, polled := pcPoll(t, address, "app", false); status != http.StatusOK || len(polled.Messages) != want {
+			t.Fatalf("poll = %d with %d messages, want %d", status, len(polled.Messages), want)
+		}
 	}
 }
 
@@ -486,7 +547,7 @@ func TestPCLinkRefusesRequestsThatPagesCouldSend(t *testing.T) {
 			}
 		}
 	}
-	if status, _ := pcPoll(t, address, "app"); status != http.StatusOK {
+	if status, _ := pcPoll(t, address, "app", true); status != http.StatusOK {
 		t.Fatalf("the desktop app's poll = %d", status)
 	}
 }
@@ -530,7 +591,7 @@ func TestPCLinkNeedsHTTPSFromAnywhereButThisMachine(t *testing.T) {
 		{"127.0.0.1:40000", "http", http.StatusForbidden},
 		{"127.0.0.1:40000", "https", http.StatusOK},
 	} {
-		request := pcLinkRequest(t, "http://127.0.0.1:4567/pc/link", map[string]string{"link": "app"})
+		request := pcLinkRequest(t, "http://127.0.0.1:4567/pc/link", map[string]any{"link": "app", "open": true})
 		request.RemoteAddr = peer.remote
 		if peer.forwardedProto != "" {
 			request.Header.Set("X-Forwarded-Proto", peer.forwardedProto)

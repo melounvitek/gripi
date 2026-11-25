@@ -128,7 +128,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - HTTPS, or loopback without a trusted forwarded scheme.
 
   Without them, or in multi-user mode, or with access approval disabled, the answer is 403 `{"error"}`.
-- `POST /pc/link`, body `{"link": "<id>"}`, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). Another link polling within 35 s (`PCLinkStale`) gets 409. When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
+- `POST /pc/link`, body `{"link": "<id>", "open": true}` for a link's first poll and `{"link": "<id>"}` after, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). A poll carries at most 64 messages, and the rest wait for the next one. Another link polling within 35 s (`PCLinkStale`) gets 409, and so does a poll without `open` of a link that the gateway never had or already ended (a restart, going stale, a close or `EndPCLink`). When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
 - `POST /pc/link/reply`, body `{"link", "id", "message": "<base64>"}` or `{"link", "id", "error": "<text>"}`, answers `200 {}`, 409 when the link isn't the current one, or 404 for an unknown request (already cancelled or timed out).
 - `POST /pc/link/close`, body `{"link"}`, releases the link if it is the current one, and fails its waiting requests with 503.
 
@@ -142,8 +142,8 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
 
 ## Desktop (Electron)
 
-**`electron/pc_access.js`** has no Electron imports, so `node --test` can test it. `main.js` injects the request function, dialogs, auth, `spawn` and the clock.
-- **Link loop**, for each server with access on: another poll as soon as one returns, and backoff on errors.
+**`electron/pc_access.js`** has no Electron imports, so `node --test` can test it. `main.js` injects the request function and dialogs, and tests also auth, `spawn` and the clock.
+- **Link loop**, for each server with access on: another poll as soon as one returns, and backoff on errors. A link's first poll opens it.
 - **Requests** are handled concurrently while dialogs stay one at a time. More than 5 waiting are denied.
 - **Before signing or spawning**, it checks again after each dialog that access is still on, the link is the same and the request isn't cancelled.
 - **Clearing:** pending approvals and grants are cleared when access is turned off, the URL changes, the link is lost, or the app closes.
@@ -153,8 +153,10 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - messages checked before use;
   - duplicate in-flight request IDs refused;
   - 32 agent connections per link, and 8 waiting messages per connection;
+  - 64 messages per poll, and 256 requests in progress per link, counting refusals still being sent and the requests of closed connections until they end. A poll over either loses the link, without replies;
   - session names cut to 200 characters for display, and logins over 256 bytes refused.
-- **The approval turn** lasts through polkit, under one 2-minute deadline from when the dialog appears.
+- **The approval turn** lasts through polkit, until `pkexec` has exited, under one 2-minute deadline from when the dialog appears.
+- **Auth:** `pkexec --disable-internal-agent /usr/bin/true`. Exit 0 means polkit authorized it under local policy, and anything else, a cancel too, is a denial with its reason.
 - **Runners:** `spawn` with no shell, `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true`, and the app's own environment, not the gateway's. With no terminal, `pkexec` fails closed without a polkit agent. A cancel kills the process group.
 - **Display:** control and bidirectional characters are escaped, as `shellWords` does.
 
@@ -203,7 +205,6 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - `Set-Cookie` replies aren't saved back, which the link doesn't need.
   - Chromium's proxy and certificate settings don't apply. Tailscale Serve's certificates are public ones.
 - the dialogs, with the main window as parent, plus a `Notification` and focusing the window;
-- auth: `pkexec --disable-internal-agent /usr/bin/true`. Exit 0 means polkit authorized it under local policy, and anything else is a denial with its reason.
 
 **`electron/gateway_config.js`:** keep `pcAccessOrigin` in `normalizeGatewayOrNull`. Access is on only while `pcAccessOrigin` equals the URL's origin.
 

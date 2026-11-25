@@ -1,5 +1,4 @@
 const { app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, session, shell } = require("electron");
-const { spawn } = require("node:child_process");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -29,7 +28,7 @@ let config = null;
 let mainWindow = null;
 let pendingWebviews = [];
 let pcAccessReleased = false;
-const pcAccess = createPcAccess({ request: pcLinkRequest, confirm: confirmPcAccess, authenticate: authenticateOnPc });
+const pcAccess = createPcAccess({ request: pcLinkRequest, confirm: confirmPcAccess });
 
 function createWindow() {
   config = readOrCreateGatewayConfig(gatewayConfigPath());
@@ -342,20 +341,6 @@ async function confirmPcAccess({ gateway, sessionName, key, server, login, signa
     signal
   });
   return ["deny", "once", "grant"][response];
-}
-
-// polkit's own dialog confirms that it is the user, so Gripi never asks for the password itself.
-function authenticateOnPc(signal) {
-  return new Promise((resolve) => {
-    const child = spawn("pkexec", ["--disable-internal-agent", "/usr/bin/true"], { stdio: "ignore", signal });
-    child.on("error", (error) => {
-      resolve({ ok: false, reason: error.code === "ENOENT" ? "PC access needs polkit's pkexec" : error.message });
-    });
-    child.on("exit", (code) => {
-      if (code === 0) resolve({ ok: true });
-      else resolve({ ok: false, reason: code === 126 ? "the password dialog was cancelled" : `pkexec failed with exit code ${code}` });
-    });
-  });
 }
 
 function routeGatewayShortcut(browserWindow, channel, eventName, detail) {
