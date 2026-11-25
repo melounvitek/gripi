@@ -30,6 +30,8 @@ var (
 	errNoPCLink   = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
 	errPCLinkLost = errors.New("the computer's link to Gripi ended before it replied")
 	errPCTimeout  = errors.New("the computer did not reply in time")
+	errPCTaken    = errors.New("another Gripi desktop app is connected for PC access")
+	errPCEnded    = errors.New("the link ended")
 )
 
 // pcMessage is a message of the gateway to the desktop app.
@@ -69,6 +71,8 @@ type pcLink struct {
 type pcLinks struct {
 	mu      sync.Mutex
 	current *pcLink
+	// stopped refuses links once the gateway stops.
+	stopped bool
 }
 
 // send queues a message for the link's next poll. Callers hold mu.
@@ -88,9 +92,12 @@ func (links *pcLinks) end(link *pcLink) {
 }
 
 // poll waits up to PCLinkPoll for messages to the link with id, which becomes the current link unless another one is.
-// It reports false when another one is.
-func (links *pcLinks) poll(ctx context.Context, id string) ([]pcMessage, bool) {
+func (links *pcLinks) poll(ctx context.Context, id string) ([]pcMessage, error) {
 	links.mu.Lock()
+	if links.stopped {
+		links.mu.Unlock()
+		return nil, errPCEnded
+	}
 	link := links.current
 	if link == nil {
 		link = &pcLink{id: id, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]chan pcLinkBody)}
@@ -98,7 +105,7 @@ func (links *pcLinks) poll(ctx context.Context, id string) ([]pcMessage, bool) {
 	}
 	if link.id != id {
 		links.mu.Unlock()
-		return nil, false
+		return nil, errPCTaken
 	}
 	link.polls++
 	queued := link.queued
@@ -115,6 +122,9 @@ func (links *pcLinks) poll(ctx context.Context, id string) ([]pcMessage, bool) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
 	link.polls--
+	if links.current != link {
+		return nil, errPCEnded
+	}
 	link.seen = time.Now()
 	stale := PCLinkStale
 	time.AfterFunc(stale, func() {
@@ -126,11 +136,11 @@ func (links *pcLinks) poll(ctx context.Context, id string) ([]pcMessage, bool) {
 	})
 	// The messages of a poll that the app no longer reads wait for its next one.
 	if len(link.queue) == 0 || ctx.Err() != nil {
-		return nil, true
+		return nil, nil
 	}
 	messages := link.queue
 	link.queue, link.queued = nil, make(chan struct{})
-	return messages, true
+	return messages, nil
 }
 
 // ask queues a request for the current link and waits for its reply. When the reply doesn't come in time, or ctx
@@ -206,6 +216,18 @@ func (links *pcLinks) release(id string) {
 	}
 }
 
+// EndPCLink ends the desktop app's link, as its close does, and refuses new ones, so that neither its poll nor the
+// requests that wait for its replies hold the gateway's shutdown.
+func (handler *Handler) EndPCLink() {
+	links := &handler.app.pcLinks
+	links.mu.Lock()
+	defer links.mu.Unlock()
+	links.stopped = true
+	if links.current != nil {
+		links.end(links.current)
+	}
+}
+
 func (app *application) registerPCRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /pc/link", app.pollPCLink)
 	mux.HandleFunc("POST /pc/link/reply", app.replyOverPCLink)
@@ -258,9 +280,13 @@ func (app *application) pollPCLink(response http.ResponseWriter, request *http.R
 	if !ok {
 		return
 	}
-	messages, ok := app.pcLinks.poll(request.Context(), body.Link)
-	if !ok {
-		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "another Gripi desktop app is connected for PC access"})
+	messages, err := app.pcLinks.poll(request.Context(), body.Link)
+	switch err {
+	case errPCTaken:
+		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	case errPCEnded:
+		writeJSONStatus(response, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
 	if messages == nil {

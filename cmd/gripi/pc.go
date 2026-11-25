@@ -86,8 +86,10 @@ func runOnPC(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	}
 	defer listener.Close()
 	relay := &sshAgentRelay{client: client, session: session, stderr: stderr, reported: map[string]bool{}}
+	ended, end := context.WithCancel(context.Background())
+	defer end()
 	relay.connections.Add(1)
-	go relay.serve(listener)
+	go relay.serve(ended, listener)
 
 	command := exec.Command(arguments[2], arguments[3:]...)
 	command.Stdin, command.Stdout, command.Stderr = stdin, stdout, stderr
@@ -96,7 +98,9 @@ func runOnPC(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	if err != nil {
 		return failure(stderr, "pc", err)
 	}
-	// The connections that the command's end closed report it to the gateway before gripi exits.
+	// The command's end closes the agent connections, also those of the processes that it left running, which report
+	// it to the gateway before gripi exits.
+	end()
 	listener.Close()
 	reported := make(chan struct{})
 	go func() {
@@ -150,7 +154,7 @@ type sshAgentRelay struct {
 	reported    map[string]bool
 }
 
-func (relay *sshAgentRelay) serve(listener net.Listener) {
+func (relay *sshAgentRelay) serve(ended context.Context, listener net.Listener) {
 	defer relay.connections.Done()
 	for {
 		connection, err := listener.Accept()
@@ -158,21 +162,23 @@ func (relay *sshAgentRelay) serve(listener net.Listener) {
 			return
 		}
 		relay.connections.Add(1)
-		go relay.serveConnection(connection)
+		go relay.serveConnection(ended, connection)
 	}
 }
 
-// serveConnection relays the messages of a connection one at a time until it closes, which ends the request that
-// waits for a reply, so that the user's computer stops asking.
-func (relay *sshAgentRelay) serveConnection(connection net.Conn) {
+// serveConnection relays the messages of a connection one at a time until it closes or ended ends, which ends the
+// request that waits for a reply, so that the user's computer stops asking.
+func (relay *sshAgentRelay) serveConnection(ended context.Context, connection net.Conn) {
 	defer relay.connections.Done()
-	defer connection.Close()
+	ctx, cancel := context.WithCancel(ended)
+	defer cancel()
+	context.AfterFunc(ctx, func() { connection.Close() })
 	id := make([]byte, 16)
 	rand.Read(id)
 	form := url.Values{"session": {relay.session}, "connection": {hex.EncodeToString(id)}}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	messages := make(chan []byte)
+	// A client of the agent waits for each reply, so a message that comes before it ends the connection. Reading on
+	// while a request waits sees the connection close.
+	messages, waiting := make(chan []byte, 1), make(chan struct{}, 1)
 	go func() {
 		defer cancel()
 		defer close(messages)
@@ -182,8 +188,9 @@ func (relay *sshAgentRelay) serveConnection(connection net.Conn) {
 				return
 			}
 			select {
-			case messages <- message:
-			case <-ctx.Done():
+			case waiting <- struct{}{}:
+				messages <- message
+			default:
 				return
 			}
 		}
@@ -198,6 +205,7 @@ func (relay *sshAgentRelay) serveConnection(connection net.Conn) {
 			relay.report(err)
 			reply = []byte{sshAgentFailure}
 		}
+		<-waiting
 		if _, err := connection.Write(append(binary.BigEndian.AppendUint32(nil, uint32(len(reply))), reply...)); err != nil {
 			break
 		}

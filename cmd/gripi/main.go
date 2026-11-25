@@ -93,6 +93,10 @@ func serve() error {
 		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Printf("close gateway listener: %v", err)
 		}
+		// The desktop app's poll and the gripi pc requests that wait for it would hold the drains.
+		if pc, ok := handler.(interface{ EndPCLink() }); ok {
+			pc.EndPCLink()
+		}
 		// Both listeners stop before either drains: a request accepted
 		// during a drain would lose its Pi process moments later.
 		if localServer != nil {

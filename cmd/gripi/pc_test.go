@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -368,6 +370,102 @@ func TestPCSSHCancelsTheRequestOfAnAgentConnectionThatEnds(t *testing.T) {
 	reply := map[string]any{"link": "app", "id": request.ID, "message": []byte{12}}
 	if status, _ := pcLinkSend(t, address, "/pc/link/reply", reply); status != http.StatusNotFound {
 		t.Fatalf("the reply to a cancelled request = %d", status)
+	}
+}
+
+// Processes that the command leaves running, such as ssh's ControlMaster, may keep their agent connections open.
+func TestPCSSHClosesTheAgentConnectionsThatTheCommandLeavesOpen(t *testing.T) {
+	requireTools(t, "ssh-add")
+	_, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	proceed := filepath.Join(t.TempDir(), "proceed")
+
+	result := startPCSSH(t, "sh", "-c", `ssh-add -l & ssh-add -l & until [ -e "$0" ]; do sleep 0.05; done`, proceed)
+	open := map[string]bool{}
+	for range 2 {
+		open[nextPCMessage(t, messages, "ssh").Connection] = true
+	}
+	if err := os.WriteFile(proceed, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ended := time.Now()
+	if answered := <-result; answered.code != 0 || strings.Contains(answered.stderr, "gripi pc:") || time.Since(ended) > 4*time.Second {
+		t.Fatalf("gripi pc ssh = %+v after %s", answered, time.Since(ended))
+	}
+	for range 2 {
+		closed := nextPCMessage(t, messages, "ssh_close")
+		if !open[closed.Connection] {
+			t.Fatalf("the desktop app got %+v, want a close of %v", closed, open)
+		}
+		delete(open, closed.Connection)
+	}
+}
+
+// A client of the agent waits for each reply, so a message before it breaks the protocol.
+func TestPCSSHEndsAnAgentConnectionThatSendsAMessageBeforeTheReply(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	client, err := newGatewayClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := &sshAgentRelay{client: client, session: alpha, stderr: io.Discard, reported: map[string]bool{}}
+	agent, connection := net.Pipe()
+	relay.connections.Add(1)
+	go relay.serveConnection(context.Background(), connection)
+
+	agent.Write([]byte{0, 0, 0, 1, 11})
+	request := nextPCMessage(t, messages, "ssh")
+	agent.Write([]byte{0, 0, 0, 1, 11})
+	agent.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := agent.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("read of the connection after a second message = %v", err)
+	}
+	if cancel := nextPCMessage(t, messages, "cancel"); cancel.ID != request.ID {
+		t.Fatalf("the desktop app got %+v after the request %+v", cancel, request)
+	}
+	if closed := nextPCMessage(t, messages, "ssh_close"); closed.Connection != request.Connection {
+		t.Fatalf("the desktop app got %+v after the request %+v", closed, request)
+	}
+}
+
+// The gateway ends the link as it stops, so that neither the desktop app's poll nor the requests that wait for its
+// replies hold the shutdown.
+func TestEndingThePCLinkWakesItsPollAndRequestsAndRefusesNewPolls(t *testing.T) {
+	requireTools(t, "ssh-add")
+	_, address := pcGateway(t)
+	messages, stop := pcDesktop(t, address, "app", nil)
+	result := startPCSSH(t, "ssh-add", "-l")
+	nextPCMessage(t, messages, "ssh")
+	stop()
+	gateway.PCLinkPoll = time.Minute
+	polled := make(chan int, 1)
+	go func() {
+		status, _ := pcPoll(t, address, "app")
+		polled <- status
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	browser.(interface{ EndPCLink() }).EndPCLink()
+	timeout := time.After(5 * time.Second)
+	select {
+	case status := <-polled:
+		if status != http.StatusServiceUnavailable {
+			t.Fatalf("the open poll = %d", status)
+		}
+	case <-timeout:
+		t.Fatal("the open poll still waits")
+	}
+	select {
+	case answered := <-result:
+		if answered.code != 1 || !strings.Contains(answered.stderr, "gripi pc: the computer's link to Gripi ended before it replied\n") {
+			t.Fatalf("gripi pc ssh = %+v", answered)
+		}
+	case <-timeout:
+		t.Fatal("gripi pc ssh still waits")
+	}
+	if status, _ := pcPoll(t, address, "app"); status != http.StatusServiceUnavailable {
+		t.Fatalf("a poll after the end = %d", status)
 	}
 }
 
