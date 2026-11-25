@@ -236,7 +236,7 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
    - The app's window and its dialog come to the front by themselves for a request that arrives while the user is on another workspace.
    - Enter and Escape both answer Deny.
 
-**Phase 1: SSH keys.**
+**Phase 1: SSH keys. Done.**
 1. Gateway link, queue and socket routes, and the `gripi pc ssh` relay.
 2. Desktop opt-in, config and link loop.
 3. SSH guard and known hosts.

@@ -358,8 +358,8 @@ func (app *application) pcSSHAgent(response http.ResponseWriter, request *http.R
 	}
 	session, connection, closing := request.PostFormValue("session"), request.PostFormValue("connection"), request.PostFormValue("close") == "1"
 	message, err := base64.StdEncoding.DecodeString(request.PostFormValue("message"))
-	if connection == "" || !closing && (err != nil || len(message) == 0 || len(message) > pcMessageLimit) {
-		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "an agent request needs a connection, and a message of up to 256 KiB in base64 or close=1"})
+	if connection == "" || len(connection) > 64 || !closing && (err != nil || len(message) == 0 || len(message) > pcMessageLimit) {
+		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "an agent request needs a connection ID of up to 64 characters, and a message of up to 256 KiB in base64 or close=1"})
 		return
 	}
 	if !app.validOwnedSessionPath(request, session) || !app.knownOrPendingSession(request, session) {
