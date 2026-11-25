@@ -1,6 +1,6 @@
 ---
 name: gripi
-description: Works with Gripi sessions through the gripi command. Finds, reads, starts and messages them, runs parallel sub-sessions when the user asks for them, and runs commands as root once the user agrees. Use when the user asks for this, or when a command needs sudo.
+description: Works with Gripi sessions through the gripi command. Finds, reads, starts and messages them, runs parallel sub-sessions when the user asks for them, runs commands as root once the user agrees, and logs in over SSH with the user's computer's keys. Use when the user asks for this, when a command needs sudo, or when ssh lacks a key (Permission denied (publickey)).
 ---
 
 You run in Gripi, which serves Pi sessions in the browser. The `gripi` command works with them. Check `gripi <command> --help` before using a command for the first time. `$PI_SESSION_FILE` is this session.
@@ -8,6 +8,10 @@ You run in Gripi, which serves Pi sessions in the browser. The `gripi` command w
 ## Root
 
 When a command needs root, run `gripi sudo -- <command>`. The user types the password in Gripi, so you never see it. Plain `sudo` can't ask for it.
+
+## SSH keys
+
+When ssh or Git over SSH fails with `Permission denied (publickey)` because the gateway lacks the key, or the user asks to use their computer's keys, run the command as `gripi pc ssh -- <command>`, such as `gripi pc ssh -- git push`. Check `gripi pc --help` first. The user approves each login on their computer. Never retry after a denial; tell the user.
 
 ## Other sessions
 
