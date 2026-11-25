@@ -84,7 +84,8 @@ function createPcAccess({
       if (signal.aborted) return;
 
       const messages = response?.status === 200 ? response.body?.messages : null;
-      if (Array.isArray(messages) && messages.length <= MAX_POLL_MESSAGES && messages.every((message) => receive(entry, link, message))) {
+      if (Array.isArray(messages) && messages.length <= MAX_POLL_MESSAGES && withinBudget(link, messages)) {
+        for (const message of messages) receive(entry, link, message);
         backoff = 0;
         continue;
       }
@@ -104,19 +105,22 @@ function createPcAccess({
     }
   }
 
-  // Returns false for a request that would take the link over the requests it may have in progress.
+  // A batch that would take the link over the requests it may have in progress drops the link before any of them starts.
+  function withinBudget(link, messages) {
+    const requests = messages.filter((message) => message?.type === "ssh").length;
+    return link.requests.size + link.refusals + requests <= MAX_REQUESTS_IN_PROGRESS;
+  }
+
   function receive(entry, link, message) {
     if (!validMessage(message)) {
       console.warn("PC access: ignored a malformed message from the server");
     } else if (message.type === "ssh") {
-      if (link.requests.size + link.refusals >= MAX_REQUESTS_IN_PROGRESS) return false;
       receiveSsh(entry, link, message);
     } else if (message.type === "ssh_close") {
       closeConnection(link, connectionKey(message));
     } else {
       link.requests.get(message.id)?.controller.abort();
     }
-    return true;
   }
 
   function receiveSsh(entry, link, message) {

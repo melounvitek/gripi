@@ -29,6 +29,9 @@ const pcMessageLimit = 256 << 10
 // pcPollMessages is the most messages that a poll carries, as the desktop app drops a link that sends more.
 const pcPollMessages = 64
 
+// pcPollBytes bounds the agent messages of a poll, whose JSON the desktop app reads only up to 8 MiB.
+const pcPollBytes = 2 << 20
+
 var (
 	errNoPCLink   = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
 	errPCLinkLost = errors.New("the computer's link to Gripi ended before it replied")
@@ -148,8 +151,15 @@ func (links *pcLinks) poll(ctx context.Context, id string, open bool) ([]pcMessa
 	if len(link.queue) == 0 || ctx.Err() != nil {
 		return nil, nil
 	}
-	messages := link.queue[:min(len(link.queue), pcPollMessages)]
-	link.queue = link.queue[len(messages):]
+	count, size := 0, 0
+	for count < min(len(link.queue), pcPollMessages) {
+		if size += len(link.queue[count].Message); count > 0 && size > pcPollBytes {
+			break
+		}
+		count++
+	}
+	messages := link.queue[:count]
+	link.queue = link.queue[count:]
 	if len(link.queue) == 0 {
 		link.queue, link.queued = nil, make(chan struct{})
 	}

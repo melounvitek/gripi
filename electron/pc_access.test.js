@@ -269,14 +269,16 @@ test("a poll that would take the link over 256 requests in progress, refusals be
 
   // 32 connections take a request each, and the requests of the others are refused.
   for (let poll = 0; poll < 4; poll++) {
-    await h.deliver(...Array.from({ length: 64 }, (_, index) => ssh(`${poll}.${index}`, LIST, { connection: `c${poll * 64 + index}` })));
+    const count = poll < 3 ? 64 : 63;
+    await h.deliver(...Array.from({ length: count }, (_, index) => ssh(`${poll}.${index}`, LIST, { connection: `c${poll * 64 + index}` })));
   }
-  assert.equal(h.replies().length, 256);
+  assert.equal(h.replies().length, 255);
   assert.equal(h.link(), link);
 
-  await h.deliver(ssh("last", LIST, { connection: "c256" }));
+  // The whole batch is checked first, so none of it starts.
+  await h.deliver(ssh("last", LIST, { connection: "c255" }), ssh("over", LIST, { connection: "c256" }));
 
-  assert.equal(h.replies().length, 256);
+  assert.equal(h.replies().length, 255);
   assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
   await expectPollAfter(t, h, 1000);
   assert.notEqual(h.link(), link);

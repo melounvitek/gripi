@@ -128,7 +128,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - HTTPS, or loopback without a trusted forwarded scheme.
 
   Without them, or in multi-user mode, or with access approval disabled, the answer is 403 `{"error"}`.
-- `POST /pc/link`, body `{"link": "<id>", "open": true}` for a link's first poll and `{"link": "<id>"}` after, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). A poll carries at most 64 messages, and the rest wait for the next one. Another link polling within 35 s (`PCLinkStale`) gets 409, and so does a poll without `open` of a link that the gateway never had or already ended (a restart, going stale, a close or `EndPCLink`). When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
+- `POST /pc/link`, body `{"link": "<id>", "open": true}` for a link's first poll and `{"link": "<id>"}` after, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). A poll carries at most 64 messages and 2 MiB of agent messages, and the rest wait for the next one. Another link polling within 35 s (`PCLinkStale`) gets 409, and so does a poll without `open` of a link that the gateway never had or already ended (a restart, going stale, a close or `EndPCLink`). When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
 - `POST /pc/link/reply`, body `{"link", "id", "message": "<base64>"}` or `{"link", "id", "error": "<text>"}`, answers `200 {}`, 409 when the link isn't the current one, or 404 for an unknown request (already cancelled or timed out).
 - `POST /pc/link/close`, body `{"link"}`, releases the link if it is the current one, and fails its waiting requests with 503.
 
@@ -153,7 +153,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - messages checked before use;
   - duplicate in-flight request IDs refused;
   - 32 agent connections per link, and 8 waiting messages per connection;
-  - 64 messages per poll, and 256 requests in progress per link, counting refusals still being sent and the requests of closed connections until they end. A poll over either loses the link, without replies;
+  - 64 messages per poll, and 256 requests in progress per link, counting refusals still being sent and the requests of closed connections until they end. A poll over either loses the link, checked for the whole batch before any of it starts, without replies;
   - session names cut to 200 characters for display, and logins over 256 bytes refused.
 - **The approval turn** lasts through polkit, until `pkexec` has exited, under one 2-minute deadline from when the dialog appears.
 - **Auth:** `pkexec --disable-internal-agent /usr/bin/true`. Exit 0 means polkit authorized it under local policy, and anything else, a cancel too, is a denial with its reason.
