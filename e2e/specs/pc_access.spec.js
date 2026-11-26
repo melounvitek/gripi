@@ -157,6 +157,17 @@ async function useSession(page, desktop) {
   }).toBe(true);
 }
 
+// Opens a page in a browser of its own, such as another computer's, which the user approves with the admin password.
+async function approvedPage(browser) {
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.getByPlaceholder("Admin password").fill(process.env.GRIPI_E2E_ADMIN_PASSWORD || ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Approve this browser" }).click();
+  await expect(page.getByRole("heading", { name: "Browser access required" })).toBeHidden();
+  return page;
+}
+
 // Lists the agent's keys with gripi pc ssh, and reports whether that reached desktop.
 async function reachedBy(desktop) {
   const requests = desktop.requests.length;
@@ -205,15 +216,10 @@ test("a session's requests go to the desktop app where it was last clicked in", 
   test.skip(isMobile, "Desktop app flow");
   const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
   // Another computer's desktop app, which has an approved browser of its own.
-  const deskContext = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const desk = await approvedPage(browser);
   try {
-    const desk = await deskContext.newPage();
-    await desk.goto("/");
-    await desk.getByPlaceholder("Admin password").fill(process.env.GRIPI_E2E_ADMIN_PASSWORD || ADMIN_PASSWORD);
-    await desk.getByRole("button", { name: "Approve this browser" }).click();
-    await expect(desk.getByRole("heading", { name: "Browser access required" })).toBeHidden();
     const laptopApp = await allowPcAccess(context, gateway, "deny");
-    const deskApp = await allowPcAccess(deskContext, gateway, "deny");
+    const deskApp = await allowPcAccess(desk.context(), gateway, "deny");
 
     await useSession(page, laptopApp);
     // A switch to the session in the sidebar is a use of the session it opens, once the desk's link is up.
@@ -230,7 +236,7 @@ test("a session's requests go to the desktop app where it was last clicked in", 
     await presence;
     expect(await reachedBy(deskApp)).toBe(true);
   } finally {
-    await deskContext.close();
+    await desk.context().close();
   }
 });
 
@@ -261,45 +267,53 @@ test("the session shows the login that the computer asks to approve above the ed
   await editor.fill("Typed while the computer asks");
   await expect(editor).toHaveValue("Typed while the computer asks");
 
-  // Also after a reload, from the page.
+  // Also after a reload, from the page alone.
+  const events = (url) => url.pathname === "/events";
+  await page.route(events, (route) => route.abort());
   await page.reload();
   await expect(line).toBeVisible();
+  await page.unroute(events);
 
   approve("once");
   expect((await push).code).toBe(0);
   await expect(line).toBeHidden({ timeout: 10_000 });
 });
 
-test("a phone shows the login that the computer asks to approve, and cancels it with one tap", async ({ context, page, baseURL, isMobile }) => {
+test("a phone shows the login that the computer asks to approve, and cancels it with one tap", async ({ browser, page, baseURL, isMobile }) => {
   test.skip(!isMobile, "Touch flow");
   test.setTimeout(40_000);
-  let dismissed = false;
-  // Like Electron's message box, the dialog closes with Deny when its signal aborts.
-  const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, (signal) => new Promise((resolve) => {
-    signal.addEventListener("abort", () => {
-      dismissed = true;
-      resolve("deny");
-    });
-  }));
-  await useSession(page, desktop);
+  const laptop = await approvedPage(browser);
+  try {
+    let dismissed = false;
+    // Like Electron's message box, the dialog closes with Deny when its signal aborts.
+    const desktop = await allowPcAccess(laptop.context(), { id: "e2e", name: "E2E gateway", url: baseURL }, (signal) => new Promise((resolve) => {
+      signal.addEventListener("abort", () => {
+        dismissed = true;
+        resolve("deny");
+      });
+    }));
+    await useSession(laptop, desktop);
+    await page.goto(`/?session=${encodeURIComponent(sessionFile())}`);
 
-  const push = gripiPc(["git", "push", "origin", "main:refs/heads/cancelled"]);
-  const line = page.locator(".pc-approval");
-  await expect(line).toBeVisible({ timeout: 10_000 });
-  await expect(line.locator(".pc-approval-text")).toHaveText(waitingLine());
-  await expectJustAboveTheEditor(page, line);
-  const cancel = line.getByRole("button", { name: "cancel" });
-  const box = await cancel.boundingBox();
-  expect(box.height).toBeGreaterThanOrEqual(44);
+    const push = gripiPc(["git", "push", "origin", "main:refs/heads/cancelled"]);
+    const line = page.locator(".pc-approval");
+    await expect(line).toBeVisible({ timeout: 10_000 });
+    await expect(line.locator(".pc-approval-text")).toHaveText(waitingLine());
+    await expectJustAboveTheEditor(page, line);
+    const cancel = line.getByRole("button", { name: /^cancel / });
+    expect((await cancel.boundingBox()).height).toBeGreaterThanOrEqual(44);
 
-  await cancel.tap();
-  await expect(line).toBeHidden();
-  const pushed = await push;
-  expect(pushed.code).not.toBe(0);
-  expect(pushed.stderr).toContain("gripi pc: cancelled in Gripi\n");
-  expect(dismissed).toBe(true);
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("TEXTAREA");
-  expect(git("--git-dir", file("repo.git"), "for-each-ref", "refs/heads/cancelled")).toBe("");
+    await cancel.tap();
+    await expect(line).toBeHidden();
+    await expect.poll(() => dismissed).toBe(true);
+    const pushed = await push;
+    expect(pushed.code).not.toBe(0);
+    expect(pushed.stderr).toContain("gripi pc: cancelled in Gripi\n");
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("TEXTAREA");
+    expect(git("--git-dir", file("repo.git"), "for-each-ref", "refs/heads/cancelled")).toBe("");
+  } finally {
+    await laptop.context().close();
+  }
 });
 
 function onPath(command) {
