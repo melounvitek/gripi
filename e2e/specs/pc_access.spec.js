@@ -516,9 +516,12 @@ test("a phone's Cancel that comes once the computer may run a command as root sa
     const ran = gripi(["pc", "run", "--root", "--", "touch", file("late")]);
     const line = page.locator(".pc-approval");
     await expect(line).toBeVisible({ timeout: 10_000 });
-    // The phone doesn't hear yet that the computer let the command start, before polkit's dialog.
+    // The phone doesn't hear yet that the computer let the command start, before polkit's dialog. The reload ends a poll
+    // in flight, and the page shows the line from its own data.
     const events = (url) => url.pathname === "/events";
     await page.route(events, (route) => route.abort());
+    await page.reload();
+    await expect(line).toBeVisible();
     approve("run");
     await pkexecAsked();
     await line.getByRole("button", { name: /^cancel / }).tap();
