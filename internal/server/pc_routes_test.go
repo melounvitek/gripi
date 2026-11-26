@@ -167,7 +167,7 @@ func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
 	}
 
 	links.closeConnection("connection")
-	if _, err := links.ask(context.Background(), link, pcMessage{Type: "ssh", ID: "request", Session: session, Connection: "connection"}); err != errPCClosed {
+	if _, err := links.ask(context.Background(), link, session, pcMessage{Type: "ssh", ID: "request", Session: session, Connection: "connection"}); err != errPCClosed {
 		t.Fatalf("ask = %v", err)
 	}
 	if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 || messages[0].Type != "ssh_close" {

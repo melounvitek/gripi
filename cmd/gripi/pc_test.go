@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -997,5 +999,156 @@ func TestPCSSHNeedsAUseSinceTheGatewayStarted(t *testing.T) {
 	eventually(t, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
 	if answerer := pcAnswerer(t); answerer != unused {
 		t.Fatalf("after gripi send, gripi pc ssh = %q", answerer)
+	}
+}
+
+// pcAsk sends the first message of an agent connection in session, as gripi pc ssh does, until cancel is called or
+// the test ends, and returns the request that the desktop app got from messages, and what the message got.
+func pcAsk(t *testing.T, session, connection string, messages <-chan pcMessage) (request pcMessage, answered <-chan error, cancel func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	errors := make(chan error, 1)
+	go func() {
+		_, err := pcRelay(t, session).post(ctx, pcAgentMessage(session, connection, true))
+		errors <- err
+	}()
+	return nextPCMessage(t, messages, "ssh"), errors, cancel
+}
+
+// pcAsking tells the gateway, as the desktop app of the browser with token does over link, that it asks the user to
+// approve the request id, or with summary "", that it stopped asking.
+func pcAsking(t *testing.T, address, token, link, id, summary string) (int, pcLinkAnswer) {
+	body := map[string]any{"link": link, "id": id, "asking": summary != ""}
+	if summary != "" {
+		body["summary"], body["expires_in"] = summary, 120
+	}
+	return pcLinkSend(t, address, "/pc/link/status", body, asBrowser(token))
+}
+
+// pcApprovals returns the requests that computers ask the user to approve in session, as the phone's live events show
+// them.
+func pcApprovals(t *testing.T, session string) []map[string]any {
+	t.Helper()
+	response := browserRequest(http.MethodGet, "/events?session="+url.QueryEscape(session), nil, "gripi_browser="+pcPhoneToken)
+	var payload struct {
+		Approvals []map[string]any `json:"pc_approvals"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); response.Code != http.StatusOK || err != nil || payload.Approvals == nil {
+		t.Fatalf("events of %s = %d %s (%v)", session, response.Code, response.Body, err)
+	}
+	return payload.Approvals
+}
+
+var renderedPCApprovals = regexp.MustCompile(`data-pc-approvals="([^"]*)"`)
+
+// While a computer asks the user to approve a request, every Gripi client of the session shows it, from the page and
+// its live events, with the computer's name and the desktop app's summary, escaped and cut, until the app stops asking.
+// Then it can't ask again.
+func TestASessionShowsTheRequestThatAComputerAsksToApprove(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	request, _, _ := pcAsk(t, alpha, "connection", messages)
+
+	started := time.Now()
+	status := map[string]any{"link": "app", "id": request.ID, "asking": true, "summary": "SSH login to github.com as git\u202e\n" + strings.Repeat("x", 300), "expires_in": 3600}
+	if status, answer := pcLinkSend(t, address, "/pc/link/status", status); status != http.StatusOK {
+		t.Fatalf("status = %d %+v", status, answer)
+	}
+	approvals := pcApprovals(t, alpha)
+	summary := `SSH login to github.com as git\u202e\u000a` + strings.Repeat("x", 157) + "…"
+	if len(approvals) != 1 || approvals[0]["id"] != request.ID || approvals[0]["computer"] != "laptop" || approvals[0]["summary"] != summary {
+		t.Fatalf("approvals = %+v", approvals)
+	}
+	if expires, err := time.Parse(time.RFC3339Nano, approvals[0]["expires_at"].(string)); err != nil || expires.Before(started.Add(gateway.PCReplyTimeout)) || expires.After(time.Now().Add(gateway.PCReplyTimeout)) {
+		t.Fatalf("an approval for an hour expires at %v (%v)", approvals[0]["expires_at"], err)
+	}
+	page := browserRequest(http.MethodGet, "/?session="+url.QueryEscape(alpha), nil, "gripi_browser="+pcPhoneToken)
+	if match := renderedPCApprovals.FindStringSubmatch(page.Body.String()); page.Code != http.StatusOK || match == nil || !strings.Contains(html.UnescapeString(match[1]), `"id":"`+request.ID+`"`) {
+		t.Fatalf("the page = %d, approvals %q", page.Code, match)
+	}
+	if others := pcApprovals(t, filepath.Join(filepath.Dir(alpha), "beta.jsonl")); len(others) != 0 {
+		t.Fatalf("another session shows %+v", others)
+	}
+
+	// The stop may also overtake the start.
+	overtaken, _, _ := pcAsk(t, alpha, "other", messages)
+	for _, id := range []string{request.ID, overtaken.ID} {
+		for _, summary := range []string{"", "SSH login again"} {
+			if status, answer := pcAsking(t, address, pcBrowserToken, "app", id, summary); status != http.StatusOK {
+				t.Fatalf("status with summary %q = %d %+v", summary, status, answer)
+			}
+			if approvals := pcApprovals(t, alpha); len(approvals) != 0 {
+				t.Fatalf("after the app stopped asking, and with summary %q, approvals = %+v", summary, approvals)
+			}
+		}
+	}
+}
+
+// Only the desktop app that a request waits for may say that it asks to approve it.
+func TestOnlyTheLinkOfARequestMayShowItAsAsking(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	pcDesktopOn(t, address, pcDeskToken, "desk", "desk", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	request, _, _ := pcAsk(t, alpha, "connection", messages)
+
+	for _, refused := range []struct {
+		name, token, link, id, summary string
+		status                         int
+	}{
+		{"another browser over the link", pcDeskToken, "app", request.ID, "SSH login", http.StatusConflict},
+		{"another link", pcDeskToken, "desk", request.ID, "SSH login", http.StatusNotFound},
+		{"an unknown request", pcBrowserToken, "app", "unknown", "SSH login", http.StatusNotFound},
+		{"no summary", pcBrowserToken, "app", request.ID, " ", http.StatusBadRequest},
+	} {
+		if status, answer := pcAsking(t, address, refused.token, refused.link, refused.id, refused.summary); status != refused.status {
+			t.Fatalf("status from %s = %d %+v, want %d", refused.name, status, answer, refused.status)
+		}
+	}
+	page := func(request *http.Request) { request.Header.Set("Origin", address) }
+	if status, _ := pcLinkSend(t, address, "/pc/link/status", map[string]any{"link": "app", "id": request.ID, "asking": true, "summary": "SSH login", "expires_in": 120}, page); status != http.StatusForbidden {
+		t.Fatalf("status from a page = %d", status)
+	}
+	if approvals := pcApprovals(t, alpha); len(approvals) != 0 {
+		t.Fatalf("approvals = %+v", approvals)
+	}
+}
+
+// A request shows as asking only while it waits: until the desktop app replies, gripi pc stops waiting, or the link
+// ends. It can't come back after that.
+func TestARequestShowsAsAskingOnlyWhileItWaits(t *testing.T) {
+	for name, end := range map[string]func(t *testing.T, address, id string, cancel, stop func()){
+		"a reply": func(t *testing.T, address, id string, _, _ func()) {
+			if status, _ := pcLinkSend(t, address, "/pc/link/reply", map[string]any{"link": "app", "id": id, "error": "denied on the PC"}); status != http.StatusOK {
+				t.Fatalf("reply = %d", status)
+			}
+		},
+		"the end of gripi pc": func(_ *testing.T, _, _ string, cancel, _ func()) { cancel() },
+		"the end of the link": func(t *testing.T, address, _ string, _, stop func()) {
+			stop()
+			if status, _ := pcLinkSend(t, address, "/pc/link/close", map[string]string{"link": "app"}); status != http.StatusOK {
+				t.Fatalf("close = %d", status)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			alpha, address := pcGateway(t)
+			messages, stop := pcDesktop(t, address, "app", nil)
+			pcPresence(t, pcBrowserToken, alpha, true)
+			request, answered, cancel := pcAsk(t, alpha, "connection", messages)
+			id := request.ID
+			if status, _ := pcAsking(t, address, pcBrowserToken, "app", id, "SSH login"); status != http.StatusOK || len(pcApprovals(t, alpha)) != 1 {
+				t.Fatalf("status = %d, approvals %+v", status, pcApprovals(t, alpha))
+			}
+
+			end(t, address, id, cancel, stop)
+			<-answered
+			pcAsking(t, address, pcBrowserToken, "app", id, "SSH login")
+			if approvals := pcApprovals(t, alpha); len(approvals) != 0 {
+				t.Fatalf("approvals after %s = %+v", name, approvals)
+			}
+		})
 	}
 }
