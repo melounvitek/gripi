@@ -1,4 +1,6 @@
 (function installWebPushWorker(scope) {
+  const SHOWN_SESSION_TIMEOUT_MS = 1000;
+
   function notificationSession(url, origin) {
     try {
       return new URL(url || "/", origin).searchParams.get("session") || "";
@@ -7,13 +9,34 @@
     }
   }
 
+  // A page at /, such as where the installed app starts, shows a session that its URL doesn't name, so it says which.
+  function shownSession(client, origin) {
+    const session = notificationSession(client.url, origin);
+    if (session || new URL(client.url).pathname !== "/") return Promise.resolve(session);
+
+    return new Promise((resolve) => {
+      const { port1, port2 } = new MessageChannel();
+      const answer = (shown) => {
+        clearTimeout(timer);
+        port1.close();
+        resolve(typeof shown === "string" ? shown : "");
+      };
+      // A page from before Gripi asked never answers.
+      const timer = setTimeout(answer, SHOWN_SESSION_TIMEOUT_MS);
+      port1.onmessage = (event) => answer(event.data);
+      client.postMessage({ type: "gripi-shown-session" }, [port2]);
+    });
+  }
+
   async function targetSessionFocused(data, worker) {
     if (data.type !== "gripi-notification") return false;
-    const targetSession = notificationSession(data.url, worker.location.origin);
+    // The URL of a Hermes conversation, or a long one, doesn't name the session, which the notification may.
+    const targetSession = data.session || notificationSession(data.url, worker.location.origin);
     if (!targetSession) return false;
 
     const clientList = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
-    return clientList.some((client) => client.focused && notificationSession(client.url, worker.location.origin) === targetSession);
+    const shown = await Promise.all(clientList.filter((client) => client.focused).map((client) => shownSession(client, worker.location.origin)));
+    return shown.includes(targetSession);
   }
 
   scope.gripiDisplayPushNotification = async function displayPushNotification(data, worker) {

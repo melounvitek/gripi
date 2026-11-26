@@ -66,6 +66,31 @@ test("test pushes remain visible while the notification page is focused", async 
   assert.equal(shown.length, 1);
 });
 
+test("a push that names its session is suppressed also for a page whose URL doesn't, which says what it shows", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const hermes = { type: "gripi-notification", title: "Hermes", body: "Approve on laptop", plain: true, url: "/hermes", session: "hermes:abc" };
+  const pc = { type: "gripi-notification", title: "Fix", body: "Approve on laptop", plain: true, url: "/?session=%2Fsessions%2Fcurrent.jsonl", session: "/sessions/current.jsonl" };
+  // A page at / answers the worker's question with the session it shows, or not at all, as an older one.
+  const page = (shows) => ({
+    focused: true,
+    url: "https://gripi.test/",
+    postMessage(message, [port]) {
+      assert.deepEqual(message, { type: "gripi-shown-session" });
+      if (shows !== undefined) port.postMessage(shows);
+    }
+  });
+  const shown = [];
+
+  assert.equal(await globalThis.gripiDisplayPushNotification(hermes, fakeWorker(shown, [{ focused: true, url: "https://gripi.test/?session=hermes%3Aabc&session_only=1" }])), false);
+  assert.equal(await globalThis.gripiDisplayPushNotification(pc, fakeWorker(shown, [page("/sessions/current.jsonl")])), false);
+  assert.equal(await globalThis.gripiDisplayPushNotification(pc, fakeWorker(shown, [{ ...page("/sessions/current.jsonl"), focused: false }, page("/sessions/other.jsonl")])), true);
+  const silent = globalThis.gripiDisplayPushNotification(pc, fakeWorker(shown, [page()]));
+  await new Promise(setImmediate);
+  t.mock.timers.tick(1000);
+  assert.equal(await silent, true);
+  assert.equal(shown.length, 2);
+});
+
 function fakeWorker(shown, clientList) {
   return {
     location: { origin: "https://gripi.test" },

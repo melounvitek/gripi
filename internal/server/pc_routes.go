@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"mime"
 	"net/http"
 	"slices"
@@ -631,7 +632,8 @@ func (app *application) pcLinkStatus(response http.ResponseWriter, request *http
 		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "a status needs the request's id, and while asking, a summary"})
 		return
 	}
-	switch status, _ := app.pcLinks.status(owner, body); status {
+	status, began := app.pcLinks.status(owner, body)
+	switch status {
 	case http.StatusConflict:
 		writeJSONStatus(response, status, map[string]string{"error": "the link is not open"})
 	case http.StatusNotFound:
@@ -639,6 +641,23 @@ func (app *application) pcLinkStatus(response http.ResponseWriter, request *http
 	default:
 		writeJSON(response, struct{}{})
 	}
+	if began != nil {
+		go app.notifyPCApproval(*began)
+	}
+}
+
+// notifyPCApproval tells the user at once that a computer asks them to approve a request, on each of their browsers
+// but the one of that computer, whose desktop app has a notification of its own. Unlike notifySudo, it goes out also
+// while a client shows the session: in single-user mode, all are one for presence, also the computer that asks, which
+// comes to the front. The service worker of a device that shows the session skips it instead.
+func (app *application) notifyPCApproval(approval pcApproval) {
+	owners, err := app.completionNotifications.owners(approval.session)
+	if err != nil {
+		log.Printf("find whom to notify of a PC access request: %v", err)
+		return
+	}
+	owners = slices.DeleteFunc(owners, func(owner string) bool { return owner == approval.asker })
+	app.notifyAtOnce(owners, approval.session, approval.ID, "pc", "Approve on "+cmp.Or(approval.Computer, "your computer")+": "+approval.Summary)
 }
 
 // cancelPCApproval refuses, from any Gripi client of its session, a request that a computer asks the user to approve,

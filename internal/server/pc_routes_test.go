@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -172,5 +174,95 @@ func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
 	}
 	if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 || messages[0].Type != "ssh_close" {
 		t.Fatalf("the link got %+v (%v)", messages, err)
+	}
+}
+
+// A computer that begins to ask the user to approve a request notifies their other browsers at once and once, also
+// while they show the session: all clients are one for presence, also the computer that asks, which comes to the front
+// with a notification of its own.
+func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	handler := newPushTestHandler(t, false, false)
+	app := handler.app
+	path := writeNotificationSession(t, app.config.SessionsRoot, "Fix login redirect")
+	delivered := make(chan map[string]any, 10)
+	app.pushNotifier = pushNotifierFunc(func(_ context.Context, owner string, payload []byte) error {
+		var notification map[string]any
+		if err := json.Unmarshal(payload, &notification); err != nil {
+			return err
+		}
+		notification["owner"] = owner
+		delivered <- notification
+		return nil
+	})
+	owners := map[string]string{}
+	for _, token := range []string{"laptop", "phone"} {
+		if _, err := app.browserStore.ApproveCurrentBrowser(token, token); err != nil {
+			t.Fatal(err)
+		}
+		owners[token], _ = app.pushOwner(requestWithCookie("gripi_browser=" + token))
+		if err := app.pushSubscriptions.Upsert(owners[token], pushRouteSubscription(token)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{"laptop", "phone"} {
+		presence := pushJSON(t, map[string]any{"client_id": token, "session": path, "focused": true, "used": token == "laptop", "sequence": 1})
+		if response := pushRequest(handler, http.MethodPut, "/web-push/presence", presence, "gripi_browser="+token); response.Code != http.StatusNoContent {
+			t.Fatalf("presence = %d %s", response.Code, response.Body)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://gripi/pc/ssh-agent", strings.NewReader("connection=c&message=Cw%3D%3D&open=1&session="+url.QueryEscape(path)))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		handler.Local().ServeHTTP(httptest.NewRecorder(), request)
+	}()
+	var id string
+	for deadline := time.Now().Add(5 * time.Second); id == ""; {
+		messages, _ := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app"})
+		for _, message := range messages {
+			id = message.ID
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the link got no request")
+		}
+	}
+	status := func(asking bool) {
+		t.Helper()
+		body := pushJSON(t, map[string]any{"link": "app", "id": id, "asking": asking, "summary": "SSH login to github.com as git", "expires_in": 120})
+		request := httptest.NewRequest(http.MethodPost, "http://example.com/pc/link/status", strings.NewReader(body))
+		request.RemoteAddr = "127.0.0.1:40000"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Gripi-PC-Link", "1")
+		request.Header.Set("Cookie", "gripi_browser=laptop")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d %s", response.Code, response.Body)
+		}
+	}
+
+	status(true)
+	select {
+	case notification := <-delivered:
+		if notification["owner"] != owners["phone"] || notification["title"] != "Fix login redirect" || notification["body"] != "Approve on laptop: SSH login to github.com as git" || notification["plain"] != true || notification["url"] != "/?session="+url.QueryEscape(path) || notification["session"] != path || !strings.HasPrefix(notification["tag"].(string), "gripi-pc:") {
+			t.Fatalf("notification = %v", notification)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no notification")
+	}
+	status(true)
+	status(false)
+	status(true)
+	select {
+	case notification := <-delivered:
+		t.Fatalf("another notification = %v", notification)
+	case <-time.After(200 * time.Millisecond):
 	}
 }

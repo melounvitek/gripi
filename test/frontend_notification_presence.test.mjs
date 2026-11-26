@@ -233,6 +233,24 @@ test("a switch to another session that the user starts reports that session, not
   assert.deepEqual(page.reports.at(-1), { client_id: "desktop-window", session: "/sessions/two.jsonl", focused: true, used: true, sequence: 2 });
 });
 
+test("a page tells the service worker which session it shows, as its URL may not say", async () => {
+  const serviceWorker = eventTarget({});
+  const window = eventTarget({ setInterval() {}, navigator: { serviceWorker } });
+  const document = eventTarget({ hidden: false });
+  document.hasFocus = () => true;
+  const controller = new NotificationPresenceController(document, window, () => "/sessions/one.jsonl", async () => {}, "page");
+  controller.start();
+  const answers = [];
+  const port = { postMessage: (answer) => answers.push(answer) };
+
+  serviceWorker.dispatch("message", { data: { type: "gripi-shown-session" }, ports: [port] });
+  serviceWorker.dispatch("message", { data: { type: "other" }, ports: [port] });
+  document.hidden = true;
+  serviceWorker.dispatch("message", { data: { type: "gripi-shown-session" }, ports: [port] });
+
+  assert.deepEqual(answers, ["/sessions/one.jsonl", ""]);
+});
+
 function eventTarget(properties) {
   const listeners = new Map();
   return {
