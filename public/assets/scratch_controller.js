@@ -138,13 +138,6 @@ export class ScratchController {
     this.window.location.replace(redirect);
   }
 
-  // On its page, Esc hides the overlay, once nothing there takes it, and never stops Pi.
-  hideFromEscape() {
-    if (!this.page) return false;
-    this.tellOverlay("gripi:scratch-hide");
-    return true;
-  }
-
   // While the overlay shows, the page around it keeps its palette and session search closed, and its page has none.
   blocksPageShortcuts() {
     return this.page || this.shown();

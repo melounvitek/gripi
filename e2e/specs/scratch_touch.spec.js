@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { prompts } from "../support/contract.mjs";
+import { expectRunFinished, sendPrompt } from "../support/ui.mjs";
 
 test.beforeEach(async ({ page }) => {
   expect((await page.request.post("/scratch/discard", { headers: { Accept: "application/json" } })).ok()).toBe(true);
@@ -50,4 +52,17 @@ test("on a phone, a scratch session opens in a sheet that one tap hides or disca
   await expect(overlay(page)).toBeHidden();
   await page.locator('label[aria-label="Open sessions"]').tap();
   await expect(page.getByRole("button", { name: "Scratch session, not saved" })).not.toHaveClass(/is-active/);
+});
+
+test("on a phone, one tap anywhere on the scratch window's stop button stops Pi", async ({ page }) => {
+  await openScratch(page);
+  const frame = scratch(page);
+  await sendPrompt(frame, prompts.abortStart);
+  await expect(frame.locator(".composer-state")).toHaveAttribute("data-state", "running");
+
+  // Its lower edge too, which the header could cut off.
+  const stop = frame.getByRole("button", { name: "Abort running Pi" });
+  const { x, y, width, height } = await stop.boundingBox();
+  await page.touchscreen.tap(x + width / 2, y + height - 1);
+  await expectRunFinished(frame);
 });

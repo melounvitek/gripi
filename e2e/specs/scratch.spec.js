@@ -59,8 +59,8 @@ test("a scratch session opens over the page, keeps its conversation and images, 
   await expectRunFinished(frame);
   await expectLoadedImage(message(frame, "user", question).locator("img"));
 
-  // Esc hides it, and the page is as it was.
-  await page.keyboard.press("Escape");
+  // Ctrl+Shift+N hides it, and the page is as it was.
+  await page.keyboard.press("Control+Shift+N");
   await expect(overlay(page)).toBeHidden();
   await expect(page.locator(".app-shell")).toHaveJSProperty("inert", false);
   expect(page.url()).toBe(url);
@@ -73,7 +73,7 @@ test("a scratch session opens over the page, keeps its conversation and images, 
   await expect(message(scratch(page), "assistant", replies.standard)).toBeVisible();
   await expectLoadedImage(message(scratch(page), "user", question).locator("img"));
   const key = await scratchKey(page);
-  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+Shift+N");
   await expect(overlay(page)).toBeHidden();
 
   // No list shows it, and the browser keeps nothing of it.
@@ -95,19 +95,23 @@ test("a scratch session opens over the page, keeps its conversation and images, 
   await expect(message(scratch(page), "user", question)).toHaveCount(0);
 });
 
-test("Esc hides a scratch session that works, which goes on", async ({ page }) => {
+test("a scratch session that works goes on while hidden, and Esc twice stops it, as in any session", async ({ page }) => {
   await openScratch(page);
   const frame = scratch(page);
   await sendPrompt(frame, prompts.abortStart);
   await expect(frame.locator(".composer-state")).toHaveAttribute("data-state", "running");
 
-  await page.keyboard.press("Escape");
+  await frame.getByRole("button", { name: "Hide the scratch session" }).click();
   await expect(overlay(page)).toBeHidden();
 
   await openScratch(page);
   await expect(frame.locator(".composer-state")).toHaveAttribute("data-state", "running");
-  await frame.getByRole("button", { name: "Abort running Pi" }).click();
-  await expect(frame.locator(".composer-state")).not.toHaveAttribute("data-state", "running");
+  await expect(frame.getByLabel(/^Message to Pi$/)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(frame.locator(".composer-state")).toHaveText("Press ESC again to stop current task");
+  await page.keyboard.press("Escape");
+  await expectRunFinished(frame);
+  await expect(overlay(page)).toBeVisible();
 });
 
 test("in a scratch session, Ctrl+K does nothing and Ctrl+N starts it over", async ({ page }) => {
@@ -128,7 +132,7 @@ test("in a scratch session, Ctrl+K does nothing and Ctrl+N starts it over", asyn
   await expect(scratchButton(page)).toHaveClass(/is-active/);
 });
 
-test("while a scratch session starts, its overlay says so, and keys around it only hide it", async ({ page }) => {
+test("while a scratch session starts, its overlay says so, and keys around it do nothing but hide it", async ({ page }) => {
   let start;
   const started = new Promise((resolve) => { start = resolve; });
   await page.route("**/scratch/new", async (route) => {
@@ -142,6 +146,8 @@ test("while a scratch session starts, its overlay says so, and keys around it on
   await scratchButton(page).click();
   await expect(overlay(page).getByText("Starting a scratch session…")).toBeVisible();
   for (const key of ["Control+K", "Control+Shift+F", "Control+N", "Escape"]) await page.keyboard.press(key);
+  await expect(overlay(page)).toBeVisible();
+  await page.keyboard.press("Control+Shift+N");
   await expect(overlay(page)).toBeHidden();
   await expect(find).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Go to or run" })).toBeHidden();

@@ -3607,14 +3607,8 @@ document.addEventListener("keydown", (event) => {
   handleModalTab(event);
   if (modalIsOpen()) return;
 
-  // Around the scratch overlay, such as while it loads, Esc hides it, and only Ctrl+N and Ctrl+Shift+N go on.
-  if (scratchController.shown() && !isCtrlOrMetaShortcut(event, "n")) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      scratchController.hide();
-    }
-    return;
-  }
+  // Around the scratch overlay, such as while it loads, only Ctrl+N and Ctrl+Shift+N go on.
+  if (scratchController.shown() && !isCtrlOrMetaShortcut(event, "n")) return;
 
   if (handleSessionSearchShortcut(event)) return;
   if (sidebarController.closeSearch(event)) {
@@ -3658,11 +3652,6 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  // Esc on the scratch session's page hides its overlay rather than stopping Pi there.
-  if (event.key === "Escape" && !event.defaultPrevented && scratchController.hideFromEscape()) {
-    event.preventDefault();
-    return;
-  }
   if (event.key === "Escape" && !event.defaultPrevented && confirmOrStopRunningTask(event)) return;
 
   if (event.key === "Control") {
