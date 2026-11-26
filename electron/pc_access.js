@@ -329,7 +329,7 @@ function createPcAccess({
     let starting = false;
     const answerWith = async (fields) => {
       const answer = await send(fields);
-      if (starting && !signal.aborted && ![200, 404, 409].includes(answer.status)) {
+      if (starting && !signal.aborted && !acknowledged(answer) && ![404, 409].includes(answer.status)) {
         loseLink(entry, link, `the reply to a command that may have started got ${answered(answer)}`);
       }
     };
@@ -358,7 +358,7 @@ function createPcAccess({
         approved: async (_answer, approval) => {
           starting = true;
           const started = await post(entry, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval);
-          if (started.status !== 200) return "not run on the PC: Gripi no longer waits for it";
+          if (!acknowledged(started)) return "not run on the PC: Gripi didn't confirm that it may start";
           if (!root) return null;
           if (approval.aborted) return "denied on the PC";
           running = runCommand(executable, args, folder, approval, pkexec);
@@ -374,7 +374,7 @@ function createPcAccess({
       if (signal.aborted) return;
       const failure = root && pkexecFailure(result, executable, run.stopped);
       if (failure) return await answerWith({ error: failure });
-      if ((await send({ result })).status === 200) return;
+      if (acknowledged(await send({ result }))) return;
       await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
     } catch (error) {
       await answerWith({ error: error.message });
@@ -519,6 +519,12 @@ function validAgentMessage(text) {
   const body = Buffer.from(text, "base64");
   // Node's decoder skips what isn't base64, so only text that encodes back the same is.
   return body.length > 0 && body.length <= MAX_AGENT_MESSAGE_BYTES && body.toString("base64") === text;
+}
+
+// Whether the gateway took a request of a link, which it says in JSON, unlike an answer too large to read or from
+// something else on the way.
+function acknowledged({ status, body }) {
+  return status === 200 && typeof body === "object" && body !== null;
 }
 
 // Says what a request of a link got, for the log: the gateway's status and error, or the request's error.

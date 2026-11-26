@@ -88,6 +88,8 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
         if (body.starting && starting === "late") return new Promise((resolve) => { harness.started = () => resolve({ status: 200, body: {} }); });
         if (body.starting && starting === "held") return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
+        // Such as an answer too large to read, or one that something on the way gave.
+        if (body.starting && starting === "unreadable") return Promise.resolve({ status: 200, body: null });
         if (body.starting) return starting ? Promise.resolve({ status: starting, body: {} }) : Promise.reject(new Error("the server did not answer in time"));
         if (lostResults && body.result || lostReplies && path === "/pc/link/reply") return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
@@ -830,21 +832,27 @@ test("refuses at once a folder or command that isn't there, or a command too lon
   assert.equal(h.prompts.length, 0);
 });
 
-test("runs nothing that the server no longer waits for once the user approved it, nor asks polkit for one as root", async (t) => {
-  const h = setup(t, { starting: 404 });
-  const pkexec = fakePkexec(t);
+const unconfirmedStarts = [
+  ["that the server no longer waits for", 404],
+  ["whose start the server's answer doesn't confirm, as it isn't the server's JSON", "unreadable"]
+];
+for (const [what, starting] of unconfirmedStarts) {
+  test(`runs nothing ${what} once the user approved it, nor asks polkit for one as root`, async (t) => {
+    const h = setup(t, { starting });
+    const pkexec = fakePkexec(t);
 
-  for (const [count, root] of [[1, false], [2, true]]) {
-    await h.deliver(run(String(count), ["true"], { root }));
-    await h.prompted(count);
-    await h.answer("run");
-    await h.replied(count);
-  }
+    for (const [count, root] of [[1, false], [2, true]]) {
+      await h.deliver(run(String(count), ["true"], { root }));
+      await h.prompted(count);
+      await h.answer("run");
+      await h.replied(count);
+    }
 
-  assert.deepEqual(h.replies().map((reply) => reply.error), ["not run on the PC: Gripi no longer waits for it", "not run on the PC: Gripi no longer waits for it"]);
-  assert.equal(h.spawned.length, 0);
-  assert.deepEqual(pkexec.calls(), []);
-});
+    assert.deepEqual(h.replies().map((reply) => reply.error), Array(2).fill("not run on the PC: Gripi didn't confirm that it may start"));
+    assert.equal(h.spawned.length, 0);
+    assert.deepEqual(pkexec.calls(), []);
+  });
+}
 
 test("asks again whether a command may start when that gets no answer, and runs it only once the server says so", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
