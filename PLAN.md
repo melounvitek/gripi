@@ -250,7 +250,7 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 
 **Phase 2: route to the computer you use.** Details under "Routing (phase 2)".
 1. Gateway: one link per approved browser, the use record, routing and refusals, pinned agent connections.
-2. Page and desktop: the `used` report on real input, the computer's name on the open poll.
+2. Page and desktop: the `used` report on real input and on the user's switches, prompt retries marked, the computer's name on the open poll.
 3. Docs and skill.
 
 **Phase 3: show a waiting approval on every device.** Details under "Waiting approvals (phase 3)". Needs the user's pick of the mockups first.
@@ -278,39 +278,42 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 
 **Links.**
 - `pcLinks.current` becomes a map by link ID. Each link is bound to the owner that opened it. Every poll, reply, close and status must match both, so a rotated `gripi_browser` cookie (`adminLogin`) gets 409 and the app opens a new link, rather than carrying the old link's waiters into the new identity.
+- `adminLogin` replaces the browser's token, so it ends the old owner's links at once (`pcLinks.endOwner`), failing their waiting requests, rather than leaving them live for 35 s.
 - Opening a link gets 409 only while another live link has the same owner, such as a copied profile or an app that crashed and restarted within 35 s. Other owners open freely.
-- The open poll may carry `"name"`, the computer's short hostname (`os.hostname()` up to the first dot, at most 64 characters, cleaned to one line), used only in refusals.
+- The open poll may carry `"name"`, the computer's short hostname (`os.hostname()` up to the first dot, at most 64 characters, cleaned to one line). Refusals name the computer with it now, and phase 3's waiting line and Push will too. A link that sent no name is "the user's computer" in refusals.
 - Stale timers, replies, closes and cancels work per link. `EndPCLink` ends all of them.
 
-**Use record.** In memory: session key → (owner, time of receipt). It is recorded only when PC access isn't refused (single-user mode, access approval on).
-- `app.prompt` records the sender for a browser request (`!commandRequest(request)`), from any client, before Pi gets the prompt. So `gripi send`, sub-session reports and workers never count, and a message from a phone records the phone.
-  - Automatic retries of a submission (`sendPromptRequest` in `app.js`) carry the milliseconds since its first attempt. The gateway dates the use that far back and records it only if it is newer than the current record. So a retry that gets through after a 409 still records, but a late one can't take routing back from a newer use elsewhere.
+**Use record.** In memory: session key → (owner, time of receipt). It is recorded only when PC access isn't refused (single-user mode, access approval on), and never for scratch sessions.
+- `app.prompt` records the sender for a browser request (`!commandRequest(request)`), from any client, at its start: after the session checks, and before a `!` command runs (`runBash`, which returns early) or Pi gets the prompt (`withSynchronizedClient`). So `gripi send`, sub-session reports and workers never count, and a message from a phone records the phone.
+  - Automatic retries of a submission (`sendPromptRequest` in `app.js`) follow only a 409 `session_operation_pending`, which the first attempt gets from `app.prompt` after it recorded. So retries carry `retry=1` and never record, and a late retry can't take routing back from a newer use elsewhere.
 - `PUT /web-push/presence` with `"used": true` and `focused` records the session for an owner that has a live link. So reading on a phone or in an app without PC access never moves it.
-  - The route checks the session like the PC routes do (`knownOrPendingSession`), and never records scratch sessions.
-- The page (`notification_presence.js`) reports `used` on trusted input while it shows a session and is looked at: non-repeating `keydown`, `pointerdown`, `wheel` and `touchstart`.
+  - The route checks the session like the PC routes do (`knownOrPendingSession`), and resolves a pending key as they do (`canonicalRPCSessionPath`) before recording, since `sessionStore.Canonical` doesn't.
+- The page (`notification_presence.js`) reports `used` on trusted input while it shows a session and is looked at: non-repeating `keydown`, `pointerdown` and `wheel`. Not `touchstart`: `pointerdown` covers touch, and both would report each tap.
   - It reports at once and never defers a use to a later report, which could land after a newer use elsewhere.
-  - Clicks and taps (`pointerdown`, `touchstart`) always report. Typing and scrolling (`keydown`, `wheel`) report at most every 2 s, dropping the rest.
+  - Clicks and taps (`pointerdown`) always report. Typing and scrolling (`keydown`, `wheel`) report at most every 2 s per session, dropping the rest.
   - Focus changes, visibility changes, reloads, heartbeats and reports after a gateway restart never carry `used`. Gripi's own `focus()` calls don't make trusted input.
-  - A click that opens another session counts for the session it opens, not the one being left.
-- Session keys are canonical. A new session's record under its pending key moves with it, atomically, when Pi saves it (`remapPendingRPCClient`), keeping the newer record if both exist.
+  - Input on the controls that open other sessions (the sidebar, the relation tree, the command palette) and keys with Ctrl or Meta (such as Ctrl+1…9) fires while the page still shows the session being left, so it doesn't count. Instead, a switch that the user starts (a sidebar session, the palette, Ctrl+1…9) passes `{ used: true }` through `switchSession` to `sessionChanged`, which reports the session it opens. Background refreshes (`refreshSessionInBackground`) don't. The relation tree's links load a new page, whose session counts from its first input.
+- Session keys are canonical. A new session's record under its pending key moves with it, atomically, in `remapPendingRPCClient`'s commit, next to `pendingSessions.Remap`, keeping the newer record if both exist.
 
 **Routing a request** (`/pc/ssh-agent`, and `/pc/run` later):
-1. Each agent connection is pinned to the link of its first message, with the session key that message used, because the desktop's guard state is per connection.
-   - The CLI marks a connection's first message (`open=1`). A message without a pin and without the mark is refused, so a connection whose pin was dropped can't start again on another link.
+1. Each agent connection is pinned, by its connection ID, to the link of its first message, with the session key that message used, because the desktop's guard state is per connection. Its later messages and `ssh_close` carry that key.
+   - The CLI marks a connection's first message (`open=1`). A message without a pin and without the mark is refused, so a connection whose pin was dropped can't start again on another link. So is `open=1` for a connection ID that has a pin, live or ended.
    - Each later message is routed again. If the route changed, such as after a message from the phone between the bind and the sign, the message is refused. Messages already queued finish.
    - A pin to a link that ended stays, so its messages fail rather than starting again on another link.
    - `ssh_close` goes only to the pinned link, with the pinned session key, and drops the pin. Pins are capped, dropping those of ended links first.
 2. Otherwise, use the session's own record.
 3. Without one, walk up `gatewayState.SessionParents()`, bounded and cycle-safe, to the nearest ancestor with a record. A sub-session's own record wins.
 4. An owner with a live link gets the request. Anything else is refused with 503, never sent to another link:
+   - no record and no live link at all: phase 1's "no computer is connected; …";
    - no record: "nobody has used this session in a Gripi desktop app with PC access since the gateway started; ask the user to open it in the desktop app on the computer that should do this, and click in it";
-   - an owner without a live link: "this session was last used on <name>, where the Gripi desktop app isn't connected for PC access; …". It says "in a Gripi window without PC access, such as a phone or a browser" when no link ever named that owner.
+   - an owner without a live link: "this session was last used on <name>, where the Gripi desktop app isn't connected for PC access; …", with "the user's computer" when its link sent no name. It says "in a Gripi window without PC access, such as a phone or a browser" when no link ever came from that owner.
 
 **No persistence.** A gateway restart ends every Pi turn, and a self-update waits until none runs, so the next turn usually starts with the user's own message, which records the computer. A turn that `gripi send` or a sub-session report starts is refused until the user uses the session. Persisting would add a state file with its remapping and deletion lifecycle for little gain.
 
 **Protocol changes:**
-- `POST /pc/link`: the open poll may carry `name`. 409 now means another live link of the same browser, or an unknown link.
+- `POST /pc/link`: the open poll may carry `name`. 409 now means another live link of the same browser, or an unknown link or one of another browser.
 - `PUT /web-push/presence`: may carry `"used": true`.
+- `POST /prompt`: the page's automatic retries carry `retry=1`.
 - `POST /pc/ssh-agent`: a connection's first message carries `open=1`. The CLI and the gateway ship together.
 - The messages to the desktop don't change. Only the 503 errors gain the routing reasons.
 
@@ -320,15 +323,16 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
   - focus reports, heartbeats without `used`, and `gripi send` don't move it;
   - a phone prompt (owner without a link) is refused, and the refusal names the last computer once its link is gone;
   - a sub-session follows its parent until its own use, and a phone prompt in the sub-session blocks the parent's computer;
-  - a pending key's record routes by the real path;
+  - a presence `used` report under a pending key routes by the real path, also when it comes after Pi saved the session (an internal test, as the fake Pi names its file at once);
   - a phone prompt between two messages of one agent connection refuses the later one, and `ssh_close` reaches only the first link;
-  - a connection pinned to an ended link fails, and doesn't move to a new link, also after its pin was dropped at the cap;
-  - a phone prompt that gets through on a retry after a 409 records, and a late retry doesn't win over a newer use;
+  - a connection pinned to an ended link fails, and doesn't move to a new link, also after its pin was dropped at the cap, and `open=1` again on a pinned connection is refused;
+  - a `!` command from a browser records, and a retry (`retry=1`) doesn't;
   - the same owner's second link gets 409, a reconnect with a new ID takes over, and a rotated cookie can't use the old link;
-  - `used` for an unknown or scratch session records nothing;
+  - `adminLogin` ends the browser's old link at once, failing its waiting requests;
+  - `used` from a browser without a link, or for a session the gateway doesn't know, records nothing, and neither does a scratch session (an internal test, as nothing else shows it);
   - after a restart, a live link alone isn't enough, and `gripi send` doesn't change that.
-- Frontend (`test/frontend_notification_presence.test.mjs`): trusted clicks report `used` at once every time, typing and scrolling at most every 2 s; untrusted events, focus changes and heartbeats don't; a click that opens a session reports that session; prompt retries carry their age.
-- E2E (`e2e/specs/pc_access.spec.js`): a click in the session page, then `gripi pc ssh` works; with two approved contexts, a click in B routes to B, and reloading A doesn't move it back.
+- Frontend (`test/frontend_notification_presence.test.mjs`): trusted clicks report `used` at once every time, typing and scrolling at most every 2 s; untrusted events, input on the controls that open sessions, Ctrl or Meta keys, focus changes and heartbeats don't; a user's switch reports the session it opens, not the one being left, and only once on touch.
+- E2E (`e2e/specs/pc_access.spec.js`): a click in the session page, then `gripi pc ssh` works; with two approved contexts, a click in B routes to B, and reloading A doesn't move it back. (`e2e/specs/prompt.spec.js`): prompt retries carry `retry=1`.
 - Node (`electron/pc_access.test.js`): only the open poll carries `name`.
 
 **Docs:**
@@ -354,7 +358,14 @@ When the user is on the phone and a computer asks for approval, the phone must s
   - Unlike `notifySudo`, the gateway doesn't skip it when a client shows the session: in single-user mode `notificationPresenceOwner` makes all clients one owner, and the approving desktop focuses itself, which would silence a phone in a pocket.
   - Each device's service worker already skips a notification for a session that this device shows in front (`web_push_worker.js`).
   - For `run`, the notification says "run a command" rather than the command, which would show on a locked screen.
-- **Mockups first.** Two or three directions at desktop and phone widths, from the project's real styles. The user picks one before implementation.
+- **Mockups first.** Two or three directions at desktop and phone widths, from the project's real styles. The user picks one before implementation. The user picked direction B: a slim line just above the editor, which stays usable.
+- **Notes from the review of phase 2's plan:**
+  - In `approveSign`, bail inside the approval turn when the request was aborted while queued, and check the grants again before posting `asking: true`.
+  - The browser's Cancel acts only while the waiter is asking, and answers 409 otherwise, so it never aborts an approved operation. It goes through the normal browser routes' same-origin protection, like the sudo cancel.
+  - `expires_in` is in seconds, clamped to 1 s … `PCReplyTimeout`.
+  - Web Push skips the approving link's own owner, whose app shows its native notification. `web_push_worker.js`'s focus check must also match the `/hermes` and `/` (default session) pages.
+  - The B line stays visible outside `.prompt-form`'s sudo and worker hide scope, never takes the editor's focus or binds Escape, can show more than one approval, and keeps cancelled IDs so that polls in flight don't bring them back. It needs server-rendered initial data and a first-tap touch test on Cancel.
+  - `live_output_bytes_test.go` needs updating for the new `/events` field.
 - **Tests:**
   - Go:
     - status route checks, and status refused for another owner, link or unknown request;
