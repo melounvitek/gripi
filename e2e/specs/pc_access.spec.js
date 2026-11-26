@@ -150,14 +150,23 @@ function gripi(args) {
 }
 
 // Turns PC access on for the gateway in the desktop app of context, answering each approval dialog with answer, or what
-// answer returns for the dialog's signal, and returns what the user saw there and the requests that reached it.
+// answer returns for the dialog's signal, and returns what the user saw there and the requests that reached it. Its
+// dropNetwork, until restoreNetwork, cuts the requests on their way and fails new ones, as a network drop does.
 async function allowPcAccess(context, gateway, answer) {
   const cookie = (await context.cookies(gateway.url)).map(({ name, value }) => `${name}=${value}`).join("; ");
-  const desktop = { seen: [], requests: [] };
+  let network = new AbortController();
+  const desktop = {
+    seen: [],
+    requests: [],
+    dropNetwork: () => network.abort(Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" })),
+    restoreNetwork: () => { network = new AbortController(); }
+  };
   const pcAccess = createPcAccess({
     // Like main.js, with the approved browser's cookies.
     request: async (target, pathname, body, signal) => {
-      const response = await linkRequest(new URL(pathname, target.url), body, { cookie, signal });
+      network.signal.throwIfAborted();
+      const signals = AbortSignal.any([network.signal, ...(signal ? [signal] : [])]);
+      const response = await linkRequest(new URL(pathname, target.url), body, { cookie, signal: signals });
       if (pathname === "/pc/link") desktop.requests.push(...(response.body?.messages || []).filter((message) => message.type === "ssh"));
       return response;
     },
@@ -369,6 +378,24 @@ test("a command allowed on the computer runs there, and gives back its output an
   // Without polkit's password dialog, which only logins ask for.
   expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command: `${which("sh")} -c "${script}"`, folder, root: false }]);
   await expect(line).toBeHidden();
+});
+
+test("a short network drop keeps the computer's dialog, and the command allowed meanwhile runs once Gripi answers again", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
+  test.setTimeout(40_000);
+  let approve;
+  const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, () => new Promise((resolve) => { approve = resolve; }));
+  await useSession(page, desktop);
+
+  const ran = gripi(["pc", "run", "--", "sh", "-c", "echo ran"]);
+  await expect.poll(() => desktop.seen.length, { timeout: 10_000 }).toBe(1);
+  desktop.dropNetwork();
+  approve("run");
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  desktop.restoreNetwork();
+
+  expect(await ran).toEqual({ code: 0, stdout: "ran\n", stderr: "" });
+  expect(desktop.seen).toHaveLength(1);
 });
 
 test("a phone cancels a command that the computer asks to run, which then doesn't", async ({ browser, page, baseURL, isMobile }) => {
