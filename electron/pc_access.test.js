@@ -54,7 +54,7 @@ async function settle() {
   for (let round = 0; round < 5; round++) await new Promise(setImmediate);
 }
 
-function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false } = {}) {
+function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan" } = {}) {
   const harness = { polls: [], posts: [], prompts: [], agents: [], auths: 0, time: 0 };
   harness.pc = createPcAccess({
     request(_gateway, path, body, signal) {
@@ -98,6 +98,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
     },
     readKnownHosts: async () => ["github.com host-gh\ngitlab.com host-gl", "@revoked host-bad"],
     now: () => harness.time,
+    hostname: () => hostname,
     sshAgentGuard: fakeGuard
   });
   harness.link = () => harness.polls.at(-1).body.link;
@@ -135,12 +136,12 @@ test("relays agent messages over one agent connection per relayed connection and
   assert.deepEqual(h.agents.map((agent) => agent.closed), [true, false]);
 });
 
-test("opens each link with its first poll and resumes it with the others", async (t) => {
+test("opens each link with its first poll, which names the computer, and resumes it with the others", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t);
   const link = h.link();
 
-  assert.deepEqual(h.polls[0].body, { link, open: true });
+  assert.deepEqual(h.polls[0].body, { link, open: true, name: "laptop" });
   await h.deliver();
   assert.deepEqual(h.polls[0].body, { link });
 
@@ -148,7 +149,13 @@ test("opens each link with its first poll and resumes it with the others", async
   await expectPollAfter(t, h, 10 * 1000);
 
   assert.notEqual(h.link(), link);
-  assert.deepEqual(h.polls[0].body, { link: h.link(), open: true });
+  assert.deepEqual(h.polls[0].body, { link: h.link(), open: true, name: "laptop" });
+});
+
+test("names the computer on one line of at most 64 characters", (t) => {
+  const h = setup(t, { hostname: `desk\n\u202e${"x".repeat(70)}.home.lan` });
+
+  assert.equal(h.polls[0].body.name, `desk${"x".repeat(60)}`);
 });
 
 test("passes on the guard's refusal without reaching the agent", async (t) => {

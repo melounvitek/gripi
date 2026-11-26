@@ -170,8 +170,11 @@ test("shows native assistant errors live and after reload", async ({ page }, tes
 
 test("automatically retries transient session contention", async ({ page }) => {
   let promptRequests = 0;
+  // A retry is marked, so that the gateway notes only the first attempt as where the user sent the message.
+  const retries = [];
   await page.route("**/prompt", async (route) => {
     promptRequests += 1;
+    retries.push(/name="retry"\r\n\r\n1\r\n/.test(route.request().postData()));
     if (promptRequests === 1) {
       await route.fulfill({
         status: 409,
@@ -197,6 +200,7 @@ test("automatically retries transient session contention", async ({ page }) => {
   await expectRunFinished(page);
   await expect(message(page, "user", prompts.retry)).toHaveCount(1);
   expect(promptRequests).toBeGreaterThanOrEqual(2);
+  expect(retries).toEqual([false, ...Array(promptRequests - 1).fill(true)]);
 });
 
 test("keeps a prompt rejected during tree navigation for explicit resubmission", async ({ page }) => {

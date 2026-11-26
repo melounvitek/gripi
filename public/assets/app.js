@@ -224,7 +224,7 @@ const commandPaletteController = new CommandPaletteController(document, {
   modalIsOpen,
   currentSessionPath,
   previousSessionPath: () => readMainSessionHistory().previous,
-  openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true }),
+  openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true, used: true }),
   // What the sidebar's row menu calls, for a row the palette lists instead.
   deleteSession: (session) => {
     sessionActionsController.target = null;
@@ -2192,6 +2192,8 @@ async function sendExportRequest(formData, { retryCancelled, onRetry }) {
 
 async function sendPromptRequest(action, formData, { retryCancelled, onRetry }) {
   for (let attempt = 0; ; attempt += 1) {
+    // The first attempt told the gateway where the user sent the message, which a late retry mustn't repeat.
+    if (attempt > 0) formData.set("retry", "1");
     const response = await fetch(action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
     if (response.type === "opaqueredirect") return { response, payload: null };
 
@@ -3031,7 +3033,8 @@ function detachSession(paths = [currentSessionPath()]) {
   return switchSession(detachedSessionFallbackUrl(paths), { push: true, focus: true });
 }
 
-async function switchSession(url, { push = true, focus = true, preserveScroll = false, findQuery = null } = {}) {
+// used marks a switch that the user starts, whose session they use at this computer.
+async function switchSession(url, { push = true, focus = true, preserveScroll = false, findQuery = null, used = false } = {}) {
   const scrollSnapshot = preserveScroll ? conversationScrollSnapshot() : null;
   persistStoredComposerDraft();
   sidebarController.invalidate({ clearSessionsLimit: true });
@@ -3073,7 +3076,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
       document.title = payload.title ? `${payload.title} · Gripi` : "Gripi";
     }
     sidebarController.closeMobile();
-    initializeSessionView({ focus, scrollSnapshot, findQuery });
+    initializeSessionView({ focus, scrollSnapshot, findQuery, used });
     if (refreshRequestVersion !== sidebarController.refreshRequestVersion) sidebarController.scheduleRefresh(0);
     return true;
   } catch (_error) {
@@ -3155,7 +3158,7 @@ async function openRecentSessionShortcut(shortcut) {
   const link = sidebarController.element?.querySelector(`.recent-session[data-session-shortcut="${shortcut}"]`);
   if (!link) return false;
   if (currentSessionPath() === link.dataset.sessionPath) return true;
-  const switched = await switchSession(link.href, { push: true, focus: true });
+  const switched = await switchSession(link.href, { push: true, focus: true, used: true });
   if (switched && currentSessionPath() !== link.dataset.sessionPath) window.location.href = link.href;
   return switched;
 }
@@ -3729,7 +3732,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  await switchSession(link.href, { push: true, focus: true, findQuery });
+  await switchSession(link.href, { push: true, focus: true, findQuery, used: true });
 });
 
 document.addEventListener("submit", async (event) => {
@@ -3869,9 +3872,9 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
   workerController.update(JSON.parse(liveOutput.dataset.worker || "null"), JSON.parse(liveOutput.dataset.workerNotices || "[]"));
 }
 
-function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {
+function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null, used = false } = {}) {
   const generation = sessionViewGeneration;
-  notificationPresenceController.sessionChanged();
+  notificationPresenceController.sessionChanged({ used });
   newSessionFormController.initialize();
   ensureNotificationWorker().catch(() => {});
   browserAccessController.resume();

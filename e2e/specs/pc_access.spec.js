@@ -5,7 +5,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { createPcAccess, linkRequest } from "../../electron/pc_access.js";
-import { sessions } from "../support/contract.mjs";
+import { ADMIN_PASSWORD, sessions } from "../support/contract.mjs";
+import { selectSession } from "../support/ui.mjs";
 
 // The test plays the desktop app with its real link core, and an SSH server and agent of its own on this machine,
 // which is the PC and the gateway at once.
@@ -20,7 +21,7 @@ let sshd;
 let agent;
 let knownHosts;
 let gitEnv;
-let pcAccess;
+let pcAccesses = [];
 const file = (name) => path.join(dir, name);
 const fingerprintOf = (name) => execFileSync("ssh-keygen", ["-lf", file(`${name}.pub`)], { encoding: "utf8" }).split(" ")[1];
 
@@ -83,8 +84,8 @@ test.beforeAll(async () => {
 });
 
 test.afterEach(async () => {
-  await pcAccess?.stopAll();
-  pcAccess = undefined;
+  await Promise.all(pcAccesses.map((pcAccess) => pcAccess.stopAll()));
+  pcAccesses = [];
 });
 
 test.afterAll(() => {
@@ -118,39 +119,56 @@ function gripiPc(command) {
   });
 }
 
-// Turns PC access on for the gateway, answering each approval dialog with answer, and returns what the user saw.
+// Turns PC access on for the gateway in the desktop app of context, answering each approval dialog with answer, and
+// returns what the user saw there and the requests that reached it.
 async function allowPcAccess(context, gateway, answer) {
   const cookie = (await context.cookies(gateway.url)).map(({ name, value }) => `${name}=${value}`).join("; ");
-  const seen = [];
-  pcAccess = createPcAccess({
+  const desktop = { seen: [], requests: [] };
+  const pcAccess = createPcAccess({
     // Like main.js, with the approved browser's cookies.
-    request: (target, pathname, body, signal) => linkRequest(new URL(pathname, target.url), body, { cookie, signal }),
+    request: async (target, pathname, body, signal) => {
+      const response = await linkRequest(new URL(pathname, target.url), body, { cookie, signal });
+      if (pathname === "/pc/link") desktop.requests.push(...(response.body?.messages || []).filter((message) => message.type === "ssh"));
+      return response;
+    },
     confirm: async ({ signal, ...prompt }) => {
-      seen.push(prompt);
+      desktop.seen.push(prompt);
       return answer;
     },
     authenticate: async () => {
-      seen.push("password");
+      desktop.seen.push("password");
       return { ok: true };
     },
     readKnownHosts: async () => [knownHosts]
   });
+  pcAccesses.push(pcAccess);
   pcAccess.start(gateway);
-  // The link is up, and the session's requests go to it once it was used there, when the agent's keys can be listed,
-  // which needs no approval.
-  const key = fingerprintOf("client");
-  await expect.poll(async () => {
-    await context.request.put("/web-push/presence", {
-      data: { client_id: "pc-e2e", session: sessionFile(), focused: true, used: true, sequence: Date.now() }
-    });
-    return (await gripiPc(["ssh-add", "-l"])).stdout;
-  }).toContain(key);
-  return seen;
+  return desktop;
 }
 
-test("a login allowed for 5 minutes pushes, then fetches without asking again", async ({ context, baseURL }) => {
+// Clicks in the session in page, which sends the session's requests to the computer of its desktop app once that app's
+// link is up. Listing the agent's keys, which needs no approval, then reaches that app.
+async function useSession(page, desktop) {
+  await page.goto(`/?session=${encodeURIComponent(sessionFile())}`);
+  await expect(page.getByRole("heading", { level: 1, name: sessions.history })).toBeVisible();
+  await expect.poll(async () => {
+    await page.locator("#conversation-scroll").click();
+    return reachedBy(desktop);
+  }).toBe(true);
+}
+
+// Lists the agent's keys with gripi pc ssh, and reports whether that reached desktop.
+async function reachedBy(desktop) {
+  const requests = desktop.requests.length;
+  const listed = await gripiPc(["ssh-add", "-l"]);
+  return listed.stdout.includes(fingerprintOf("client")) && desktop.requests.length > requests;
+}
+
+test("a login allowed for 5 minutes pushes, then fetches without asking again", async ({ context, page, baseURL }) => {
   const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
-  const seen = await allowPcAccess(context, gateway, "grant");
+  const desktop = await allowPcAccess(context, gateway, "grant");
+  await useSession(page, desktop);
+  const { seen } = desktop;
 
   const push = await gripiPc(["git", "push", "origin", "main"]);
   expect(push.code, push.stderr).toBe(0);
@@ -169,14 +187,48 @@ test("a login allowed for 5 minutes pushes, then fetches without asking again", 
   expect(seen).toEqual([prompt, "password"]);
 });
 
-test("a denied login fails the push with the PC's refusal", async ({ context, baseURL }) => {
-  const seen = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, "deny");
+test("a denied login fails the push with the PC's refusal", async ({ context, page, baseURL }) => {
+  const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, "deny");
+  await useSession(page, desktop);
+  const { seen } = desktop;
 
   const push = await gripiPc(["git", "push", "origin", "main:refs/heads/denied"]);
   expect(push.code).not.toBe(0);
   expect(push.stderr).toContain("gripi pc: denied on the PC\n");
   expect(seen).toEqual([expect.objectContaining({ login: os.userInfo().username })]);
   expect(git("--git-dir", file("repo.git"), "for-each-ref", "refs/heads/denied")).toBe("");
+});
+
+test("a session's requests go to the desktop app where it was last clicked in", async ({ browser, context, page, baseURL }) => {
+  const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
+  // Another computer's desktop app, which has an approved browser of its own.
+  const deskContext = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  try {
+    const desk = await deskContext.newPage();
+    await desk.goto("/");
+    await desk.getByPlaceholder("Admin password").fill(process.env.GRIPI_E2E_ADMIN_PASSWORD || ADMIN_PASSWORD);
+    await desk.getByRole("button", { name: "Approve this browser" }).click();
+    await expect(desk.getByRole("heading", { name: "Browser access required" })).toBeHidden();
+    const laptopApp = await allowPcAccess(context, gateway, "deny");
+    const deskApp = await allowPcAccess(deskContext, gateway, "deny");
+
+    await useSession(page, laptopApp);
+    // A switch to the session in the sidebar is a use of the session it opens, once the desk's link is up.
+    await desk.goto("/");
+    await expect.poll(async () => {
+      await selectSession(desk, sessions.prompt);
+      const used = desk.waitForRequest((request) => new URL(request.url()).pathname === "/web-push/presence" && request.postDataJSON().used);
+      await selectSession(desk, sessions.history);
+      await (await used).response();
+      return reachedBy(deskApp);
+    }).toBe(true);
+    const presence = page.waitForRequest((request) => new URL(request.url()).pathname === "/web-push/presence");
+    await page.reload();
+    await presence;
+    expect(await reachedBy(deskApp)).toBe(true);
+  } finally {
+    await deskContext.close();
+  }
 });
 
 function onPath(command) {
