@@ -186,6 +186,7 @@ test("a login allowed for 5 minutes pushes, then fetches without asking again", 
   expect(push.code, push.stderr).toBe(0);
   expect(git("--git-dir", file("repo.git"), "rev-parse", "main")).toBe(git("-C", file("work"), "rev-parse", "main"));
   const prompt = {
+    kind: "ssh",
     gateway,
     sessionName: sessions.history,
     key: { type: "ssh-ed25519", fingerprint: fingerprintOf("client"), comment: "pc-e2e-client" },

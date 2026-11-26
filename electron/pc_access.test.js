@@ -1,8 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { spawn } = require("node:child_process");
+const { execFileSync, spawn } = require("node:child_process");
 const { once } = require("node:events");
+const fs = require("node:fs");
 const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
 const { authenticateWithPolkit, createPcAccess, linkRequest } = require("./pc_access");
 
 const GATEWAY = { id: "home", name: "home-server", url: "https://home.example.test/" };
@@ -46,6 +49,25 @@ function ssh(id, message, fields = {}) {
   return { type: "ssh", id, session: SESSION, session_name: "Fix login redirect", connection: "c1", message, ...fields };
 }
 
+function run(id, argv, fields = {}) {
+  return { type: "run", id, session: SESSION, session_name: "Fix login redirect", argv, ...fields };
+}
+
+const SH = execFileSync("sh", ["-c", "command -v sh"], { encoding: "utf8" }).trim();
+
+// Whether a process has ended, which it has too while it waits for its parent to reap it.
+function ended(pid) {
+  try {
+    return fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ").at(-1).startsWith("Z");
+  } catch (_error) {
+    return true;
+  }
+}
+
+function base64(text) {
+  return Buffer.from(text).toString("base64");
+}
+
 function agentReply(message) {
   return Buffer.concat([Buffer.from("re:"), Buffer.from(message, "base64")]).toString("base64");
 }
@@ -54,13 +76,15 @@ async function settle() {
   for (let round = 0; round < 5; round++) await new Promise(setImmediate);
 }
 
-function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan" } = {}) {
-  const harness = { polls: [], posts: [], prompts: [], agents: [], auths: 0, time: 0 };
+function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan", starting = 200, lostResults = false } = {}) {
+  const harness = { polls: [], posts: [], prompts: [], agents: [], spawned: [], auths: 0, time: 0 };
   harness.pc = createPcAccess({
     request(_gateway, path, body, signal) {
       if (path !== "/pc/link") {
         harness.posts.push({ path, body });
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
+        if (body.starting) return Promise.resolve({ status: starting, body: {} });
+        if (lostResults && body.result) return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
       }
       return new Promise((resolve, reject) => {
@@ -99,6 +123,11 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
     readKnownHosts: async () => ["github.com host-gh\ngitlab.com host-gl", "@revoked host-bad"],
     now: () => harness.time,
     hostname: () => hostname,
+    spawn(command, args, options) {
+      const child = spawn(command, args, options);
+      harness.spawned.push({ command, args, options, child, printed: once(child.stdout, "data"), closed: once(child, "close") });
+      return child;
+    },
     sshAgentGuard: fakeGuard
   });
   harness.link = () => harness.polls.at(-1).body.link;
@@ -111,6 +140,15 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
   harness.answer = async (answer) => {
     harness.prompts.at(-1).answer(answer);
     await settle();
+  };
+  // Waits for what the PC does with a command, which looks at files first, and sends its result only once it ends.
+  harness.until = async (done) => {
+    while (!done()) await new Promise(setImmediate);
+  };
+  harness.prompted = (count) => harness.until(() => harness.prompts.length >= count);
+  harness.replied = async (count) => {
+    await harness.until(() => harness.replies().length >= count);
+    return harness.replies();
   };
   t.after(() => harness.pc.stopAll());
   harness.pc.start(GATEWAY);
@@ -189,6 +227,7 @@ test("asks with the request's details, escaped, and signs nothing when denied", 
 
   const { answer, signal, ...prompt } = h.prompts[0];
   assert.deepEqual(prompt, {
+    kind: "ssh",
     gateway: GATEWAY,
     sessionName: "Fix \\u202elogin\\u000a",
     key: { type: "ssh-ed25519", fingerprint: "SHA256:key-a", comment: "key-a@laptop" },
@@ -227,10 +266,19 @@ test("ignores malformed messages", async (t) => {
     ssh("7", "Cw"),
     ssh("8", ""),
     ssh("9", Buffer.alloc(256 * 1024 + 1, 11).toString("base64")),
-    ssh("10", Buffer.alloc(256 * 1024, 11).toString("base64"))
+    ssh("10", Buffer.alloc(256 * 1024, 11).toString("base64")),
+    run("11", []),
+    run("12", ["", "x"]),
+    run("13", Array(257).fill("x")),
+    run("14", ["x".repeat(4097)]),
+    run("15", "ls"),
+    run("16", ["ls", 5]),
+    run("17", ["ls"], { cwd: "" }),
+    run("18", ["ls"], { cwd: ["/"] })
   );
 
   assert.deepEqual(h.replies().map((reply) => reply.id), ["10"]);
+  assert.equal(h.prompts.length, 0);
   assert.equal(h.link(), link);
 });
 
@@ -542,6 +590,169 @@ for (const [failure, retryMs, fail] of failedPolls) {
     assert.deepEqual(h.replies().map((reply) => reply.id), ["1", "2"]);
   });
 }
+
+test("asks to run a command with the file that runs, the folder and the session, escaped, and runs nothing when denied", async (t) => {
+  const h = setup(t);
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-\u202e"));
+  t.after(() => fs.rmSync(folder, { recursive: true }));
+
+  await h.deliver(run("1", ["sh", "-c", "echo 'a\nb' \u202e", "--plain=word"], { session_name: "Fix \u202elogin", cwd: folder }));
+  await h.prompted(1);
+
+  const { answer, signal, ...prompt } = h.prompts[0];
+  assert.deepEqual(prompt, {
+    kind: "run",
+    gateway: GATEWAY,
+    sessionName: "Fix \\u202elogin",
+    command: `${SH} -c "echo 'a\\nb' \\u202e" --plain=word`,
+    folder: folder.replace("\u202e", "\\u202e")
+  });
+  assert.deepEqual(h.statuses(), [{ link: h.link(), id: "1", asking: true, summary: prompt.command, expires_in: 120 }]);
+
+  await h.answer("deny");
+
+  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "denied on the PC" }]);
+  assert.equal(h.auths, 0);
+  assert.equal(h.spawned.length, 0);
+});
+
+test("runs an approved command without a shell or input in a process group of its own, once the server says that it still waits", async (t) => {
+  const h = setup(t);
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
+  t.after(() => fs.rmSync(folder, { recursive: true }));
+
+  await h.deliver(run("1", ["sh", "-c", "pwd; read -r line || echo no input >&2; exit 3"], { cwd: folder }));
+  await h.prompted(1);
+  await h.answer("run");
+
+  assert.equal(h.auths, 1);
+  assert.deepEqual(h.spawned.map(({ command, args, options }) => ({ command, args, options })), [{
+    command: SH,
+    args: ["-c", "pwd; read -r line || echo no input >&2; exit 3"],
+    options: { cwd: folder, stdio: ["ignore", "pipe", "pipe"], detached: true }
+  }]);
+  assert.deepEqual(await h.replied(1), [{
+    link: h.link(),
+    id: "1",
+    result: { exit_code: 3, stdout: base64(`${folder}\n`), stderr: base64("no input\n"), truncated: false }
+  }]);
+  // The server hears that it may start before it does, and that the PC stopped asking before it ends.
+  assert.deepEqual(h.posts.map(({ body }) => Object.keys(body).find((key) => ["asking", "starting", "result"].includes(key)) + (body.asking === false ? ":false" : "")), ["asking", "starting", "asking:false", "result"]);
+});
+
+test("runs a command found on the PATH in the user's home folder without a folder, and passes on the signal that killed it", async (t) => {
+  const h = setup(t);
+
+  await h.deliver(run("1", ["sh", "-c", "pwd; kill -TERM $$"]));
+  await h.prompted(1);
+  await h.answer("run");
+
+  assert.equal(h.spawned[0].options.cwd, os.homedir());
+  assert.deepEqual(await h.replied(1), [{
+    link: h.link(),
+    id: "1",
+    result: { exit_code: 128 + 15, stdout: base64(`${os.homedir()}\n`), stderr: "", truncated: false }
+  }]);
+});
+
+test("refuses at once a folder or command that isn't there, or a command too long to show", async (t) => {
+  const h = setup(t);
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
+  t.after(() => fs.rmSync(folder, { recursive: true }));
+  fs.writeFileSync(path.join(folder, "notes.txt"), "");
+
+  await h.deliver(
+    run("1", ["true"], { cwd: path.join(folder, "missing") }),
+    run("2", ["true"], { cwd: "relative" }),
+    run("3", ["no-such-command-\u202e"]),
+    run("4", ["./notes.txt"], { cwd: folder }),
+    run("5", ["echo", "x".repeat(4096)])
+  );
+  await h.replied(5);
+
+  assert.deepEqual(h.replies().sort((a, b) => a.id.localeCompare(b.id)).map((reply) => reply.error), [
+    `the PC has no folder ${folder}/missing`,
+    "the PC has no folder relative",
+    "the PC has no command no-such-command-\\u202e on its PATH",
+    "the PC has no command ./notes.txt",
+    "the command is too long to show on the PC"
+  ]);
+  assert.equal(h.prompts.length, 0);
+});
+
+test("runs nothing that the server no longer waits for once the user approved it", async (t) => {
+  const h = setup(t, { starting: 404 });
+
+  await h.deliver(run("1", ["true"]));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.replied(1);
+
+  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "not run on the PC: Gripi no longer waits for it" }]);
+  assert.equal(h.spawned.length, 0);
+});
+
+test("a cancel during the password check runs nothing, nor asks the server to start", async (t) => {
+  let confirmed;
+  const h = setup(t, { authenticate: () => new Promise((resolve) => { confirmed = resolve; }) });
+
+  await h.deliver(run("1", ["true"]));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.deliver({ type: "cancel", id: "1" });
+  confirmed({ ok: true });
+  await settle();
+
+  assert.equal(h.posts.some(({ body }) => body.starting), false);
+  assert.deepEqual(h.replies(), []);
+  assert.equal(h.spawned.length, 0);
+});
+
+test("keeps 16 MiB of each output of a command and drops the rest", async (t) => {
+  const h = setup(t);
+
+  await h.deliver(run("1", ["sh", "-c", "head -c 16777217 /dev/zero; head -c 16777216 /dev/zero >&2"]));
+  await h.prompted(1);
+  await h.answer("run");
+
+  const [{ result }] = await h.replied(1);
+  assert.equal(Buffer.from(result.stdout, "base64").length, 16 * 1024 * 1024);
+  assert.equal(Buffer.from(result.stderr, "base64").length, 16 * 1024 * 1024);
+  assert.equal(result.truncated, true);
+});
+
+test("a cancel ends the command's process group, with SIGKILL 5 seconds after SIGTERM, and sends no result", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const script = (trap) => `${trap} sleep 30 & echo $!; wait`;
+
+  await h.deliver(run("1", ["sh", "-c", script("")]), run("2", ["sh", "-c", script("trap '' TERM;")]));
+  for (const count of [1, 2]) {
+    await h.prompted(count);
+    await h.answer("run");
+  }
+  await h.until(() => h.spawned.length === 2);
+  const sleeps = await Promise.all(h.spawned.map(async ({ printed }) => Number(String((await printed)[0]))));
+  await h.deliver({ type: "cancel", id: "1" }, { type: "cancel", id: "2" });
+
+  await h.spawned[0].closed;
+  assert.equal(h.spawned[1].child.exitCode, null);
+  t.mock.timers.tick(5000);
+  await h.spawned[1].closed;
+  for (const sleep of sleeps) assert.equal(ended(sleep), true);
+  await settle();
+  assert.deepEqual(h.replies(), []);
+});
+
+test("a result that can't reach the server becomes an error, as gripi pc run would wait for it for good", async (t) => {
+  const h = setup(t, { lostResults: true });
+
+  await h.deliver(run("1", ["true"]));
+  await h.prompted(1);
+  await h.answer("run");
+
+  assert.deepEqual((await h.replied(2)).at(-1), { link: h.link(), id: "1", error: "the command ran on the PC, but its result could not reach Gripi" });
+});
 
 test("a cancelled password check ends only once pkexec has exited", async () => {
   let pkexec;
