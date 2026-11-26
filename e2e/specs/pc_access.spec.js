@@ -16,6 +16,7 @@ test.skip(!root, "Needs the managed gateway, whose socket gripi uses");
 test.skip(Boolean(missingTool), `${missingTool} is missing`);
 
 const userAgentSocket = process.env.SSH_AUTH_SOCK;
+const userPath = process.env.PATH;
 let dir;
 let sshd;
 let agent;
@@ -81,6 +82,26 @@ test.beforeAll(async () => {
   git("init", "-q", "-b", "main", file("work"));
   git("-C", file("work"), "commit", "-q", "--allow-empty", "-m", "Pushed with the PC's key");
   git("-C", file("work"), "remote", "add", "origin", `127.0.0.1:${file("repo.git")}`);
+
+  // The PC's pkexec, which the link core finds on the PATH. Like pkexec while polkit's dialog is open, it records how
+  // it was run and waits for the test's answer: "authorize" runs the command, closing descriptor 3 as pkexec does, and
+  // "dismiss" exits as pkexec does when the user cancels polkit's dialog.
+  fs.mkdirSync(file("bin"));
+  fs.writeFileSync(file("bin/pkexec"), `#!/bin/sh
+printf '%s\\n' "$$" "$(pwd)" "$@" > "${file("pkexec-call.new")}"
+mv "${file("pkexec-call.new")}" "${file("pkexec-call")}"
+while [ ! -e "${file("pkexec-answer")}" ]; do sleep 0.02; done
+answer=$(cat "${file("pkexec-answer")}")
+rm "${file("pkexec-answer")}"
+if [ "$answer" = dismiss ]; then
+  echo "Error executing command as another user: Request dismissed" >&2
+  exit 126
+fi
+shift 2
+exec 3>&-
+exec "$@"
+`, { mode: 0o755 });
+  process.env.PATH = `${file("bin")}${path.delimiter}${userPath}`;
 });
 
 test.afterEach(async () => {
@@ -91,6 +112,7 @@ test.afterEach(async () => {
 test.afterAll(() => {
   if (userAgentSocket === undefined) delete process.env.SSH_AUTH_SOCK;
   else process.env.SSH_AUTH_SOCK = userAgentSocket;
+  process.env.PATH = userPath;
   sshd?.kill();
   agent?.kill();
   if (dir) fs.rmSync(dir, { recursive: true, force: true });
@@ -107,6 +129,7 @@ function gripiPc(command) {
   return gripi(["pc", "ssh", "--", ...command]);
 }
 
+// Runs gripi with args, and returns how it ended, with its process as child.
 function gripi(args) {
   const env = {
     ...process.env,
@@ -116,11 +139,14 @@ function gripi(args) {
   };
   delete env.HERMES_SESSION_ID;
   delete env.SSH_AUTH_SOCK;
-  return new Promise((resolve) => {
-    execFile(process.env.GRIPI_E2E_GRIPI, args, { cwd: file("work"), env, timeout: 15_000 }, (error, stdout, stderr) => {
+  let child;
+  const ended = new Promise((resolve) => {
+    child = execFile(process.env.GRIPI_E2E_GRIPI, args, { cwd: file("work"), env, timeout: 15_000 }, (error, stdout, stderr) => {
       resolve({ code: error ? error.code : 0, stdout, stderr });
     });
   });
+  ended.child = child;
+  return ended;
 }
 
 // Turns PC access on for the gateway in the desktop app of context, answering each approval dialog with answer, or what
@@ -340,7 +366,8 @@ test("a command allowed on the computer runs there, and gives back its output an
   approve("run");
 
   expect(await ran).toEqual({ code: 3, stdout: `${folder}\n`, stderr: "err\n" });
-  expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command: `${which("sh")} -c "${script}"`, folder }, "password"]);
+  // Without polkit's password dialog, which only logins ask for.
+  expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command: `${which("sh")} -c "${script}"`, folder, root: false }]);
   await expect(line).toBeHidden();
 });
 
@@ -366,6 +393,146 @@ test("a phone cancels a command that the computer asks to run, which then doesn'
     expect(cancelled.stderr).toBe("gripi pc: the gateway answered 502: cancelled in Gripi\n");
     await expect(line).toBeHidden();
     expect(fs.existsSync(touched)).toBe(false);
+  } finally {
+    await laptop.context().close();
+  }
+});
+
+// Waits for the PC's fake pkexec to ask, as polkit's dialog would, and returns its process and how it was run.
+async function pkexecAsked() {
+  await expect.poll(() => fs.existsSync(file("pkexec-call")), { timeout: 10_000 }).toBe(true);
+  const [pid, folder, ...args] = fs.readFileSync(file("pkexec-call"), "utf8").split("\n").slice(0, -1);
+  fs.rmSync(file("pkexec-call"));
+  return { pid: Number(pid), folder, args };
+}
+
+// Answers the PC's fake pkexec as the user would in polkit's dialog.
+function answerPkexec(answer) {
+  fs.writeFileSync(file("pkexec-answer.new"), answer);
+  fs.renameSync(file("pkexec-answer.new"), file("pkexec-answer"));
+}
+
+// Whether a process runs, also while it waits for its parent to reap it.
+function running(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a command allowed as root runs through pkexec in its folder, whose dialog asks for the password, and gives back its output and exit code", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
+  test.setTimeout(40_000);
+  let approve;
+  const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
+  const desktop = await allowPcAccess(context, gateway, () => new Promise((resolve) => { approve = resolve; }));
+  await useSession(page, desktop);
+  const folder = fs.realpathSync(dir);
+  const command = `${which("sh")} -c "${script}"`;
+
+  const ran = gripi(["pc", "run", "--root", "--cwd", folder, "--", "sh", "-c", script]);
+  const line = page.locator(".pc-approval");
+  await expect(line.locator(".pc-approval-text")).toHaveText(`Waiting for you on ${os.hostname().split(".")[0]}: run a command as root: ${command}`, { timeout: 10_000 });
+  approve("run");
+
+  // Gripi let it start before polkit's dialog, which runs it once the user authorizes it there.
+  await expect(line).toBeHidden();
+  expect(await pkexecAsked()).toEqual({ pid: expect.any(Number), folder, args: ["--disable-internal-agent", "--keep-cwd", which("sh"), "-c", script] });
+  answerPkexec("authorize");
+  expect(await ran).toEqual({ code: 3, stdout: `${folder}\n`, stderr: "err\n" });
+  expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command, folder, root: true }]);
+
+  const dismissed = gripi(["pc", "run", "--root", "--", "touch", file("dismissed")]);
+  await expect(line).toBeVisible({ timeout: 10_000 });
+  approve("run");
+  await pkexecAsked();
+  answerPkexec("dismiss");
+  expect(await dismissed).toEqual({
+    code: 1,
+    stdout: "",
+    stderr: "gripi pc: the gateway answered 502: not run as root on the PC: pkexec: Error executing command as another user: Request dismissed\n"
+  });
+  expect(fs.existsSync(file("dismissed"))).toBe(false);
+});
+
+test("a command as root whose gripi pc run ends while polkit's dialog is open never runs, as the computer stops pkexec", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
+  test.setTimeout(40_000);
+  const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, "run");
+  await useSession(page, desktop);
+  const touched = file("ended-as-root");
+
+  const ran = gripi(["pc", "run", "--root", "--", "touch", touched]);
+  const { pid } = await pkexecAsked();
+  ran.child.kill("SIGTERM");
+
+  await expect.poll(() => running(pid), { timeout: 10_000 }).toBe(false);
+  answerPkexec("authorize");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  fs.rmSync(file("pkexec-answer"), { force: true });
+  expect(fs.existsSync(touched)).toBe(false);
+});
+
+test("a phone cancels a command as root that the computer asks to run, so that polkit never asks", async ({ browser, page, baseURL, isMobile }) => {
+  test.skip(!isMobile, "Touch flow");
+  test.setTimeout(40_000);
+  const laptop = await approvedPage(browser);
+  try {
+    const desktop = await allowPcAccess(laptop.context(), { id: "e2e", name: "E2E gateway", url: baseURL }, (signal) => new Promise((resolve) => {
+      signal.addEventListener("abort", () => resolve("deny"));
+    }));
+    await useSession(laptop, desktop);
+    await page.goto(`/?session=${encodeURIComponent(sessionFile())}`);
+
+    const touched = file("cancelled-as-root");
+    const ran = gripi(["pc", "run", "--root", "--", "touch", touched]);
+    const line = page.locator(".pc-approval");
+    await expect(line.locator(".pc-approval-text")).toHaveText(`Waiting for you on ${os.hostname().split(".")[0]}: run a command as root: ${which("touch")} ${touched}`, { timeout: 10_000 });
+    await line.getByRole("button", { name: /^cancel / }).tap();
+
+    const cancelled = await ran;
+    expect(cancelled.code).toBe(1);
+    expect(cancelled.stderr).toBe("gripi pc: the gateway answered 502: cancelled in Gripi\n");
+    await expect(line).toBeHidden();
+    expect(fs.existsSync(file("pkexec-call"))).toBe(false);
+    expect(fs.existsSync(touched)).toBe(false);
+  } finally {
+    await laptop.context().close();
+  }
+});
+
+test("a phone's Cancel that comes once the computer may run a command as root says so, on the screen", async ({ browser, page, baseURL, isMobile }) => {
+  test.skip(!isMobile, "Touch flow");
+  test.setTimeout(40_000);
+  const laptop = await approvedPage(browser);
+  try {
+    let approve;
+    const desktop = await allowPcAccess(laptop.context(), { id: "e2e", name: "E2E gateway", url: baseURL }, () => new Promise((resolve) => { approve = resolve; }));
+    await useSession(laptop, desktop);
+    await page.goto(`/?session=${encodeURIComponent(sessionFile())}`);
+
+    const ran = gripi(["pc", "run", "--root", "--", "touch", file("late")]);
+    const line = page.locator(".pc-approval");
+    await expect(line).toBeVisible({ timeout: 10_000 });
+    // The phone doesn't hear yet that the computer let the command start, before polkit's dialog. The reload ends a poll
+    // in flight, and the page shows the line from its own data.
+    const events = (url) => url.pathname === "/events";
+    await page.route(events, (route) => route.abort());
+    await page.reload();
+    await expect(line).toBeVisible();
+    approve("run");
+    await pkexecAsked();
+    await line.getByRole("button", { name: /^cancel / }).tap();
+
+    const answer = line.locator(".pc-approval-error");
+    await expect(answer).toHaveText("The command may already run as root, which Gripi can't stop.");
+    const box = await answer.boundingBox();
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize().width);
+    await page.unroute(events);
+    answerPkexec("dismiss");
+    expect((await ran).code).toBe(1);
   } finally {
     await laptop.context().close();
   }

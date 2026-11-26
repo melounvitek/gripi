@@ -262,21 +262,45 @@ gripi pc run -- systemctl --user restart pipewire
 gripi pc run --cwd /home/you/Work/app -- sh -c 'git status | head'
 ```
 
-Each command asks on your computer first, as a [login](#using-your-computers-ssh-keys) does. The app shows the session, the command with the file that your computer’s `PATH` finds for it, such as `/usr/bin/systemctl`, the folder and "As: you", with **Deny** and **Run**; then polkit’s password dialog confirms that it is you. Enter and Escape choose **Deny**. Every command asks: there is no approval for 5 minutes. A denial, 2 minutes without an answer, or a request while 5 others wait refuses it, and `gripi pc run` exits with 1 and says why after `gripi pc:`.
+Each command asks on your computer first, as a [login](#using-your-computers-ssh-keys) does. The app shows the session, the command with the file that your computer’s `PATH` finds for it, such as `/usr/bin/systemctl`, the folder and "As: you", with **Deny** and **Run**. **Run** runs it, without polkit’s password dialog that a login asks for. Enter and Escape choose **Deny**. Every command asks: there is no approval for 5 minutes. A denial, 2 minutes without an answer, or a request while 5 others wait refuses it, and `gripi pc run` exits with 1 and says why after `gripi pc:`.
 
 The command runs in the folder that `--cwd` names on your computer, which must exist, or else in your home folder there, with the desktop app’s environment, without a shell and without input. Gripi passes on the first 16 MiB of each output. When `gripi pc run` ends first, such as when you stop the agent, the app sends the command’s process group SIGTERM, and SIGKILL 5 seconds later. So it does when you turn PC access off, and when the app quits, with SIGKILL after a second.
 
-While your computer asks, every Gripi client that shows the session says so in the line above the editor, with the command and **cancel**, as for a login. Your other devices with [Web Push notifications](#web-push-notifications) on get "Approve on laptop: run a command", without the command, which a locked screen would show. Right before your computer runs an approved command, it checks with the gateway that the command wasn't cancelled meanwhile. So **cancel** refuses a command until then, and afterwards answers that it already runs: Gripi never reports a command that runs as cancelled.
+While your computer asks, every Gripi client that shows the session says so in the line above the editor, with the command and **cancel**, as for a login. Your other devices with [Web Push notifications](#web-push-notifications) on get "Approve on laptop: run a command", without the command, which a locked screen would show. Right before your computer runs an approved command, it checks with the gateway that the command wasn't cancelled meanwhile. So **cancel** refuses a command until then, and afterwards the line says for a few seconds that it already runs: Gripi never reports a command that runs as cancelled.
 
 The commands go to the computer where you last used the session, as logins do. They need only the first step of the logins’ setup, PC access on in the desktop app, and the same gateway, and a desktop app that knows `gripi pc run`: an older one gets refused at once, with a hint to update it.
 
 Limits:
 
 - An approved command can do whatever you can on your computer, and its output reaches the gateway and the agent. Read the command, and the file that runs, before you run it.
+- A command needs only a click on **Run**, not your password. The dialog stops a compromised gateway, which can't click it, but not someone else at your computer while it is unlocked. Lock it when you leave it.
 - A process that the command starts in a process group of its own, such as with `setsid`, keeps running after the app ends the command.
 - A command has at most 256 words of up to 4096 bytes each, and the app refuses one that takes more than 4096 characters to show.
 - The app gives its output 40 seconds to reach the gateway once the command ends, which a slow upload of much output may take longer for. `gripi pc run` then fails, though the command ran, and says so; when even that can't reach the gateway, the app's link to it ends, and `gripi pc run` fails with that.
 - Hermes stops a terminal command after 180 seconds unless its model sets a longer timeout, and the wait for your answer counts.
+
+### As root
+
+With `--root`, the command runs as root on your computer, through polkit’s `pkexec`:
+
+```sh
+gripi pc run --root -- systemctl restart sshd
+```
+
+The app asks as for any command, but its dialog says "As: root", and Gripi’s line says "run a command as root" before the command. Your other devices get "Approve on laptop: run a command as root". **Run** then hands the command to polkit, whose own dialog shows it, shortened, and which runs it as soon as you enter your password there. Like logins, it follows polkit’s policy for running programs as root, rather than sudoers: by default, it asks for an administrator’s password every time, and a local polkit rule that skips the password skips it here too.
+
+Because polkit’s dialog runs the command, your computer checks with the gateway that it wasn’t cancelled right before that dialog shows. So **cancel** in Gripi works only while the app’s own dialog is open; afterwards the line says that the command may already run as root, and you cancel in polkit’s dialog instead. While polkit’s dialog is open, the app stops `pkexec`, which closes the dialog without running the command, when `gripi pc run` ends, PC access is turned off, the app’s link to the gateway is lost, the app quits or crashes, or 2 minutes have passed since its own dialog appeared.
+
+When `pkexec` doesn’t run the command, such as when you cancel polkit’s dialog or polkit refuses, `gripi pc run` exits with 1 and passes on `pkexec`’s words, such as `gripi pc: … not run as root on the PC: pkexec: Error executing command as another user: Request dismissed`. Otherwise, it gets the command’s output and exit code, as without `--root`. The command runs in the folder, which `pkexec` keeps, but with `pkexec`’s environment, such as root’s home folder and a standard `PATH`, rather than the app’s.
+
+`--root` needs a desktop app that knows it, and a polkit authentication agent, which desktop environments run. An older app gets it refused at once, with a hint to update it.
+
+Limits:
+
+- Once the command runs as root, nothing in Gripi can stop it: the app runs as you, so **cancel**, `gripi pc run` ending, turning PC access off or quitting the app leave it running. When the app’s link ends while it may run, `gripi pc run` says so. Once the app is gone, the command’s output goes nowhere, so a command that still prints may then fail. Stop it on your computer, such as with `sudo kill`.
+- Stopping `pkexec` when the app crashes is best effort: when the app crashes at the very moment you enter your password in polkit’s dialog, the command can still start.
+- Without a privileged helper, which would need root to install, Gripi tells `pkexec`’s refusals from the command’s own exit codes by their words: a command that exits with 126 or 127 without output and with an error that starts like `pkexec`’s counts as refused.
+- Root is root over your whole computer. Read the command, and the file that runs, before you enter your password.
 
 ## Pinned session directories
 
@@ -582,7 +606,7 @@ The timeout is a whole number of seconds; `0` disables it. The sweep interval se
 
 Turn notifications on with the bell icon in the sidebar header, which is orange when they are on and crossed out when they are off or blocked. On iPhone and iPad, this requires iOS/iPadOS 16.4 or newer and Gripi added to the Home Screen.
 
-Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A [`gripi sudo`](#running-commands-as-root) request notifies at once, with its command, unless the session is open and focused in one of them. So does a login or command that your computer asks you to approve for [`gripi pc ssh`](#using-your-computers-ssh-keys) or [`gripi pc run`](#running-commands-on-your-computer), on each device but that computer, also while a client shows the session; only a device that shows it in front skips it. For a command, it says only that your computer asks to run one. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, notifies and shows as unread only for the turns that its parent didn’t start, such as yours in the browser. The parent gets a report of its own turns instead.
+Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A [`gripi sudo`](#running-commands-as-root) request notifies at once, with its command, unless the session is open and focused in one of them. So does a login or command that your computer asks you to approve for [`gripi pc ssh`](#using-your-computers-ssh-keys) or [`gripi pc run`](#running-commands-on-your-computer), on each device but that computer, also while a client shows the session; only a device that shows it in front skips it. For a command, it says only that your computer asks to run one, and whether as root. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, notifies and shows as unread only for the turns that its parent didn’t start, such as yours in the browser. The parent gets a report of its own turns instead.
 
 Web Push requires HTTPS, such as [Tailscale Serve](examples.md#https-through-tailscale-serve). The gateway also needs outbound HTTPS access to the browser’s push service. Delivery is best-effort.
 

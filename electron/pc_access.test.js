@@ -83,6 +83,8 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
       if (path !== "/pc/link") {
         harness.posts.push({ path, body });
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
+        if (body.starting && starting === "late") return new Promise((resolve) => { harness.started = () => resolve({ status: 200, body: {} }); });
+        if (body.starting && starting === "held") return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
         if (body.starting) return starting ? Promise.resolve({ status: starting, body: {} }) : Promise.reject(new Error("the server did not answer in time"));
         if (lostResults && body.result || lostReplies && path === "/pc/link/reply") return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
@@ -151,6 +153,11 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
     }
   };
   harness.prompted = (count) => harness.until(() => harness.prompts.length >= count);
+  // Waits for ms of real time, also while the test mocks timers.
+  harness.waited = (ms) => {
+    const end = Date.now() + ms;
+    return harness.until(() => Date.now() >= end);
+  };
   // Waits for a process to end, sooner than a sleep 30 that nothing kills.
   harness.ended = (pid) => harness.until(() => ended(pid), 5000);
   harness.replied = async (count) => {
@@ -187,7 +194,7 @@ test("opens each link with its first poll, which names the computer, and resumes
   const h = setup(t);
   const link = h.link();
 
-  assert.deepEqual(h.polls[0].body, { link, open: true, name: "laptop", run: true });
+  assert.deepEqual(h.polls[0].body, { link, open: true, name: "laptop", run: true, root: true });
   await h.deliver();
   assert.deepEqual(h.polls[0].body, { link });
 
@@ -195,7 +202,7 @@ test("opens each link with its first poll, which names the computer, and resumes
   await expectPollAfter(t, h, 10 * 1000);
 
   assert.notEqual(h.link(), link);
-  assert.deepEqual(h.polls[0].body, { link: h.link(), open: true, name: "laptop", run: true });
+  assert.deepEqual(h.polls[0].body, { link: h.link(), open: true, name: "laptop", run: true, root: true });
 });
 
 test("names the computer on one line of at most 64 characters", (t) => {
@@ -281,7 +288,8 @@ test("ignores malformed messages", async (t) => {
     run("15", "ls"),
     run("16", ["ls", 5]),
     run("17", ["ls"], { cwd: "" }),
-    run("18", ["ls"], { cwd: ["/"] })
+    run("18", ["ls"], { cwd: ["/"] }),
+    run("19", ["ls"], { root: "yes" })
   );
 
   assert.deepEqual(h.replies().map((reply) => reply.id), ["10"]);
@@ -612,7 +620,8 @@ test("asks to run a command with the file that runs, the folder and the session,
     gateway: GATEWAY,
     sessionName: "Fix \\u202elogin",
     command: `${SH} -c "echo 'a\\nb' \\u202e" --plain=word`,
-    folder: folder.replace("\u202e", "\\u202e")
+    folder: folder.replace("\u202e", "\\u202e"),
+    root: false
   });
   assert.deepEqual(h.statuses(), [{ link: h.link(), id: "1", asking: true, summary: prompt.command, expires_in: 120 }]);
 
@@ -623,7 +632,7 @@ test("asks to run a command with the file that runs, the folder and the session,
   assert.equal(h.spawned.length, 0);
 });
 
-test("runs an approved command without a shell or input in a process group of its own, once the server says that it still waits", async (t) => {
+test("runs an approved command without polkit's password dialog, a shell or input in a process group of its own, once the server says that it still waits", async (t) => {
   const h = setup(t);
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
   t.after(() => fs.rmSync(folder, { recursive: true }));
@@ -632,7 +641,7 @@ test("runs an approved command without a shell or input in a process group of it
   await h.prompted(1);
   await h.answer("run");
 
-  assert.equal(h.auths, 1);
+  assert.equal(h.auths, 0);
   assert.deepEqual(h.spawned.map(({ command, args, options }) => ({ command, args, options })), [{
     command: SH,
     args: ["-c", "pwd; read -r line || echo no input >&2; exit 3"],
@@ -687,30 +696,31 @@ test("refuses at once a folder or command that isn't there, or a command too lon
   assert.equal(h.prompts.length, 0);
 });
 
-test("runs nothing that the server no longer waits for once the user approved it", async (t) => {
+test("runs nothing that the server no longer waits for once the user approved it, nor asks polkit for one as root", async (t) => {
   const h = setup(t, { starting: 404 });
+  const pkexec = fakePkexec(t);
 
-  await h.deliver(run("1", ["true"]));
-  await h.prompted(1);
-  await h.answer("run");
-  await h.replied(1);
+  for (const [count, root] of [[1, false], [2, true]]) {
+    await h.deliver(run(String(count), ["true"], { root }));
+    await h.prompted(count);
+    await h.answer("run");
+    await h.replied(count);
+  }
 
-  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "not run on the PC: Gripi no longer waits for it" }]);
+  assert.deepEqual(h.replies().map((reply) => reply.error), ["not run on the PC: Gripi no longer waits for it", "not run on the PC: Gripi no longer waits for it"]);
   assert.equal(h.spawned.length, 0);
+  assert.deepEqual(pkexec.calls(), []);
 });
 
-test("a cancel during the password check runs nothing, nor asks the server to start", async (t) => {
-  let confirmed;
-  const h = setup(t, { authenticate: () => new Promise((resolve) => { confirmed = resolve; }) });
+test("a cancel while the server is asked whether the command may start runs nothing", async (t) => {
+  const h = setup(t, { starting: "held" });
 
   await h.deliver(run("1", ["true"]));
   await h.prompted(1);
   await h.answer("run");
+  await h.until(() => h.posts.some(({ body }) => body.starting));
   await h.deliver({ type: "cancel", id: "1" });
-  confirmed({ ok: true });
-  await settle();
 
-  assert.equal(h.posts.some(({ body }) => body.starting), false);
   assert.deepEqual(h.replies(), []);
   assert.equal(h.spawned.length, 0);
 });
@@ -818,6 +828,227 @@ test("a link keeps refusals that don't reach Gripi before the server may have le
 
   assert.equal(h.posts.some(({ path }) => path === "/pc/link/close"), false);
   assert.deepEqual(h.polls.map((poll) => poll.body.link), [h.link()]);
+});
+
+// A fake pkexec, first on the PATH, which records its process, folder and arguments, and then waits for the test's
+// answer, as polkit's dialog does. "authorize" runs the command, closing descriptor 3 as pkexec does, and "dismiss",
+// "refuse" and "fail" exit with pkexec's words.
+function fakePkexec(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pc-pkexec-"));
+  const answer = path.join(dir, "answer");
+  fs.writeFileSync(path.join(dir, "pkexec"), `#!/bin/sh
+printf '%s\\n' "$(pwd)" "$@" > "${dir}/new.$$"
+mv "${dir}/new.$$" "${dir}/call.$$"
+while [ ! -e "${answer}" ]; do sleep 0.02; done
+answer=$(cat "${answer}")
+rm "${answer}"
+case $answer in
+dismiss) echo "Error executing command as another user: Request dismissed" >&2; exit 126 ;;
+refuse) printf 'Error executing command as another user: Not authorized\\n\\nThis incident has been reported.\\n' >&2; exit 127 ;;
+fail) echo "Error checking for authorization org.freedesktop.policykit.exec: no polkitd" >&2; exit 127 ;;
+esac
+shift 2
+exec 3>&-
+exec "$@"
+`, { mode: 0o755 });
+  const PATH = process.env.PATH;
+  process.env.PATH = `${dir}:${PATH}`;
+  t.after(() => {
+    process.env.PATH = PATH;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const calls = () => fs.readdirSync(dir).filter((name) => name.startsWith("call.")).map((name) => {
+    const [folder, ...args] = fs.readFileSync(path.join(dir, name), "utf8").split("\n").slice(0, -1);
+    return { pid: Number(name.slice(5)), folder, args };
+  });
+  return {
+    calls,
+    asked: (count = 1) => calls().length >= count,
+    answer(text) {
+      fs.writeFileSync(`${answer}.new`, text);
+      fs.renameSync(`${answer}.new`, answer);
+    }
+  };
+}
+
+test("asks to run a command as root, saying so, and runs it with pkexec in its folder, whose dialog is the password step, once the server says that it may start", async (t) => {
+  const h = setup(t);
+  const pkexec = fakePkexec(t);
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
+  t.after(() => fs.rmSync(folder, { recursive: true }));
+  const script = "pwd; read -r line || echo no input >&2; exit 3";
+
+  await h.deliver(run("1", ["sh", "-c", script], { cwd: folder, root: true }));
+  await h.prompted(1);
+  const { answer, signal, ...prompt } = h.prompts[0];
+  assert.deepEqual(prompt, { kind: "run", gateway: GATEWAY, sessionName: "Fix login redirect", command: `${SH} -c "${script}"`, folder, root: true });
+  assert.deepEqual(h.statuses(), [{ link: h.link(), id: "1", asking: true, summary: `run a command as root: ${SH} -c "${script}"`, expires_in: 120 }]);
+
+  await h.answer("run");
+  await h.until(() => pkexec.asked());
+  assert.deepEqual(pkexec.calls().map(({ folder, args }) => ({ folder, args })), [{ folder, args: ["--disable-internal-agent", "--keep-cwd", SH, "-c", script] }]);
+  assert.deepEqual(h.statuses().map((status) => Object.keys(status).find((key) => ["asking", "starting"].includes(key))), ["asking", "starting"]);
+
+  pkexec.answer("authorize");
+  assert.deepEqual(await h.replied(1), [{
+    link: h.link(),
+    id: "1",
+    result: { exit_code: 3, stdout: base64(`${folder}\n`), stderr: base64("no input\n"), truncated: false }
+  }]);
+  assert.equal(h.auths, 0);
+  assert.deepEqual(h.statuses().at(-1), { link: h.link(), id: "1", asking: false });
+});
+
+test("shows the next dialog once polkit's dialog of a command as root has ended, while the command still runs", async (t) => {
+  const h = setup(t);
+  const pkexec = fakePkexec(t);
+
+  await h.deliver(run("1", ["sh", "-c", "echo $$; exec sleep 30"], { root: true }));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => pkexec.asked());
+  await h.deliver(run("2", ["true"]));
+  await h.waited(100);
+  assert.equal(h.prompts.length, 1);
+
+  pkexec.answer("authorize");
+  await h.prompted(2);
+  const sleep = Number(String((await h.spawned[0].printed)[0]));
+  t.after(() => process.kill(sleep));
+  assert.equal(ended(sleep), false);
+  assert.deepEqual(h.statuses().filter((status) => status.id === "1").map((status) => status.asking ?? "starting"), [true, "starting", false]);
+});
+
+test("pkexec's refusals come back as errors with its words, unlike the command's own exit codes", async (t) => {
+  const h = setup(t);
+  const pkexec = fakePkexec(t);
+  const commands = [
+    ["dismiss", ["true"]],
+    ["refuse", ["true"]],
+    ["fail", ["true"]],
+    ["authorize", ["sh", "-c", "echo 'sh: 1: x: not found' >&2; exit 127"]],
+    ["authorize", ["sh", "-c", "echo 'Error executing /usr/bin/other: No such file or directory' >&2; exit 127"]],
+    ["authorize", ["sh", "-c", "echo out; echo 'Error executing command as another user: Request dismissed' >&2; exit 126"]]
+  ];
+
+  for (const [index, [answer, argv]] of commands.entries()) {
+    await h.deliver(run(String(index), argv, { root: true }));
+    await h.prompted(index + 1);
+    await h.answer("run");
+    await h.until(() => pkexec.asked(index + 1));
+    pkexec.answer(answer);
+    await h.replied(index + 1);
+  }
+
+  assert.deepEqual(h.replies().map(({ error, result }) => error ?? result.exit_code), [
+    "not run as root on the PC: pkexec: Error executing command as another user: Request dismissed",
+    "not run as root on the PC: pkexec: Error executing command as another user: Not authorized\n\nThis incident has been reported.",
+    "not run as root on the PC: pkexec: Error checking for authorization org.freedesktop.policykit.exec: no polkitd",
+    127,
+    127,
+    126
+  ]);
+});
+
+test("refuses a command as root at once on a PC without pkexec", async (t) => {
+  const h = setup(t);
+  const PATH = process.env.PATH;
+  process.env.PATH = fs.mkdtempSync(path.join(os.tmpdir(), "pc-path-"));
+  t.after(() => {
+    fs.rmSync(process.env.PATH, { recursive: true });
+    process.env.PATH = PATH;
+  });
+
+  await h.deliver(run("1", ["/bin/true"], { root: true }));
+
+  assert.deepEqual(await h.replied(1), [{ link: h.link(), id: "1", error: "running commands as root on the PC needs polkit's pkexec" }]);
+  assert.equal(h.prompts.length, 0);
+});
+
+// The wrapper's pipe closes also when the app crashes, which stops pkexec while polkit's dialog is open.
+test("the wrapper stops pkexec while polkit's dialog is open once the app's pipe closes, and the command never runs", async (t) => {
+  const h = setup(t);
+  const pkexec = fakePkexec(t);
+  const touched = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-")), "ran");
+  t.after(() => fs.rmSync(path.dirname(touched), { recursive: true }));
+
+  await h.deliver(run("1", ["touch", touched], { root: true }));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => pkexec.asked());
+  h.spawned[0].child.stdin.destroy();
+
+  await h.ended(pkexec.calls()[0].pid);
+  await h.spawned[0].closed;
+  pkexec.answer("authorize");
+  await h.waited(100);
+  assert.equal(fs.existsSync(touched), false);
+});
+
+const stoppedDialogs = [
+  ["a cancel", (_t, h) => h.deliver({ type: "cancel", id: "1" }), []],
+  ["the 2 minutes", (t) => t.mock.timers.tick(2 * 60 * 1000), ["denied on the PC: nobody answered there in 2 minutes"]]
+];
+for (const [stop, act, errors] of stoppedDialogs) {
+  test(`${stop} while polkit's dialog of a command as root is open stops pkexec, and the command never runs`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const h = setup(t);
+    const pkexec = fakePkexec(t);
+    const touched = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-")), "ran");
+    t.after(() => fs.rmSync(path.dirname(touched), { recursive: true }));
+
+    await h.deliver(run("1", ["touch", touched], { root: true }));
+    await h.prompted(1);
+    await h.answer("run");
+    await h.until(() => pkexec.asked());
+    await act(t, h);
+
+    await h.ended(pkexec.calls()[0].pid);
+    await h.spawned[0].closed;
+    await settle();
+    assert.deepEqual(h.replies().map((reply) => reply.error), errors);
+    pkexec.answer("authorize");
+    await h.waited(100);
+    assert.equal(fs.existsSync(touched), false);
+  });
+}
+
+test("stopping all, as the app quits, leaves a command as root to run once polkit authorized it, as the app can't stop it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const pkexec = fakePkexec(t);
+
+  await h.deliver(run("1", ["sh", "-c", "echo $$; exec sleep 30"], { root: true }));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => pkexec.asked());
+  pkexec.answer("authorize");
+  const sleep = Number(String((await h.spawned[0].printed)[0]));
+  t.after(() => process.kill(sleep));
+
+  // Without waiting to kill it, which it would do for a command as the user.
+  let stopped = false;
+  h.pc.stopAll().then(() => { stopped = true; });
+  await h.until(() => stopped, 5000);
+  await h.waited(100);
+  assert.equal(ended(sleep), false);
+});
+
+test("a cancel that comes before the server's answer that a command as root may start runs nothing, also when that answer is yes", async (t) => {
+  const h = setup(t, { starting: "late" });
+  const pkexec = fakePkexec(t);
+
+  await h.deliver(run("1", ["true"], { root: true }));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => h.started);
+  await h.deliver({ type: "cancel", id: "1" });
+  h.started();
+  await h.waited(100);
+
+  assert.deepEqual(pkexec.calls(), []);
+  assert.equal(h.spawned.length, 0);
+  assert.deepEqual(h.replies(), []);
 });
 
 test("a cancelled password check ends only once pkexec has exited", async () => {

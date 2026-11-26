@@ -77,14 +77,20 @@ test("cancel refuses the request, and a poll from before then doesn't bring it b
   assert.equal(element.children.length, 1);
 });
 
-test("a cancel that comes too late hides the line, and one that fails says so and may be tried again", async (t) => {
+test("a cancel that comes too late says why on the line for 10 seconds, and one that fails says so and may be tried again", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
-  const { controller, element, sent, lines, cancel } = fixture([reply(409, { error: "The request no longer waits for approval." }), new Error("offline")]);
+  const tooLate = "The command may already run as root, which Gripi can't stop.";
+  const { controller, element, sent, lines, cancel } = fixture([reply(409, { error: tooLate }), new Error("offline")]);
   controller.update([approval("one"), approval("two")]);
 
   await cancel(0);
-  assert.equal(element.children.length, 1);
-  controller.update([approval("one"), approval("two")]);
+  // Also once the gateway no longer lists it, and when a poll from before then still does.
+  for (const approvals of [[approval("two")], [approval("one"), approval("two")]]) {
+    controller.update(approvals);
+    assert.deepEqual(lines().map((line) => line.time), [tooLate, "expires in 2:00"]);
+    assert.equal(element.children[0].querySelector("button").hidden, true);
+  }
+  t.mock.timers.tick(10_000);
   assert.equal(element.children.length, 1);
 
   await cancel(0);
@@ -98,6 +104,21 @@ test("a cancel that comes too late hides the line, and one that fails says so an
   await cancel(0);
   assert.equal(element.children.length, 0);
   assert.deepEqual(sent.map((request) => request.body), ["id=one", "id=two", "id=two"]);
+});
+
+test("a line stays while its cancel waits for the gateway, so that a poll meanwhile can't make a late cancel look done", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
+  let answer;
+  const { controller, element, lines, cancel } = fixture([new Promise((resolve) => { answer = resolve; })]);
+  controller.update([approval("one")]);
+
+  await cancel(0);
+  controller.update([]);
+  assert.equal(element.children.length, 1);
+
+  answer(reply(409, { error: "The command already runs." }));
+  for (let tick = 0; tick < 3; tick++) await new Promise(setImmediate);
+  assert.deepEqual(lines().map((line) => line.time), ["The command already runs."]);
 });
 
 test("another session's view starts without the lines of the one before", (t) => {
