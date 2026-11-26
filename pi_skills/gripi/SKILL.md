@@ -11,7 +11,7 @@ When a command needs root, run `gripi sudo -- <command>`. The user types the pas
 
 ## SSH keys
 
-When ssh or Git over SSH fails with `Permission denied (publickey)` because the gateway lacks the key, or the user asks to use their computer's keys, run the command as `gripi pc ssh -- <command>`, such as `gripi pc ssh -- git push`. Check `gripi pc --help` first. The user approves each login on their computer. Never retry after a denial; tell the user.
+When ssh or Git over SSH fails with `Permission denied (publickey)` because the gateway lacks the key, or the user asks to use their computer's keys, run the command as `gripi pc ssh -- <command>`, such as `gripi pc ssh -- git push`. Check `gripi pc --help` first. The user approves each login on their computer. Never retry after a denial or a cancel; tell the user.
 
 The logins go to the computer where the user last used this session. When `gripi pc` refuses because the session was last used elsewhere, such as on a phone, or not since the gateway started, don't retry: ask the user to open this session in the desktop app on the computer that should log in, and to click in it.
 
