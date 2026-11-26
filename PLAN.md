@@ -259,11 +259,12 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 3. Page: the line above the editor (direction B), and the service worker's focus check.
 4. Docs and skill.
 
-**Phase 4: `gripi pc run`** as the PC user. Details under "Running commands (phase 4)".
-- Before it: Cancel from Gripi wins until the gateway hears the desktop's `asking: false` or reply, so it can refuse a login that the user just allowed on the PC (phase 3 accepted that for SSH, which only refuses). A run has side effects on the PC, so decide whether the desktop confirms with the gateway before it spawns.
-1. The run dialog, the runner with output caps and cancel, and a cwd that must be absolute and exist (home by default). `argv[0]` is resolved on the PC's PATH, and the dialog shows the resolved path.
-2. Workers: both socket routes go into `workerRoutes`, so sessions on workers can use the PC too. Routing uses main's session key, and the routes check the session's placement with `reachesSession`.
-3. Docs: when the gateway's `~/.ssh/config` names a key for a host with `IdentitiesOnly yes`, `gripi pc ssh` uses only that key there.
+**Phase 4: `gripi pc run` as the PC user. Done.** Details under "Running commands (phase 4)".
+- The race: Cancel from Gripi wins until the gateway hears the desktop's `asking: false` or reply, which phase 3 accepted for SSH, which only refuses. A run has side effects on the PC, so the user decided that the desktop confirms with the gateway right before it spawns (`starting`).
+1. Gateway: the `/pc/run` route, the `run` message and its result, the `starting` status, and a Push that says only "run a command".
+2. Desktop: the run dialog with `argv[0]` resolved on the PC's PATH, a cwd that must be absolute and exist (home by default), the start check, and the runner with output caps and the process group's kill.
+3. Workers: both socket routes go into `workerRoutes`, so sessions on workers can use the PC too. Routing uses main's session key, and the routes check the requesting session's placement with `reachesSession`.
+4. Docs and skill, also that when the gateway's `~/.ssh/config` names a key for a host with `IdentitiesOnly yes`, `gripi pc ssh` uses only that key there.
 
 **Phase 5: `--root`.**
 - It runs `pkexec --disable-internal-agent --keep-cwd <resolved executable> <args>` with the spawn's cwd. polkit's dialog, which names the executable, is the auth step.
