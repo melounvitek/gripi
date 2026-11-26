@@ -298,9 +298,9 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 **Routing a request** (`/pc/ssh-agent`, and `/pc/run` later):
 1. Each agent connection is pinned, by its connection ID, to the link of its first message, with the session key that message used, because the desktop's guard state is per connection. Its later messages and `ssh_close` carry that key.
    - The CLI marks a connection's first message (`open=1`). A message without a pin and without the mark is refused, so a connection whose pin was dropped can't start again on another link. So is `open=1` for a connection ID that has a pin, live or ended.
-   - Each later message is routed again. If the route changed, such as after a message from the phone between the bind and the sign, the message is refused. Messages already queued finish.
+   - Each later message is routed again, by the session of the connection's first message, wherever a new session moved since, whichever session the message names. If the route changed, such as after a message from the phone between the bind and the sign, the message is refused. Messages already queued finish.
    - A pin to a link that ended stays, so its messages fail rather than starting again on another link.
-   - `ssh_close` goes only to the pinned link, with the pinned session key, and drops the pin. Pins are capped, dropping those of ended links first, then the oldest, whose link gets an `ssh_close` so that it doesn't count the connection against its limit.
+   - `ssh_close` goes only to the pinned link, with the pinned session key, and drops the pin. Pins are capped: at the cap, those of ended links go, and without any, a new connection is refused, as open ones may still wait for replies.
 2. Otherwise, use the session's own record.
 3. Without one, walk up `gatewayState.SessionParents()`, bounded and cycle-safe, to the nearest ancestor with a record. A sub-session's own record wins.
 4. An owner with a live link gets the request. Anything else is refused with 503, never sent to another link:
@@ -325,7 +325,7 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
   - a sub-session follows its parent until its own use, and a phone prompt in the sub-session blocks the parent's computer;
   - a presence `used` report under a pending key routes by the real path, also when it comes after Pi saved the session (an internal test, as the fake Pi names its file at once);
   - a phone prompt between two messages of one agent connection refuses the later one, and `ssh_close` reaches only the first link;
-  - a connection pinned to an ended link fails, and doesn't move to a new link, also after its pin was dropped at the cap, `open=1` again on a pinned connection is refused, and a live connection dropped at the cap is closed on its link;
+  - a connection pinned to an ended link fails, and doesn't move to a new link, also after its pin was dropped at the cap, `open=1` again on a pinned connection is refused, a later message routes by the connection's session also when it names another one, and a new connection beyond the cap is refused while none ended;
   - a `!` command from a browser records, a retry (`retry=1`) doesn't, a message counts also when the gateway refuses it, even with a retryable 409 from finding the session (an internal test), and a click elsewhere during a message's upload wins;
   - the same owner's second link gets 409, a reconnect with a new ID takes over, and a rotated cookie can't use the old link;
   - `adminLogin` ends the browser's old link at once, failing its waiting requests;

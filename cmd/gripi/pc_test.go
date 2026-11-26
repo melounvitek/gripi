@@ -766,7 +766,9 @@ func TestAnAgentConnectionStaysWithTheComputerOfItsFirstMessage(t *testing.T) {
 	laptop, _ := pcDesktop(t, address, "laptop", answeredBy("laptop"))
 	desk, _ := pcDesktopOn(t, address, pcDeskToken, "desk", "desk", answeredBy("desk"))
 	relay := pcRelay(t, alpha)
+	beta := filepath.Join(filepath.Dir(alpha), "beta.jsonl")
 	pcPresence(t, pcBrowserToken, alpha, true)
+	pcPresence(t, pcBrowserToken, beta, true)
 
 	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "connection", true)); err == nil || err.Error() != "laptop" {
 		t.Fatalf("the first message = %v", err)
@@ -775,8 +777,11 @@ func TestAnAgentConnectionStaysWithTheComputerOfItsFirstMessage(t *testing.T) {
 		t.Fatalf("a second first message = %v", err)
 	}
 	pcPresence(t, pcDeskToken, alpha, true)
-	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "connection", false)); err == nil || !strings.HasPrefix(err.Error(), "the session was used on another computer during this SSH agent connection") {
-		t.Fatalf("a message after a click on the desk = %v", err)
+	// Also in another session's name, which still goes to the laptop.
+	for _, session := range []string{alpha, beta} {
+		if _, err := relay.post(context.Background(), pcAgentMessage(session, "connection", false)); err == nil || !strings.HasPrefix(err.Error(), "the session was used on another computer during this SSH agent connection") {
+			t.Fatalf("a message in %s after a click on the desk = %v", session, err)
+		}
 	}
 	pcPrompt(t, pcPhoneToken, alpha, pcMessageText)
 	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "connection", false)); err == nil || !strings.HasPrefix(err.Error(), "this session was last used in a Gripi window without PC access") {
@@ -831,12 +836,9 @@ func TestAnAgentConnectionOfAnEndedLinkNeverMovesToAnother(t *testing.T) {
 			t.Fatalf("the second link got %+v", request)
 		}
 	}
-	// Without connections of ended links to drop, the oldest goes, and its link, which counts it, closes it.
-	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "last", true)); err == nil || err.Error() != "second" {
-		t.Fatalf("the first message of last = %v", err)
-	}
-	if closed := nextPCMessage(t, messages, "ssh_close"); closed.Connection != "later" {
-		t.Fatalf("the second link got %+v", closed)
+	// Open connections may still wait for replies, so without any of ended links to drop, a new one is refused.
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "last", true)); err == nil || err.Error() != "too many SSH agent connections are open for PC access" {
+		t.Fatalf("the first message of a connection beyond the limit = %v", err)
 	}
 }
 

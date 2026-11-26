@@ -88,7 +88,7 @@ func TestAUseOfANewSessionFollowsItWhenPiSavesIt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		link, _, err := app.pcLinks.route(nil, session, connection, true)
+		link, _, err := app.pcLinks.route(nil, session, connection, true, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestAMessageThatThePageRetriesCountsAtOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if link, _, err := app.pcLinks.route(nil, session, "connection", true); err != nil || link.id != "laptop" {
+	if link, _, err := app.pcLinks.route(nil, session, "connection", true, nil); err != nil || link.id != "laptop" {
 		t.Fatalf("the session routes to %v (%v)", link, err)
 	}
 }

@@ -51,6 +51,7 @@ var (
 	errPCMoved    = errors.New("the session was used on another computer during this SSH agent connection; run the command again")
 	errPCNotOpen  = errors.New("this SSH agent connection didn't start on the computer that the session uses; run the command again")
 	errPCReopened = errors.New("this SSH agent connection is already open")
+	errPCPinned   = errors.New("too many SSH agent connections are open for PC access")
 )
 
 // pcMessage is a message of the gateway to the desktop app.
@@ -101,8 +102,7 @@ type pcLinks struct {
 	// uses are the latest use of each session, by its canonical key.
 	uses map[string]pcUse
 	// pins keep each agent connection on the link of its first message, by the connection's ID.
-	pins   map[string]pcPin
-	pinned uint64
+	pins map[string]pcPin
 	// stopped refuses links once the gateway stops.
 	stopped bool
 }
@@ -118,7 +118,6 @@ type pcUse struct {
 type pcPin struct {
 	link    *pcLink
 	session string
-	order   uint64
 }
 
 // send queues a message for the link's next poll. Callers hold mu.
@@ -263,10 +262,15 @@ func (links *pcLinks) remapUse(from, to string, remap func()) {
 // route finds the link for a message of an agent connection in session, whose parents are by session key, and returns
 // it with the session key to send. The link is that of the browser where session was last used, or else the nearest
 // of its parents. A connection stays on the link of its first message, which opens it, so that the desktop app sees
-// all its messages. A request never goes to another link.
-func (links *pcLinks) route(parents map[string]string, session, connection string, open bool) (*pcLink, string, error) {
+// all its messages, and with that message's session, which resolve finds where a new one moved. A request never goes
+// to another link.
+func (links *pcLinks) route(parents map[string]string, session, connection string, open bool, resolve func(string) string) (*pcLink, string, error) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
+	pin, pinned := links.pins[connection]
+	if pinned {
+		session = resolve(pin.session)
+	}
 	use, used := links.uses[session]
 	for key, step := session, 0; !used && step < 8; step++ {
 		if key = parents[key]; key == "" {
@@ -287,7 +291,6 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 		}
 		return nil, "", fmt.Errorf("this session was last used on %s, where the Gripi desktop app isn't connected for PC access; ask the user to open the app there, or to open the session in the desktop app on the computer that should do this, and click in it", cmp.Or(name, "the user's computer"))
 	}
-	pin, pinned := links.pins[connection]
 	switch {
 	case pinned && open:
 		return nil, "", errPCReopened
@@ -300,27 +303,20 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 	case !open:
 		return nil, "", errPCNotOpen
 	}
-	// The pins of connections whose gripi was killed stay, so the oldest go once there are too many, those of links
-	// that ended first.
+	// The pins of links that ended, which their connections' messages fail on, go once there are too many. Others may
+	// still wait for replies.
 	for key, pin := range links.pins {
 		if len(links.pins) >= PCPins && !links.live(pin.link) {
-			links.unpin(key)
+			delete(links.pins, key)
 		}
 	}
-	for len(links.pins) >= PCPins {
-		oldest := ""
-		for key, pin := range links.pins {
-			if oldest == "" || pin.order < links.pins[oldest].order {
-				oldest = key
-			}
-		}
-		links.unpin(oldest)
+	if len(links.pins) >= PCPins {
+		return nil, "", errPCPinned
 	}
 	if links.pins == nil {
 		links.pins = make(map[string]pcPin)
 	}
-	links.pinned++
-	links.pins[connection] = pcPin{link: link, session: session, order: links.pinned}
+	links.pins[connection] = pcPin{link: link, session: session}
 	return link, session, nil
 }
 
@@ -384,15 +380,10 @@ func (links *pcLinks) reply(owner string, reply pcLinkBody) int {
 func (links *pcLinks) closeConnection(connection string) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
-	if _, pinned := links.pins[connection]; pinned {
-		links.unpin(connection)
+	pin, pinned := links.pins[connection]
+	if !pinned {
+		return
 	}
-}
-
-// unpin forgets a pinned agent connection, and closes it on its link, if that hasn't ended, which counts it until then.
-// Callers hold mu.
-func (links *pcLinks) unpin(connection string) {
-	pin := links.pins[connection]
 	delete(links.pins, connection)
 	if links.live(pin.link) {
 		pin.link.send(pcMessage{Type: "ssh_close", Session: pin.session, Connection: connection})
@@ -584,7 +575,10 @@ func (app *application) pcSSHAgent(response http.ResponseWriter, request *http.R
 		writeInternalError(response, "read session parents", err)
 		return
 	}
-	link, key, err := app.pcLinks.route(parents, session, connection, open)
+	link, key, err := app.pcLinks.route(parents, session, connection, open, func(pinned string) string {
+		resolved, _, _ := app.resolveOwnedPendingPath(request, pinned)
+		return resolved
+	})
 	if err != nil {
 		writeJSONStatus(response, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
