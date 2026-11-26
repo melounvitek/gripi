@@ -88,7 +88,8 @@ test.beforeAll(async () => {
   // "dismiss" exits as pkexec does when the user cancels polkit's dialog.
   fs.mkdirSync(file("bin"));
   fs.writeFileSync(file("bin/pkexec"), `#!/bin/sh
-printf '%s\\n' "$(pwd)" "$@" > "${file("pkexec-call")}"
+printf '%s\\n' "$$" "$(pwd)" "$@" > "${file("pkexec-call.new")}"
+mv "${file("pkexec-call.new")}" "${file("pkexec-call")}"
 while [ ! -e "${file("pkexec-answer")}" ]; do sleep 0.02; done
 answer=$(cat "${file("pkexec-answer")}")
 rm "${file("pkexec-answer")}"
@@ -128,6 +129,7 @@ function gripiPc(command) {
   return gripi(["pc", "ssh", "--", ...command]);
 }
 
+// Runs gripi with args, and returns how it ended, with its process as child.
 function gripi(args) {
   const env = {
     ...process.env,
@@ -137,11 +139,14 @@ function gripi(args) {
   };
   delete env.HERMES_SESSION_ID;
   delete env.SSH_AUTH_SOCK;
-  return new Promise((resolve) => {
-    execFile(process.env.GRIPI_E2E_GRIPI, args, { cwd: file("work"), env, timeout: 15_000 }, (error, stdout, stderr) => {
+  let child;
+  const ended = new Promise((resolve) => {
+    child = execFile(process.env.GRIPI_E2E_GRIPI, args, { cwd: file("work"), env, timeout: 15_000 }, (error, stdout, stderr) => {
       resolve({ code: error ? error.code : 0, stdout, stderr });
     });
   });
+  ended.child = child;
+  return ended;
 }
 
 // Turns PC access on for the gateway in the desktop app of context, answering each approval dialog with answer, or what
@@ -393,14 +398,28 @@ test("a phone cancels a command that the computer asks to run, which then doesn'
   }
 });
 
-// Answers the PC's fake pkexec, once it asks, as the user would in polkit's dialog, and returns how it was run.
-async function answerPkexec(answer) {
+// Waits for the PC's fake pkexec to ask, as polkit's dialog would, and returns its process and how it was run.
+async function pkexecAsked() {
   await expect.poll(() => fs.existsSync(file("pkexec-call")), { timeout: 10_000 }).toBe(true);
-  const [folder, ...args] = fs.readFileSync(file("pkexec-call"), "utf8").split("\n").slice(0, -1);
+  const [pid, folder, ...args] = fs.readFileSync(file("pkexec-call"), "utf8").split("\n").slice(0, -1);
   fs.rmSync(file("pkexec-call"));
+  return { pid: Number(pid), folder, args };
+}
+
+// Answers the PC's fake pkexec as the user would in polkit's dialog.
+function answerPkexec(answer) {
   fs.writeFileSync(file("pkexec-answer.new"), answer);
   fs.renameSync(file("pkexec-answer.new"), file("pkexec-answer"));
-  return { folder, args };
+}
+
+// Whether a process runs, also while it waits for its parent to reap it.
+function running(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test("a command allowed as root runs through pkexec in its folder, whose dialog asks for the password, and gives back its output and exit code", async ({ context, page, baseURL, isMobile }) => {
@@ -420,20 +439,40 @@ test("a command allowed as root runs through pkexec in its folder, whose dialog 
 
   // Gripi let it start before polkit's dialog, which runs it once the user authorizes it there.
   await expect(line).toBeHidden();
-  expect(await answerPkexec("authorize")).toEqual({ folder, args: ["--disable-internal-agent", "--keep-cwd", which("sh"), "-c", script] });
+  expect(await pkexecAsked()).toEqual({ pid: expect.any(Number), folder, args: ["--disable-internal-agent", "--keep-cwd", which("sh"), "-c", script] });
+  answerPkexec("authorize");
   expect(await ran).toEqual({ code: 3, stdout: `${folder}\n`, stderr: "err\n" });
   expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command, folder, root: true }]);
 
   const dismissed = gripi(["pc", "run", "--root", "--", "touch", file("dismissed")]);
   await expect(line).toBeVisible({ timeout: 10_000 });
   approve("run");
-  await answerPkexec("dismiss");
+  await pkexecAsked();
+  answerPkexec("dismiss");
   expect(await dismissed).toEqual({
     code: 1,
     stdout: "",
     stderr: "gripi pc: the gateway answered 502: not run as root on the PC: pkexec: Error executing command as another user: Request dismissed\n"
   });
   expect(fs.existsSync(file("dismissed"))).toBe(false);
+});
+
+test("a command as root whose gripi pc run ends while polkit's dialog is open never runs, as the computer stops pkexec", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
+  test.setTimeout(40_000);
+  const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, "run");
+  await useSession(page, desktop);
+  const touched = file("ended-as-root");
+
+  const ran = gripi(["pc", "run", "--root", "--", "touch", touched]);
+  const { pid } = await pkexecAsked();
+  ran.child.kill("SIGTERM");
+
+  await expect.poll(() => running(pid), { timeout: 10_000 }).toBe(false);
+  answerPkexec("authorize");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  fs.rmSync(file("pkexec-answer"), { force: true });
+  expect(fs.existsSync(touched)).toBe(false);
 });
 
 test("a phone cancels a command as root that the computer asks to run, so that polkit never asks", async ({ browser, page, baseURL, isMobile }) => {

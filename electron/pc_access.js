@@ -35,17 +35,18 @@ const LINK_TAKEN_RETRY_MS = 10 * 1000;
 const REFUSED_RETRY_MS = 60 * 1000;
 const AGENT_HINT = 'start one with "systemctl --user enable --now ssh-agent" and load your keys with "ssh-add"';
 // Runs pkexec, whose path comes first, for a command as root, in the folder, which pkexec keeps, and without input. The
-// wrapper runs as the user. The app's pipe on its input closes when the app stops the command or ends, also when it
-// crashes, and the wrapper then stops pkexec, and with it polkit's dialog, which pkexec, being setuid, wouldn't do on its
-// own. That works only while pkexec waits, as it runs as the user until polkit authorizes it, and then runs the command
-// as root. pkexec closes descriptor 3 when it runs the command or exits, which tells the app that polkit's dialog ended.
+// wrapper runs as the user. When the app's pipe on its input closes, as the app stops the command or ends, also when it
+// crashes, the wrapper stops pkexec, and with it polkit's dialog, which pkexec, being setuid, wouldn't do on its own.
+// That works only while pkexec waits, as it runs as the user until polkit authorizes it, and then runs the command as
+// root. pkexec closes descriptor 3 when it runs the command or exits, which tells the app that polkit's dialog ended,
+// and the app then sends a line, after which the wrapper stops nothing.
 const ROOT_WRAPPER = `exec 4<&0 </dev/null
 pkexec=$1
 shift
 "$pkexec" --disable-internal-agent --keep-cwd "$@" 4<&- &
 pid=$!
 exec 3>&-
-{ read -r _ <&4; kill "$pid"; } >/dev/null 2>&1 &
+{ read -r _ <&4 || kill "$pid"; } >/dev/null 2>&1 &
 watchdog=$!
 exec 4<&-
 # Some shells note there that pkexec was stopped, which isn't the command's output.
@@ -340,6 +341,7 @@ function createPcAccess({
           const started = await request(entry.gateway, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval).catch(() => null);
           if (started?.status !== 200) return "not run on the PC: Gripi no longer waits for it";
           if (!root) return null;
+          if (approval.aborted) return "denied on the PC";
           running = runCommand(executable, args, folder, approval, pkexec);
           await running.asked;
           return null;
@@ -351,7 +353,7 @@ function createPcAccess({
       const run = running ?? runCommand(executable, args, folder, signal);
       const result = await run.result;
       if (signal.aborted) return;
-      const failure = root && pkexecFailure(result, run.stopped);
+      const failure = root && pkexecFailure(result, executable, run.stopped);
       if (failure) return await answerWith({ error: failure });
       if (await send({ result }) === 200) return;
       await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
@@ -403,7 +405,13 @@ function createPcAccess({
         resolve({ exit_code: code ?? 128 + os.constants.signals[name], stdout, stderr, truncated: outputs.some((output) => output.truncated) });
       });
     });
-    run.asked = pkexec && Promise.race([new Promise((resolve) => child.stdio[3].on("close", resolve).resume()), run.result.catch(() => {})]);
+    if (!pkexec) return run;
+
+    // The wrapper may have ended before the app writes to it.
+    child.stdin.on("error", () => {});
+    run.asked = Promise.race([new Promise((resolve) => child.stdio[3].on("close", resolve).resume()), run.result.catch(() => {})]).then(() => {
+      if (!run.stopped) child.stdin.end("\n");
+    });
     return run;
   }
 
@@ -574,14 +582,22 @@ async function findExecutable(name, folder) {
 }
 
 // Says why pkexec didn't run a command as root: 126 or 127 with its words when polkit's dialog was dismissed, polkit
-// refused or pkexec couldn't run the file, and 143 without output once the 2 minutes stopped it. Without a privileged
-// helper, Gripi can't tell these apart from a command's own exits, but those rarely come without output and with
-// pkexec's words. Returns null for the command's own.
-function pkexecFailure({ exit_code: code, stdout, stderr, truncated }, stopped) {
-  const said = Buffer.from(stderr, "base64").toString("utf8").trim();
+// refused or failed, or pkexec couldn't run the file, and 143 without output once the 2 minutes stopped it. Without a
+// privileged helper, Gripi can't tell these apart from a command's own exits for sure, but those rarely come without
+// output and with pkexec's words. Returns null for the command's own.
+function pkexecFailure({ exit_code: code, stdout, stderr, truncated }, executable, stopped) {
+  const said = Buffer.from(stderr, "base64").toString("utf8").trimEnd();
   if (stdout || truncated) return null;
   if (stopped && code === 128 + os.constants.signals.SIGTERM && !said) return "denied on the PC: nobody answered there in 2 minutes";
-  if ((code === 126 || code === 127) && /^(Error executing |Cannot run program )/.test(said)) return `not run as root on the PC: pkexec: ${said}`;
+  const words = [
+    "Error executing command as another user: ",
+    "Error checking for authorization ",
+    "Error getting authority: ",
+    "pkexec must be setuid root",
+    "Refusing to render service to dead parents.",
+    ...["Cannot run program", "Error accessing", "Error executing"].map((start) => `${start} ${executable}: `)
+  ];
+  if ((code === 126 || code === 127) && words.some((start) => said.startsWith(start))) return `not run as root on the PC: pkexec: ${said}`;
   return null;
 }
 

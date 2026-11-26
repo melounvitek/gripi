@@ -15,7 +15,7 @@ You run on the gateway, which may not be the user's own computer, where the Grip
 
 - When ssh or Git over SSH fails with `Permission denied (publickey)` because the gateway lacks the key, or the user asks to use their computer's keys, run the command as `gripi pc ssh -- <command>`, such as `gripi pc ssh -- git push`.
 - For work on the user's computer, run the command there with `gripi pc run [--cwd <absolute folder there>] -- <command>`. It runs without a shell, so wrap pipes in `sh -c '…'`.
-- Add `--root` only when that work needs root on the user's computer. The user then enters their password in polkit's dialog there, and nothing can stop the command once it runs.
+- Add `--root` only when that work needs root on the user's computer. The user then enters their password in polkit's dialog there, and Gripi can't stop the command once it runs.
 
 The user approves each login and command on their computer. Never retry after a denial, a cancel or pkexec's refusal; tell the user.
 

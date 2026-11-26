@@ -1,3 +1,5 @@
+// How long a line says why a cancel came too late, such as that the command already runs.
+const ANSWER_MS = 10 * 1000;
 const COMPUTER_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4.5" y="5" width="15" height="10.5" rx="1.4"></rect><path d="M2.5 19h19"></path></svg>';
 
 // Owns the quiet line above the editor that says, on every device that shows the session, that a computer asks the user
@@ -39,7 +41,7 @@ export class PcApprovalsController {
     if (!this.element) return;
     const shown = this.approvals.filter((approval) => !this.finished.has(approval.id));
     for (const [id, line] of this.lines) {
-      if (shown.some((approval) => approval.id === id)) continue;
+      if (line.until ? line.until > Date.now() : shown.some((approval) => approval.id === id)) continue;
       line.element.remove();
       this.lines.delete(id);
     }
@@ -51,8 +53,8 @@ export class PcApprovalsController {
       const error = line.failed ? "could not cancel" : "";
       if (line.error.textContent !== error) line.error.textContent = error;
     }
-    if (shown.length && !this.ticker) this.ticker = setInterval(() => this.render(), 1000);
-    if (!shown.length) {
+    if (this.lines.size && !this.ticker) this.ticker = setInterval(() => this.render(), 1000);
+    if (!this.lines.size) {
       clearInterval(this.ticker);
       this.ticker = null;
     }
@@ -101,9 +103,19 @@ export class PcApprovalsController {
     } catch (_error) {
     }
     line.cancel.disabled = false;
-    // Too late, the request no longer waits for approval, such as once the user approved it on the computer.
-    if (response?.ok || response?.status === 409) this.finished.add(id);
-    else line.failed = true;
+    if (response?.ok) {
+      this.finished.add(id);
+    } else if (response?.status === 409) {
+      // Too late, as the request no longer waits for approval, such as once the user approved it on the computer. The
+      // line says so for a while rather than look cancelled, which matters for a command that already runs.
+      this.finished.add(id);
+      line.until = Date.now() + ANSWER_MS;
+      line.cancel.hidden = true;
+      line.countdown.textContent = "";
+      line.error.textContent = (await response.json().catch(() => null))?.error || "too late to cancel";
+    } else {
+      line.failed = true;
+    }
     this.render();
   }
 }
