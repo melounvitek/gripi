@@ -99,13 +99,15 @@ function git(...args) {
   return execFileSync("git", args, { env: { ...process.env, ...gitEnv }, encoding: "utf8" }).trim();
 }
 
+const sessionFile = () => path.join(root, "sessions", "e2e", "history.jsonl");
+
 // Runs gripi pc ssh as the bash tool of the session's Pi would. Only gripi's relay leads to an agent.
 function gripiPc(command) {
   const env = {
     ...process.env,
     ...gitEnv,
     GRIPI_SOCKET_PATH: process.env.GRIPI_E2E_SOCKET_PATH,
-    PI_SESSION_FILE: path.join(root, "sessions", "e2e", "history.jsonl")
+    PI_SESSION_FILE: sessionFile()
   };
   delete env.HERMES_SESSION_ID;
   delete env.SSH_AUTH_SOCK;
@@ -134,9 +136,15 @@ async function allowPcAccess(context, gateway, answer) {
     readKnownHosts: async () => [knownHosts]
   });
   pcAccess.start(gateway);
-  // The link is up once the agent's keys can be listed, which needs no approval.
+  // The link is up, and the session's requests go to it once it was used there, when the agent's keys can be listed,
+  // which needs no approval.
   const key = fingerprintOf("client");
-  await expect.poll(async () => (await gripiPc(["ssh-add", "-l"])).stdout).toContain(key);
+  await expect.poll(async () => {
+    await context.request.put("/web-push/presence", {
+      data: { client_id: "pc-e2e", session: sessionFile(), focused: true, used: true, sequence: Date.now() }
+    });
+    return (await gripiPc(["ssh-add", "-l"])).stdout;
+  }).toContain(key);
   return seen;
 }
 

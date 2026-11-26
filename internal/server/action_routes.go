@@ -85,6 +85,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if !ok {
 		return
 	}
+	// A message from the user, also from a phone, sends the session's PC requests to the computer where it was sent.
+	// The page retries only after this first attempt, which recorded the message.
+	if !commandRequest(request) && request.FormValue("retry") != "1" {
+		app.usedPC(request, path)
+	}
 	reportTo := app.reportingParent(request, path)
 	message := request.FormValue("message")
 	imageFiles, ok := uploadedPromptImages(response, request)

@@ -175,7 +175,8 @@ func (relay *sshAgentRelay) serveConnection(ended context.Context, connection ne
 	context.AfterFunc(ctx, func() { connection.Close() })
 	id := make([]byte, 16)
 	rand.Read(id)
-	form := url.Values{"session": {relay.session}, "connection": {hex.EncodeToString(id)}}
+	// The first message opens the connection on the gateway, which keeps it on the computer that gets that one.
+	form := url.Values{"session": {relay.session}, "connection": {hex.EncodeToString(id)}, "open": {"1"}}
 	// A client of the agent waits for each reply, so a message that comes before it ends the connection. Reading on
 	// while a request waits sees the connection close.
 	messages, waiting := make(chan []byte, 1), make(chan struct{}, 1)
@@ -198,6 +199,7 @@ func (relay *sshAgentRelay) serveConnection(ended context.Context, connection ne
 	for message := range messages {
 		form.Set("message", base64.StdEncoding.EncodeToString(message))
 		reply, err := relay.post(ctx, form)
+		form.Del("open")
 		if ctx.Err() != nil {
 			break
 		}

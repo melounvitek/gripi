@@ -446,7 +446,7 @@ func (app *application) remapPendingRPCClient(from, to string, claim func() (fun
 		}, nil
 	}, func() {
 		app.promptAdmissions.remap(from, to, func() {
-			app.pendingSessions.Remap(from, to)
+			app.pcLinks.remapUse(from, to, func() { app.pendingSessions.Remap(from, to) })
 		})
 	})
 }
