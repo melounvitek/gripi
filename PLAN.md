@@ -248,7 +248,7 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 4. Dialogs, pkexec auth and grants.
 5. Docs and skill.
 
-**Phase 2: route to the computer you use.** Details under "Routing (phase 2)".
+**Phase 2: route to the computer you use. Done.** Details under "Routing (phase 2)".
 1. Gateway: one link per approved browser, the use record, routing and refusals, pinned agent connections.
 2. Page and desktop: the `used` report on real input and on the user's switches, prompt retries marked, the computer's name on the open poll.
 3. Docs and skill.
