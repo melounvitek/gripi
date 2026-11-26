@@ -9,11 +9,9 @@
     }
   }
 
-  // A page at /, such as where the installed app starts, shows a session that its URL doesn't name, so it says which.
-  function shownSession(client, origin) {
-    const session = notificationSession(client.url, origin);
-    if (session || new URL(client.url).pathname !== "/") return Promise.resolve(session);
-
+  // Asks a page which session it shows, which its URL may not name, such as at /, where the installed app starts, or
+  // not anymore, such as once a new session got its own key.
+  function shownSession(client) {
     return new Promise((resolve) => {
       const { port1, port2 } = new MessageChannel();
       const answer = (shown) => {
@@ -35,7 +33,7 @@
     if (!targetSession) return false;
 
     const clientList = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
-    const shown = await Promise.all(clientList.filter((client) => client.focused).map((client) => shownSession(client, worker.location.origin)));
+    const shown = await Promise.all(clientList.filter((client) => client.focused).map(shownSession));
     return shown.includes(targetSession);
   }
 

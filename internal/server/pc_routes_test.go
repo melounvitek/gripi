@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -305,5 +306,41 @@ func TestARequestThatAComputerAsksToApproveFollowsANewSessionWhenPiSavesIt(t *te
 	}
 	if approvals := links.approvals(saved); len(approvals) != 1 || approvals[0].ID != "request" {
 		t.Fatalf("the saved session shows %+v", approvals)
+	}
+}
+
+// A Web Push message carries at most about 4 KiB, so a notification names its session only when the session's key is
+// short, as its URL does.
+func TestANotificationAtOnceNamesOnlyASessionWithAShortKey(t *testing.T) {
+	root := t.TempDir()
+	notifier := &recordingPushNotifier{}
+	app := notificationTestApplication(t, root, false, false, notifier)
+	short, long := filepath.Join(root, "session.jsonl"), filepath.Join(root, strings.Repeat("deep/", 800), "session.jsonl")
+
+	for _, session := range []string{short, long} {
+		app.notifyAtOnce([]string{"owner"}, session, "request", "pc", "Approve on laptop: SSH login")
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		notifier.mu.Lock()
+		count := len(notifier.payloads)
+		notifier.mu.Unlock()
+		if count == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d notifications", count)
+		}
+	}
+	sessions := map[string]bool{}
+	for _, payload := range notifier.payloads {
+		var notification map[string]any
+		if err := json.Unmarshal(payload, &notification); err != nil || len(payload) > 1024 {
+			t.Fatalf("a notification of %d bytes: %s (%v)", len(payload), payload, err)
+		}
+		session, _ := notification["session"].(string)
+		sessions[session] = true
+	}
+	if !reflect.DeepEqual(sessions, map[string]bool{short: true, "": true}) {
+		t.Fatalf("the notifications name %v", sessions)
 	}
 }

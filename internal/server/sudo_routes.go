@@ -426,22 +426,26 @@ func (app *application) notifySudo(view sudoRequestView) {
 
 // notifyAtOnce sends owners a notification of a request in session, of the kind given, at once, unlike of a reply, and
 // with body as plain text, without the Markdown of a reply. It names the session, which a page's URL may not, such as a
-// Hermes conversation's, so that a device's service worker skips it while the device shows the session.
+// Hermes conversation's, so that a device's service worker skips it while the device shows the session; but only a
+// short one, as is the URL, since a push message carries about 4 KiB.
 func (app *application) notifyAtOnce(owners []string, session, id, kind, body string) {
 	title := "current session"
 	if found, ok := app.sessionStore.Session(session); ok && strings.TrimSpace(found.DisplayName) != "" {
 		title = agent.NotificationPreview(found.DisplayName)
 	}
 	digest := sha256.Sum256([]byte(id))
-	payload, _ := json.Marshal(map[string]any{
-		"type":    "gripi-notification",
-		"title":   title,
-		"body":    agent.NotificationBody(body),
-		"plain":   true,
-		"tag":     "gripi-" + kind + ":" + hex.EncodeToString(digest[:16]),
-		"url":     completedReplyURL(session, app.agentOf(session)),
-		"session": session,
-	})
+	notification := map[string]any{
+		"type":  "gripi-notification",
+		"title": title,
+		"body":  agent.NotificationBody(body),
+		"plain": true,
+		"tag":   "gripi-" + kind + ":" + hex.EncodeToString(digest[:16]),
+		"url":   completedReplyURL(session, app.agentOf(session)),
+	}
+	if len(session) <= maxNotificationURLBytes {
+		notification["session"] = session
+	}
+	payload, _ := json.Marshal(notification)
 	for _, owner := range owners {
 		// Each browser is an owner of its own, which a slow one mustn't hold up.
 		go func() {
