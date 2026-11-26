@@ -14,10 +14,12 @@ type WorkerPlacement interface {
 }
 
 // workerRoutes are the routes of Local that workers may use. claim is left out because it looks for the session among
-// all of main's, and new sessions because they would start on main. sudo runs the command on the worker.
+// all of main's, and new sessions because they would start on main. sudo runs the command on the worker, and gripi pc
+// reaches the user's computer as on main.
 var workerRoutes = []string{
 	"GET /sessions", "GET /conversation", "POST /prompt", "POST /abort", "POST /sessions/rename",
 	"POST /sessions/pin", "POST /sessions/tags", "POST /sessions/delete", "GET /tags", "POST /sudo",
+	"POST /pc/ssh-agent", "POST /pc/run",
 }
 
 // workerRefusals say why gripi on a worker can't run a command that it has no route for, and what to do instead, by

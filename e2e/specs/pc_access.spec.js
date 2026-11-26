@@ -104,6 +104,10 @@ const sessionFile = () => path.join(root, "sessions", "e2e", "history.jsonl");
 
 // Runs gripi pc ssh as the bash tool of the session's Pi would. Only gripi's relay leads to an agent.
 function gripiPc(command) {
+  return gripi(["pc", "ssh", "--", ...command]);
+}
+
+function gripi(args) {
   const env = {
     ...process.env,
     ...gitEnv,
@@ -113,7 +117,7 @@ function gripiPc(command) {
   delete env.HERMES_SESSION_ID;
   delete env.SSH_AUTH_SOCK;
   return new Promise((resolve) => {
-    execFile(process.env.GRIPI_E2E_GRIPI, ["pc", "ssh", "--", ...command], { cwd: file("work"), env, timeout: 15_000 }, (error, stdout, stderr) => {
+    execFile(process.env.GRIPI_E2E_GRIPI, args, { cwd: file("work"), env, timeout: 15_000 }, (error, stdout, stderr) => {
       resolve({ code: error ? error.code : 0, stdout, stderr });
     });
   });
@@ -186,6 +190,7 @@ test("a login allowed for 5 minutes pushes, then fetches without asking again", 
   expect(push.code, push.stderr).toBe(0);
   expect(git("--git-dir", file("repo.git"), "rev-parse", "main")).toBe(git("-C", file("work"), "rev-parse", "main"));
   const prompt = {
+    kind: "ssh",
     gateway,
     sessionName: sessions.history,
     key: { type: "ssh-ed25519", fingerprint: fingerprintOf("client"), comment: "pc-e2e-client" },
@@ -311,6 +316,56 @@ test("a phone shows the login that the computer asks to approve, and cancels it 
     expect(pushed.stderr).toContain("gripi pc: cancelled in Gripi\n");
     expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("TEXTAREA");
     expect(git("--git-dir", file("repo.git"), "for-each-ref", "refs/heads/cancelled")).toBe("");
+  } finally {
+    await laptop.context().close();
+  }
+});
+
+// The file that the computer runs for a command, which its dialog and Gripi's line show.
+const which = (command) => execFileSync("sh", ["-c", `command -v ${command}`], { encoding: "utf8" }).trim();
+const script = "pwd; echo err >&2; exit 3";
+
+test("a command allowed on the computer runs there, and gives back its output and exit code", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
+  test.setTimeout(40_000);
+  let approve;
+  const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
+  const desktop = await allowPcAccess(context, gateway, () => new Promise((resolve) => { approve = resolve; }));
+  await useSession(page, desktop);
+  const folder = fs.realpathSync(dir);
+
+  const ran = gripi(["pc", "run", "--cwd", folder, "--", "sh", "-c", script]);
+  const line = page.locator(".pc-approval");
+  await expect(line.locator(".pc-approval-text")).toHaveText(`Waiting for you on ${os.hostname().split(".")[0]}: ${which("sh")} -c "${script}"`, { timeout: 10_000 });
+  approve("run");
+
+  expect(await ran).toEqual({ code: 3, stdout: `${folder}\n`, stderr: "err\n" });
+  expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command: `${which("sh")} -c "${script}"`, folder }, "password"]);
+  await expect(line).toBeHidden();
+});
+
+test("a phone cancels a command that the computer asks to run, which then doesn't", async ({ browser, page, baseURL, isMobile }) => {
+  test.skip(!isMobile, "Touch flow");
+  test.setTimeout(40_000);
+  const laptop = await approvedPage(browser);
+  try {
+    const desktop = await allowPcAccess(laptop.context(), { id: "e2e", name: "E2E gateway", url: baseURL }, (signal) => new Promise((resolve) => {
+      signal.addEventListener("abort", () => resolve("deny"));
+    }));
+    await useSession(laptop, desktop);
+    await page.goto(`/?session=${encodeURIComponent(sessionFile())}`);
+
+    const touched = file("cancelled");
+    const ran = gripi(["pc", "run", "--", "touch", touched]);
+    const line = page.locator(".pc-approval");
+    await expect(line.locator(".pc-approval-text")).toHaveText(`Waiting for you on ${os.hostname().split(".")[0]}: ${which("touch")} ${touched}`, { timeout: 10_000 });
+    await line.getByRole("button", { name: /^cancel / }).tap();
+
+    const cancelled = await ran;
+    expect(cancelled.code).toBe(1);
+    expect(cancelled.stderr).toBe("gripi pc: the gateway answered 502: cancelled in Gripi\n");
+    await expect(line).toBeHidden();
+    expect(fs.existsSync(touched)).toBe(false);
   } finally {
     await laptop.context().close();
   }

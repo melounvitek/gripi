@@ -14,30 +14,78 @@ import (
 )
 
 // The desktop app drops a link whose poll carries more than 64 messages, and reads a poll's JSON only up to 8 MiB, so
-// a poll carries at most 64 messages and 2 MiB of agent messages, and the others wait for the next one.
-func TestPCLinkPollCarriesAtMost64MessagesAnd2MiBOfAgentMessages(t *testing.T) {
+// a poll carries at most 64 messages and 4 MiB of their JSON, but for a single message, and the others wait for the
+// next one.
+func TestPCLinkPollCarriesAtMost64MessagesAnd4MiBOfTheirJSON(t *testing.T) {
 	poll := PCLinkPoll
 	PCLinkPoll = 10 * time.Millisecond
 	t.Cleanup(func() { PCLinkPoll = poll })
+	// The longest command that the gateway takes, of words that JSON escapes most.
+	argv := make([]string, pcRunWords)
+	for index := range argv {
+		argv[index] = strings.Repeat("<", pcRunWordBytes)
+	}
 	for _, queued := range []struct {
-		count, size int
-		polls       []int
-	}{{65, 1, []int{64, 1}}, {9, pcMessageLimit, []int{8, 1}}} {
+		name    string
+		count   int
+		message pcMessage
+		polls   []int
+	}{
+		{"small messages", 65, pcMessage{Type: "ssh", Message: make([]byte, 1)}, []int{64, 1}},
+		{"agent messages of 256 KiB", 13, pcMessage{Type: "ssh", Message: make([]byte, pcMessageLimit)}, []int{11, 2}},
+		{"the longest commands", 2, pcMessage{Type: "run", Argv: argv, CWD: "/" + strings.Repeat("<", pcRunWordBytes-1)}, []int{1, 1}},
+	} {
 		links := &pcLinks{}
 		if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
 			t.Fatal(err)
 		}
 		links.mu.Lock()
 		for range queued.count {
-			links.byID["app"].send(pcMessage{Type: "ssh", Message: make([]byte, queued.size)})
+			links.byID["app"].send(queued.message)
 		}
 		links.mu.Unlock()
 
 		for _, want := range queued.polls {
 			messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"})
-			if err != nil || len(messages) != want {
-				t.Fatalf("poll of %d messages of %d bytes = %d messages (%v), want %d", queued.count, queued.size, len(messages), err, want)
+			encoded, _ := json.Marshal(map[string][]pcMessage{"messages": messages})
+			if err != nil || len(messages) != want || len(encoded) > 8<<20 {
+				t.Fatalf("poll of %d %s = %d messages in %d bytes (%v), want %d", queued.count, queued.name, len(messages), len(encoded), err, want)
 			}
+		}
+	}
+}
+
+// The desktop app runs a command only once the gateway says that gripi pc run still waits for it, so the gateway says
+// no once gripi's request ended or timed out, also before the gateway took the request away, and for other requests.
+func TestACommandStartsOnlyWhileGripiWaitsForIt(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	links := &pcLinks{}
+	if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
+		t.Fatal(err)
+	}
+	ended, end := context.WithCancel(context.Background())
+	end()
+	timedOut := time.NewTimer(0)
+	<-timedOut.C
+	for _, waiter := range []struct {
+		name   string
+		ctx    context.Context
+		kind   string
+		timer  *time.Timer
+		status int
+	}{
+		{"a command", context.Background(), "run", time.NewTimer(time.Minute), http.StatusOK},
+		{"an SSH request", context.Background(), "ssh", time.NewTimer(time.Minute), http.StatusNotFound},
+		{"a command whose gripi ended", ended, "run", time.NewTimer(time.Minute), http.StatusNotFound},
+		{"a command that timed out", context.Background(), "run", timedOut, http.StatusNotFound},
+	} {
+		links.mu.Lock()
+		links.byID["app"].waiting["request"] = &pcWaiter{ctx: waiter.ctx, timeout: waiter.timer, approval: pcApproval{kind: waiter.kind}}
+		links.mu.Unlock()
+		if status, _ := links.status("owner", pcLinkBody{Link: "app", ID: "request", Starting: true}); status != waiter.status {
+			t.Fatalf("starting %s = %d, want %d", waiter.name, status, waiter.status)
 		}
 	}
 }
@@ -180,11 +228,20 @@ func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
 
 // A computer that begins to ask the user to approve a request notifies their other browsers at once and once, also
 // while they show the session: all clients are one for presence, also the computer that asks, which comes to the front
-// with a notification of its own.
+// with a notification of its own. A command shows on a locked screen, so only that it asks to run one does.
 func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.T) {
 	poll := PCLinkPoll
 	PCLinkPoll = 10 * time.Millisecond
 	t.Cleanup(func() { PCLinkPoll = poll })
+	for _, request := range []struct{ route, form, summary, body string }{
+		{"/pc/ssh-agent", "connection=c&message=Cw%3D%3D&open=1", "SSH login to github.com as git", "Approve on laptop: SSH login to github.com as git"},
+		{"/pc/run", "argv=cat&argv=.env", "/usr/bin/cat .env", "Approve on laptop: run a command"},
+	} {
+		t.Run(request.route, func(t *testing.T) { notifiesOnce(t, request.route, request.form, request.summary, request.body) })
+	}
+}
+
+func notifiesOnce(t *testing.T, route, form, summary, body string) {
 	handler := newPushTestHandler(t, false, false)
 	app := handler.app
 	path := writeNotificationSession(t, app.config.SessionsRoot, "Fix login redirect")
@@ -208,7 +265,7 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop"}); err != nil {
+	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop", Run: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range []string{"laptop", "phone"} {
@@ -220,7 +277,7 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {
-		request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://gripi/pc/ssh-agent", strings.NewReader("connection=c&message=Cw%3D%3D&open=1&session="+url.QueryEscape(path)))
+		request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://gripi"+route, strings.NewReader(form+"&session="+url.QueryEscape(path)))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		handler.Local().ServeHTTP(httptest.NewRecorder(), request)
 	}()
@@ -236,8 +293,8 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	}
 	status := func(asking bool) {
 		t.Helper()
-		body := pushJSON(t, map[string]any{"link": "app", "id": id, "asking": asking, "summary": "SSH login to github.com as git", "expires_in": 120})
-		request := httptest.NewRequest(http.MethodPost, "http://example.com/pc/link/status", strings.NewReader(body))
+		status := pushJSON(t, map[string]any{"link": "app", "id": id, "asking": asking, "summary": summary, "expires_in": 120})
+		request := httptest.NewRequest(http.MethodPost, "http://example.com/pc/link/status", strings.NewReader(status))
 		request.RemoteAddr = "127.0.0.1:40000"
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Gripi-PC-Link", "1")
@@ -252,7 +309,7 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	status(true)
 	select {
 	case notification := <-delivered:
-		if notification["owner"] != owners["phone"] || notification["title"] != "Fix login redirect" || notification["body"] != "Approve on laptop: SSH login to github.com as git" || notification["plain"] != true || notification["url"] != "/?session="+url.QueryEscape(path) || notification["session"] != path || !strings.HasPrefix(notification["tag"].(string), "gripi-pc:") {
+		if notification["owner"] != owners["phone"] || notification["title"] != "Fix login redirect" || notification["body"] != body || notification["plain"] != true || notification["url"] != "/?session="+url.QueryEscape(path) || notification["session"] != path || !strings.HasPrefix(notification["tag"].(string), "gripi-pc:") {
 			t.Fatalf("notification = %v", notification)
 		}
 	case <-time.After(5 * time.Second):

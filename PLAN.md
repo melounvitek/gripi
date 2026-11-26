@@ -133,7 +133,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - HTTPS, or loopback without a trusted forwarded scheme.
 
   Without them, or in multi-user mode, or with access approval disabled, the answer is 403 `{"error"}`.
-- `POST /pc/link`, body `{"link": "<id>", "open": true}` for a link's first poll and `{"link": "<id>"}` after, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). A poll carries at most 64 messages and 2 MiB of agent messages, and the rest wait for the next one. Another link polling within 35 s (`PCLinkStale`) gets 409, and so does a poll without `open` of a link that the gateway never had or already ended (a restart, going stale, a close or `EndPCLink`). When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
+- `POST /pc/link`, body `{"link": "<id>", "open": true}` for a link's first poll and `{"link": "<id>"}` after, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). A poll carries at most 64 messages and 2 MiB of agent messages, and the rest wait for the next one. (Phase 4: at most 4 MiB of the messages' JSON, but a single message may have more.) Another link polling within 35 s (`PCLinkStale`) gets 409, and so does a poll without `open` of a link that the gateway never had or already ended (a restart, going stale, a close or `EndPCLink`). When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
 - `POST /pc/link/reply`, body `{"link", "id", "message": "<base64>"}` or `{"link", "id", "error": "<text>"}`, answers `200 {}`, 409 when the link isn't the current one, or 404 for an unknown request (already cancelled or timed out).
 - `POST /pc/link/close`, body `{"link"}`, releases the link if it is the current one, and fails its waiting requests with 503.
 
@@ -259,11 +259,12 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 3. Page: the line above the editor (direction B), and the service worker's focus check.
 4. Docs and skill.
 
-**Phase 4: `gripi pc run`** as the PC user.
-- Before it: Cancel from Gripi wins until the gateway hears the desktop's `asking: false` or reply, so it can refuse a login that the user just allowed on the PC (phase 3 accepted that for SSH, which only refuses). A run has side effects on the PC, so decide whether the desktop confirms with the gateway before it spawns.
-1. The run dialog, the runner with output caps and cancel, and a cwd that must be absolute and exist (home by default). `argv[0]` is resolved on the PC's PATH, and the dialog shows the resolved path.
-2. Workers: both socket routes go into `workerRoutes`, so sessions on workers can use the PC too. Routing uses main's session key, and the routes check the session's placement with `reachesSession`.
-3. Docs: when the gateway's `~/.ssh/config` names a key for a host with `IdentitiesOnly yes`, `gripi pc ssh` uses only that key there.
+**Phase 4: `gripi pc run` as the PC user. Done.** Details under "Running commands (phase 4)".
+- The race: Cancel from Gripi wins until the gateway hears the desktop's `asking: false` or reply, which phase 3 accepted for SSH, which only refuses. A run has side effects on the PC, so the user decided that the desktop confirms with the gateway right before it spawns (`starting`).
+1. Gateway: the `/pc/run` route, the `run` message and its result, the `starting` status, and a Push that says only "run a command".
+2. Desktop: the run dialog with `argv[0]` resolved on the PC's PATH, a cwd that must be absolute and exist (home by default), the start check, and the runner with output caps and the process group's kill.
+3. Workers: both socket routes go into `workerRoutes`, so sessions on workers can use the PC too. Routing uses main's session key, and the routes check the requesting session's placement with `reachesSession`.
+4. Docs and skill, also that when the gateway's `~/.ssh/config` names a key for a host with `IdentitiesOnly yes`, `gripi pc ssh` uses only that key there.
 
 **Phase 5: `--root`.**
 - It runs `pkexec --disable-internal-agent --keep-cwd <resolved executable> <args>` with the spawn's cwd. polkit's dialog, which names the executable, is the auth step.
@@ -386,6 +387,48 @@ When the user is on the phone and a computer asks for approval, the phone must s
   - Frontend: live rendering.
   - E2E: a phone-sized context sees the line and cancels, which aborts the fake desktop's dialog.
 - **Not in scope:** a mark in the sidebar and `gripi list`, which `TODO.md` already has for `gripi sudo`; it gets PC requests added.
+
+## Running commands (phase 4)
+
+**The race with Cancel.** The user decided that the desktop confirms with the gateway right before it spawns.
+- After the dialog and polkit, still in the approval turn, the app posts `POST /pc/link/status` with `{link, id, starting: true}`, and spawns only on 200.
+- The gateway answers 200 only for a command whose waiter is live: not cancelled, timed out, or ended by gripi or the link's end, also when gripi's request ended or the timeout fired a moment before the gateway removed the waiter. From then on:
+  - the waiter no longer asks, as after `asking: false`, so the line and Cancel go;
+  - a browser Cancel gets 409 "The command already runs.", never a cancel;
+  - the waiter waits for the reply without `PCReplyTimeout`, as a command may run long. gripi's end or the link's still end it, and the app then kills the command.
+- Otherwise it answers 404, or 409 for a link that isn't open, and the app doesn't run the command.
+- So Cancel in Gripi wins until the gateway hears `starting`, and the command runs only if it didn't.
+
+**Protocol:**
+- CLI → gateway: `POST /pc/run` on the socket, with the form fields:
+  - `session`, as for `/pc/ssh-agent`;
+  - `argv`, repeated: 1 to 256 words of up to 4096 bytes of UTF-8 without NUL, the first not empty;
+  - `cwd`, optional: an absolute path on the PC.
+
+  It answers `200` with a `SudoResult` (`exit_code`, `stdout` and `stderr` in base64, `truncated`). Errors are as for `/pc/ssh-agent`: 400, 403, 404, 503, 504 when the command didn't start in time, and 502 for the desktop's own `error`. It is routed like `/pc/ssh-agent`, without connection pins.
+- Gateway → desktop: `{"type": "run", "id", "session", "session_name", "argv", "cwd"}`, without `cwd` for the home folder. It needs a reply with that `id`.
+- Desktop → gateway:
+  - `POST /pc/link/reply` with `{"link", "id", "result": {"exit_code", "stdout", "stderr", "truncated"}}` or `{"link", "id", "error"}`. A reply's body may be up to 48 MiB, for 16 MiB per output in base64.
+  - `POST /pc/link/status` may carry `"starting": true`, as above.
+  - The open poll carries `"run": true`. A desktop app from before phase 4 drops a `run` message as malformed, and the gateway updates itself while the app doesn't, so the gateway refuses a command at once (503, "can't run commands; ask the user to update it") for a link without it.
+- A poll carries at most 4 MiB of its messages' JSON, but a single message may have more: a command's words, which JSON may escape to 6 times their size, take up to about 6 MiB, and the desktop reads 8 MiB.
+- The Push says "Approve on laptop: run a command", while the line shows the command.
+
+**Desktop:**
+- **Checks before the dialog**, which refuse at once with an error reply:
+  - the message: `argv` of 1 to 256 strings of up to 4096 characters, the first not empty, and `cwd` a string if given;
+  - the folder: absolute and an existing one, or the user's home folder without `cwd`;
+  - the command: `argv[0]` with a slash is resolved against the folder, and otherwise on the app's `PATH`, skipping relative entries, to an executable file, as a shell would;
+  - the command as shown at most 4096 characters, so the dialog stays readable.
+- **The dialog** shows the session, the command with the resolved path and the other words quoted like `shellWords`, the folder and "As: you", with **Deny** (default and cancel) and **Run**. The approval turn's summary for Gripi's line is the command as shown.
+- **The runner** spawns the resolved path with the other words, in the folder, with no shell, `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true` and the app's own environment.
+  - It keeps 16 MiB of each output and drops the rest, with `truncated`.
+  - The exit code is the command's, or 128 plus the signal that killed it.
+  - A cancel, a lost link or turning access off sends SIGTERM to the process group, and SIGKILL 5 s later, so that Git can remove its lock files first. Quitting, which waits at most 2 s, sends SIGKILL to the commands still running a second after SIGTERM.
+  - When the result's reply fails, such as a large one on a slow uplink, it sends an error instead, as gripi pc run would otherwise wait for good. Once the app asked to start the command, an error that doesn't reach the gateway either, such as for a command that can't start, drops the link, which ends the wait.
+  - Quitting and turning access off track the process groups that got SIGTERM until their SIGKILL, also once the command's first process ended, as a process that it started in the background may still run.
+
+**Workers:** both socket routes go into `workerRoutes`. `validOwnedSessionPath` checks the requesting session's placement with `reachesSession`, and routing then walks main's session keys, so a sub-session on a worker follows its parent on main.
 
 ## Trust model
 

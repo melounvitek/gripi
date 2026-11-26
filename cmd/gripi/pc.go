@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -17,49 +18,64 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
 const pcHelp = `Usage:
   gripi pc ssh -- <command> [arguments]
+  gripi pc run [--cwd <folder>] -- <command> [arguments]
 
-Runs a command on this machine, the gateway, with SSH_AUTH_SOCK pointing at
-the SSH agent of the user's computer, where the Gripi desktop app runs with
-File → Allow PC Access for This Server on. So ssh, and Git through it, log in
-with that computer's keys, which never leave it. The computer signs only
-logins to hosts in its known_hosts. Each login asks the user there to approve
-it and to enter their computer's password, unless they allowed the key on
-that host for 5 minutes.
+These use the user's computer, where the Gripi desktop app runs with
+File → Allow PC Access for This Server on. The user approves each use there,
+and enters their computer's password.
 
-The logins go to the computer where the user last used the session: sent a
-message in it, or clicked or typed in it in the desktop app, or else in the
-session that started it as a sub-session. They never go to another computer.
-gripi pc says why it refused one, such as when the session was last used on
-a phone, in a browser or on a computer whose app isn't connected, or not
-since the gateway started. Ask the user to open the session in the desktop
-app on the computer that should log in, and to click in it, rather than
-retrying.
+gripi pc ssh runs a command on this machine, the gateway, with SSH_AUTH_SOCK
+pointing at the SSH agent of the user's computer. So ssh, and Git through it,
+log in with that computer's keys, which never leave it. The computer signs only
+logins to hosts in its known_hosts. Each login asks the user, unless they
+allowed the key on that host for 5 minutes. The command runs with gripi's
+input, output and environment, and with this machine's SSH configuration and
+known_hosts.
 
-The command runs with gripi's input, output and environment, and with this
-machine's SSH configuration and known_hosts.
+gripi pc run runs a command on the user's computer, as the user, and passes on
+its output and exit code. Each command asks the user, who sees it with the
+file that the computer's PATH finds for it. It runs there in --cwd, an
+absolute folder on that computer, or else in the user's home folder, with the
+desktop app's environment, without a shell, so use sh -c for pipes, and with
+no input. Gripi keeps only the first 16 MiB of each output. When gripi pc run
+ends first, the computer stops the command.
+
+Both go to the computer where the user last used the session: sent a message
+in it, or clicked or typed in it in the desktop app, or else in the session
+that started it as a sub-session. They never go to another computer. gripi pc
+says why it refused one, such as when the session was last used on a phone,
+in a browser or on a computer whose app isn't connected, or not since the
+gateway started. Ask the user to open the session in the desktop app on the
+computer that should do this, and to click in it, rather than retrying.
 
 gripi pc finds its session, whose name the user sees, by PI_SESSION_FILE,
 which Pi's bash tool sets, or by HERMES_SESSION_ID, which Hermes's terminal
 sets.
 
-Example:
+Examples:
   gripi pc ssh -- git push
+  gripi pc run --cwd /home/me/app -- sh -c 'git status | head'
 
 Exit codes:
-  The command's own once it ran. When the computer signs no login, as when
-  gripi pc refused it, or the user denied it or cancelled it in Gripi, the
-  agent answers with a failure, and gripi pc prints why once, starting with
-  "gripi pc:". When the command
-  cannot run, gripi pc prints why and exits with
-  1  the command does not run in a Pi or Hermes session, or cannot start
+  The command's own once it ran. When the computer signs no login for
+  gripi pc ssh, as when gripi pc refused it, or the user denied it or
+  cancelled it in Gripi, the agent answers with a failure, and gripi pc prints
+  why once, starting with "gripi pc:". When the command cannot run, gripi pc
+  prints why and exits with
+  1  the command does not run in a Pi or Hermes session, cannot start, or for
+     gripi pc run, did not run on the computer, as when gripi pc refused it,
+     or the user denied it or cancelled it in Gripi
   2  usage error
 `
 
@@ -70,8 +86,11 @@ const (
 )
 
 func runOnPC(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(arguments) > 0 && arguments[0] == "run" {
+		return runCommandOnPC(arguments[1:], stdout, stderr)
+	}
 	if len(arguments) == 0 || arguments[0] != "ssh" {
-		return usageError(stderr, "pc", "needs ssh, as in 'gripi pc ssh -- git push'")
+		return usageError(stderr, "pc", "needs ssh or run, as in 'gripi pc ssh -- git push'")
 	}
 	if len(arguments) < 3 || arguments[1] != "--" {
 		return usageError(stderr, "pc", "put the command after --, as in 'gripi pc ssh -- git push'")
@@ -122,6 +141,51 @@ func runOnPC(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	case <-time.After(5 * time.Second):
 	}
 	return code
+}
+
+// runCommandOnPC asks the user's computer to run a command, and passes on its output and exit code.
+func runCommandOnPC(arguments []string, stdout, stderr io.Writer) int {
+	separator := slices.Index(arguments, "--")
+	if separator < 0 || separator == len(arguments)-1 {
+		return usageError(stderr, "pc", "put the command after --, as in 'gripi pc run -- systemctl --user restart pipewire'")
+	}
+	flags := flag.NewFlagSet("pc run", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	cwd := flags.String("cwd", "", "")
+	if err := flags.Parse(arguments[:separator]); err != nil {
+		return usageError(stderr, "pc", err.Error())
+	}
+	if flags.NArg() > 0 || *cwd != "" && !filepath.IsAbs(*cwd) {
+		return usageError(stderr, "pc", "takes only --cwd with an absolute folder on the computer before --")
+	}
+	session := runningSession()
+	if session == "" {
+		return failure(stderr, "pc", errors.New("run it from a Pi or Hermes session in Gripi; neither PI_SESSION_FILE nor HERMES_SESSION_ID is set"))
+	}
+	client, err := newGatewayClient()
+	if err != nil {
+		return failure(stderr, "pc", err)
+	}
+	form := url.Values{"session": {session}, "argv": arguments[separator+1:]}
+	if *cwd != "" {
+		form.Set("cwd", *cwd)
+	}
+	request, err := http.NewRequest(http.MethodPost, "http://gripi/pc/run", strings.NewReader(form.Encode()))
+	if err != nil {
+		return failure(stderr, "pc", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// The gateway answers once the command has run, however long that takes.
+	var result gateway.SudoResult
+	if err := client.do(request, 0, &result); err != nil {
+		return failure(stderr, "pc", err)
+	}
+	stdout.Write(result.Stdout)
+	stderr.Write(result.Stderr)
+	if result.Truncated {
+		fmt.Fprintln(stderr, "gripi pc: the command printed more than 16 MiB to an output, and Gripi dropped the rest")
+	}
+	return result.ExitCode
 }
 
 // runForwardingSignals runs a command, passes on the signals that would stop gripi, and returns the command's exit

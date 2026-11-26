@@ -20,6 +20,13 @@ const MAX_REQUESTS_IN_PROGRESS = 256;
 const MAX_FIELD_LENGTH = 4096;
 const MAX_AGENT_MESSAGE_BYTES = 256 * 1024;
 const MAX_SESSION_NAME_LENGTH = 200;
+const MAX_COMMAND_WORDS = 256;
+// As the dialog shows a command, which must stay readable there.
+const MAX_COMMAND_LENGTH = 4096;
+const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+// After SIGTERM, which lets a command such as Git remove its lock files, before SIGKILL, and sooner as the app quits.
+const KILL_DELAY_MS = 5 * 1000;
+const QUIT_KILL_DELAY_MS = 1000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // Longer than the gateway's 25-second link poll.
 const REQUEST_TIMEOUT_MS = 40 * 1000;
@@ -36,10 +43,13 @@ function createPcAccess({
   readKnownHosts = readLocalKnownHosts,
   now = Date.now,
   hostname = os.hostname,
+  spawn = childProcess.spawn,
   sshAgentGuard = require("./ssh_agent_guard")
 }) {
   const { createConnectionGuard, findKnownHost, fingerprint, keyType } = sshAgentGuard;
   const gateways = new Map();
+  // What signals the process groups of the commands that were stopped, until they get SIGKILL.
+  const stopping = new Set();
   let approvalTurn = Promise.resolve();
   let waitingApprovals = 0;
 
@@ -64,8 +74,13 @@ function createPcAccess({
     await dropLink(entry, entry.link);
   }
 
+  // The app quits before SIGKILL's 5 seconds, so the process groups of stopped commands get it after a second.
   async function stopAll() {
-    await Promise.all([...gateways.keys()].map(stop));
+    const stopped = Promise.all([...gateways.keys()].map(stop));
+    if (stopping.size) await sleep(QUIT_KILL_DELAY_MS);
+    for (const kill of stopping) kill("SIGKILL");
+    stopping.clear();
+    await stopped;
   }
 
   async function runLink(entry) {
@@ -74,7 +89,7 @@ function createPcAccess({
     while (!signal.aborted) {
       const link = entry.link;
       // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart.
-      const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()) };
+      const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()), run: true };
       link.opened = true;
       let response;
       try {
@@ -108,7 +123,7 @@ function createPcAccess({
 
   // A batch that would take the link over the requests it may have in progress drops the link before any of them starts.
   function withinBudget(link, messages) {
-    const requests = messages.filter((message) => message?.type === "ssh").length;
+    const requests = messages.filter((message) => message?.type === "ssh" || message?.type === "run").length;
     return link.requests.size + link.refusals + requests <= MAX_REQUESTS_IN_PROGRESS;
   }
 
@@ -117,6 +132,8 @@ function createPcAccess({
       console.warn("PC access: ignored a malformed message from the server");
     } else if (message.type === "ssh") {
       receiveSsh(entry, link, message);
+    } else if (message.type === "run") {
+      receiveRun(entry, link, message);
     } else if (message.type === "ssh_close") {
       closeConnection(link, connectionKey(message));
     } else {
@@ -124,13 +141,15 @@ function createPcAccess({
     }
   }
 
+  function refuseRequest(entry, link, id, error) {
+    link.refusals += 1;
+    reply(entry, link, id, { error }, link.controller.signal).finally(() => { link.refusals -= 1; });
+  }
+
   function receiveSsh(entry, link, message) {
     const key = connectionKey(message);
     let connection = link.connections.get(key);
-    const refuse = (error) => {
-      link.refusals += 1;
-      reply(entry, link, message.id, { error }, link.controller.signal).finally(() => { link.refusals -= 1; });
-    };
+    const refuse = (error) => refuseRequest(entry, link, message.id, error);
     if (link.requests.has(message.id)) return refuse("another request with this ID is in progress on the PC");
     if (!connection && link.connections.size >= MAX_AGENT_CONNECTIONS) return refuse("too many SSH agent connections are open on the PC");
     if (connection?.waiting >= MAX_WAITING_MESSAGES) return refuse("too many SSH agent messages wait on this connection on the PC");
@@ -153,9 +172,10 @@ function createPcAccess({
   }
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
+  // Returns the status of the server's answer, or null without one.
   async function reply(entry, link, id, fields, signal) {
-    if (signal.aborted) return;
-    await request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).catch(() => {});
+    if (signal.aborted) return null;
+    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).then(({ status }) => status, () => null);
   }
 
   async function handleSsh(entry, link, connection, message, signal) {
@@ -192,24 +212,38 @@ function createPcAccess({
     }
 
     const grantKey = JSON.stringify([message.session, fingerprint(key), fingerprint(hostKey), user]);
-    if (link.grants.get(grantKey) > now()) return null;
+    const granted = () => link.grants.get(grantKey) > now();
+    if (granted()) return null;
+
+    const login = escapeForDisplay(user);
+    return approve(entry, link, message, signal, {
+      prompt: {
+        kind: "ssh",
+        key: { type: keyType(key), fingerprint: fingerprint(key), comment: connection.guard.comment(key) },
+        server: { names: host.names, hostKeyFingerprint: fingerprint(hostKey) },
+        login
+      },
+      summary: `SSH login to ${host.names[0] || "a known host"} as ${login}`,
+      answers: ["once", "grant"],
+      covered: granted,
+      approved: (answer) => {
+        if (answer === "grant" && !signal.aborted) link.grants.set(grantKey, now() + GRANT_MS);
+        return null;
+      }
+    });
+  }
+
+  // Asks the user to approve a request in the approval turn, unless covered says that it needs no approval, and returns
+  // a refusal, or null once they approved it. approved runs in the turn once they did, and may still refuse it.
+  async function approve(entry, link, message, signal, { prompt, summary, answers, covered = () => false, approved }) {
     if (waitingApprovals >= MAX_WAITING_APPROVALS) return "denied on the PC: too many requests are waiting for approval there";
 
-    const sessionName = [...escapeForDisplay(message.session_name || message.session)];
-    const prompt = {
-      gateway: entry.gateway,
-      sessionName: sessionName.length > MAX_SESSION_NAME_LENGTH
-        ? `${sessionName.slice(0, MAX_SESSION_NAME_LENGTH - 1).join("")}…`
-        : sessionName.join(""),
-      key: { type: keyType(key), fingerprint: fingerprint(key), comment: connection.guard.comment(key) },
-      server: { names: host.names, hostKeyFingerprint: fingerprint(hostKey) },
-      login: escapeForDisplay(user)
-    };
-    const summary = `SSH login to ${host.names[0] || "a known host"} as ${prompt.login}`;
+    const name = [...escapeForDisplay(message.session_name || message.session)];
+    const sessionName = name.length > MAX_SESSION_NAME_LENGTH ? `${name.slice(0, MAX_SESSION_NAME_LENGTH - 1).join("")}…` : name.join("");
     return inTurn(async () => {
       // A request cancelled while it waited for its turn needs no dialog, nor one that a grant made meanwhile covers.
       if (signal.aborted) return "denied on the PC";
-      if (link.grants.get(grantKey) > now()) return null;
+      if (covered()) return null;
 
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(), DIALOG_TIMEOUT_MS);
@@ -217,22 +251,112 @@ function createPcAccess({
       // Gripi shows that the PC asks on the user's other devices, until the dialog and polkit's have ended.
       status(entry, link, message.id, { asking: true, summary, expires_in: DIALOG_TIMEOUT_MS / 1000 }, signal);
       try {
-        const answer = await confirm({ ...prompt, signal: approval }).catch((error) => {
+        const answer = await confirm({ ...prompt, gateway: entry.gateway, sessionName, signal: approval }).catch((error) => {
           console.warn("PC access: the approval dialog failed:", error);
           return "deny";
         });
         if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
-        if ((answer !== "once" && answer !== "grant") || approval.aborted) return "denied on the PC";
+        if (!answers.includes(answer) || approval.aborted) return "denied on the PC";
 
         const auth = await authenticate(approval);
         if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
         if (!auth.ok) return `denied on the PC: ${auth.reason}`;
-        if (answer === "grant" && !signal.aborted) link.grants.set(grantKey, now() + GRANT_MS);
-        return null;
+        if (approval.aborted) return "denied on the PC";
+        return await approved(answer, approval);
       } finally {
         clearTimeout(timer);
         status(entry, link, message.id, { asking: false }, signal);
       }
+    });
+  }
+
+  function receiveRun(entry, link, message) {
+    if (link.requests.has(message.id)) return refuseRequest(entry, link, message.id, "another request with this ID is in progress on the PC");
+
+    const controller = new AbortController();
+    const signal = AbortSignal.any([link.controller.signal, controller.signal]);
+    link.requests.set(message.id, { controller });
+    handleRun(entry, link, message, signal)
+      .catch((error) => console.warn("PC access: could not handle a command:", error))
+      .finally(() => link.requests.delete(message.id));
+  }
+
+  async function handleRun(entry, link, message, signal) {
+    const send = (fields) => reply(entry, link, message.id, fields, signal);
+    // Once the server may have let the command start, gripi pc run waits for an answer however long it takes, so an
+    // answer that doesn't reach Gripi then ends the link, which ends the wait.
+    let starting = false;
+    const answerWith = async (fields) => {
+      const status = await send(fields);
+      if (starting && !signal.aborted && ![200, 404, 409].includes(status)) link.controller.abort();
+    };
+    try {
+      const folder = message.cwd ?? os.homedir();
+      if (!path.isAbsolute(folder) || !(await fs.promises.stat(folder).catch(() => null))?.isDirectory()) {
+        return await answerWith({ error: `the PC has no folder ${escapeForDisplay(folder)}` });
+      }
+      const [name, ...args] = message.argv;
+      const executable = await findExecutable(name, folder);
+      if (!executable) return await answerWith({ error: `the PC has no command ${escapeForDisplay(name)}${name.includes("/") ? "" : " on its PATH"}` });
+      const command = commandLine([executable, ...args]);
+      if (command.length > MAX_COMMAND_LENGTH) return await answerWith({ error: "the command is too long to show on the PC" });
+
+      const refusal = await approve(entry, link, message, signal, {
+        prompt: { kind: "run", command, folder: escapeForDisplay(folder) },
+        summary: command,
+        answers: ["run"],
+        // Right before the command runs, the server confirms that gripi pc run still waits for it, so Cancel in Gripi
+        // either stopped it or no longer can.
+        approved: async (_answer, approval) => {
+          starting = true;
+          const started = await request(entry.gateway, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval).catch(() => null);
+          return started?.status === 200 ? null : "not run on the PC: Gripi no longer waits for it";
+        }
+      });
+      if (refusal) return await answerWith({ error: refusal });
+      if (signal.aborted) return;
+
+      const result = await runCommand(executable, args, folder, signal);
+      if (signal.aborted || await send({ result }) === 200) return;
+      await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
+    } catch (error) {
+      await answerWith({ error: error.message });
+    }
+  }
+
+  // Runs an approved command as the user, with the app's environment, without a shell or input, in a process group of
+  // its own, which signal ends.
+  function runCommand(executable, args, folder, signal) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(executable, args, { cwd: folder, stdio: ["ignore", "pipe", "pipe"], detached: true });
+      const outputs = [child.stdout, child.stderr].map(capture);
+      const kill = (name) => {
+        try {
+          process.kill(-child.pid, name);
+        } catch (_error) {
+          // The group has ended, or never started.
+        }
+      };
+      // The group may outlive the command's first process, such as a process that it started in the background.
+      const end = () => {
+        kill("SIGTERM");
+        stopping.add(kill);
+        setTimeout(() => {
+          kill("SIGKILL");
+          stopping.delete(kill);
+        }, KILL_DELAY_MS).unref();
+      };
+      let failure;
+      signal.addEventListener("abort", end, { once: true });
+      child.on("error", (error) => {
+        failure ??= error;
+      });
+      child.on("close", (code, name) => {
+        signal.removeEventListener("abort", end);
+        if (failure) return reject(new Error(`could not run the command on the PC: ${failure.message}`));
+        const [stdout, stderr] = outputs.map((output) => Buffer.concat(output.chunks).toString("base64"));
+        resolve({ exit_code: code ?? 128 + os.constants.signals[name], stdout, stderr, truncated: outputs.some((output) => output.truncated) });
+      });
     });
   }
 
@@ -298,6 +422,10 @@ function validMessage(message) {
     case "ssh":
       return field(message.id) && field(message.session) && field(message.connection) &&
         (message.session_name === undefined || text(message.session_name)) && validAgentMessage(message.message);
+    case "run":
+      return field(message.id) && field(message.session) && (message.session_name === undefined || text(message.session_name)) &&
+        Array.isArray(message.argv) && message.argv.length > 0 && message.argv.length <= MAX_COMMAND_WORDS &&
+        message.argv.every(text) && message.argv[0] !== "" && (message.cwd === undefined || field(message.cwd));
     case "ssh_close":
       return field(message.session) && field(message.connection);
     case "cancel":
@@ -369,6 +497,37 @@ function computerName(hostname) {
 // Like the gateway's shellWords, so a session name or login can't hide or reorder what the dialog shows.
 function escapeForDisplay(text) {
   return String(text).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, (char) => `\\u${char.codePointAt(0).toString(16).padStart(4, "0")}`);
+}
+
+// Keeps the first 16 MiB of an output and drops the rest.
+function capture(stream) {
+  const output = { chunks: [], size: 0, truncated: false };
+  stream.on("data", (chunk) => {
+    const kept = chunk.subarray(0, MAX_OUTPUT_BYTES - output.size);
+    output.truncated ||= kept.length < chunk.length;
+    output.size += kept.length;
+    // An empty view would still keep the chunk.
+    if (kept.length) output.chunks.push(kept);
+  });
+  return output;
+}
+
+// Finds the file that a command names as a shell would: one with a slash in the folder, and others on the app's PATH,
+// whose relative folders it skips.
+async function findExecutable(name, folder) {
+  const candidates = name.includes("/")
+    ? [path.resolve(folder, name)]
+    : (process.env.PATH || "").split(path.delimiter).filter((directory) => path.isAbsolute(directory)).map((directory) => path.join(directory, name));
+  for (const candidate of candidates) {
+    const file = (await fs.promises.stat(candidate).catch(() => null))?.isFile();
+    if (file && await fs.promises.access(candidate, fs.constants.X_OK).then(() => true, () => false)) return candidate;
+  }
+  return null;
+}
+
+// Like the gateway's shellWords, so the dialog shows the command as a shell would take it, with nothing hidden.
+function commandLine(words) {
+  return words.map((word) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : escapeForDisplay(JSON.stringify(word)))).join(" ");
 }
 
 async function connectLocalAgent() {

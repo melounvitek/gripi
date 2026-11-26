@@ -296,8 +296,8 @@ async function confirmPcAccessOptIn(gateway) {
     type: "warning",
     message: `Allow ${gateway.name} to use this computer?`,
     detail: [
-      "Agents on this server can then ask to use this computer's SSH keys. Each use needs your approval here and your password.",
-      "The server sees every public key in your SSH agent, with its comment.",
+      "Agents on this server can then ask to use this computer's SSH keys, and to run commands here as you. Each use needs your approval here and your password.",
+      "The server sees every public key in your SSH agent, with its comment, and the output of the commands that you run for it.",
       "It works only while Gripi is open."
     ].join("\n\n"),
     buttons: ["Cancel", "Allow"],
@@ -314,14 +314,21 @@ async function pcLinkRequest(gateway, pathname, body, signal) {
   return linkRequest(url, body, { cookie: cookies.map(({ name, value }) => `${name}=${value}`).join("; "), signal });
 }
 
-async function confirmPcAccess({ gateway, sessionName, key, server, login, signal }) {
+async function confirmPcAccess({ kind, gateway, sessionName, signal, ...request }) {
   if (!mainWindow || mainWindow.isDestroyed()) return "deny";
 
-  const message = `${gateway.name} wants to use your SSH key`;
+  const run = kind === "run";
+  const message = run ? `${gateway.name} wants to run a command on this computer` : `${gateway.name} wants to use your SSH key`;
   if (Notification.isSupported()) new Notification({ title: message, body: `Session: ${sessionName}`, icon: WINDOW_ICON_PATH }).show();
   mainWindow.show();
   mainWindow.focus();
-  const detail = [
+  const { key, server, login, command, folder } = request;
+  const detail = (run ? [
+    `Session:  ${sessionName}`,
+    `Command:  ${command}`,
+    `Folder:   ${folder}`,
+    "As:       you"
+  ] : [
     `Session:  ${sessionName}`,
     `Key:      ${key.type} ${key.fingerprint}${key.comment ? ` (${key.comment})` : ""}`,
     `Server:   ${server.names.join(", ") || "known host"} (in your known_hosts)`,
@@ -329,18 +336,19 @@ async function confirmPcAccess({ gateway, sessionName, key, server, login, signa
     `Login:    ${login}`,
     "",
     "Allow for 5 minutes lets this session use this key on this server without asking again."
-  ].join("\n");
+  ]).join("\n");
+  const answers = run ? ["deny", "run"] : ["deny", "once", "grant"];
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: "warning",
     message,
     detail,
-    buttons: ["Deny", "Allow once", "Allow for 5 minutes"],
+    buttons: run ? ["Deny", "Run"] : ["Deny", "Allow once", "Allow for 5 minutes"],
     defaultId: 0,
     cancelId: 0,
     noLink: true,
     signal
   });
-  return ["deny", "once", "grant"][response];
+  return answers[response];
 }
 
 function routeGatewayShortcut(browserWindow, channel, eventName, detail) {

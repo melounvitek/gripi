@@ -37,12 +37,14 @@ const (
 
 // pcMessage is a message of the gateway to the desktop app.
 type pcMessage struct {
-	Type        string `json:"type"`
-	ID          string `json:"id"`
-	Session     string `json:"session"`
-	SessionName string `json:"session_name"`
-	Connection  string `json:"connection"`
-	Message     []byte `json:"message"`
+	Type        string   `json:"type"`
+	ID          string   `json:"id"`
+	Session     string   `json:"session"`
+	SessionName string   `json:"session_name"`
+	Connection  string   `json:"connection"`
+	Message     []byte   `json:"message"`
+	Argv        []string `json:"argv"`
+	CWD         string   `json:"cwd"`
 }
 
 type pcLinkAnswer struct {
@@ -126,15 +128,15 @@ func pcDesktop(t *testing.T, address, link string, answer func(pcMessage) map[st
 }
 
 // pcDesktopOn plays the desktop app of the browser with token on the computer name, which opens link and polls it until
-// stop is called or the test ends. It answers each ssh message with what answer returns, unless answer is nil, and
-// passes on every message. It returns once the link is open.
+// stop is called or the test ends. It answers each ssh or run message with what answer returns, unless answer is nil,
+// and passes on every message. It returns once the link is open.
 func pcDesktopOn(t *testing.T, address, token, name, link string, answer func(pcMessage) map[string]any) (messages <-chan pcMessage, stop func()) {
 	t.Helper()
 	received := make(chan pcMessage, 100)
 	poll := func(open bool) bool {
 		body := map[string]any{"link": link}
 		if open {
-			body["open"], body["name"] = true, name
+			body["open"], body["name"], body["run"] = true, name, true
 		}
 		status, polled := pcLinkSend(t, address, "/pc/link", body, asBrowser(token))
 		if status != http.StatusOK {
@@ -143,7 +145,7 @@ func pcDesktopOn(t *testing.T, address, token, name, link string, answer func(pc
 		}
 		for _, message := range polled.Messages {
 			received <- message
-			if message.Type == "ssh" && answer != nil {
+			if (message.Type == "ssh" || message.Type == "run") && answer != nil {
 				reply := answer(message)
 				reply["link"], reply["id"] = link, message.ID
 				if status, replied := pcLinkSend(t, address, "/pc/link/reply", reply, asBrowser(token)); status != http.StatusOK {
@@ -399,7 +401,7 @@ func TestPCSSHPrintsTheDesktopAppsRefusalOnceAndFailsTheAgentRequest(t *testing.
 func TestPCSSHFailsAtOnceWithoutALinkOrASession(t *testing.T) {
 	requireTools(t, "ssh-add")
 	alpha, _ := pcGateway(t)
-	for _, usage := range [][]string{{"pc"}, {"pc", "run", "--", "true"}, {"pc", "ssh"}, {"pc", "ssh", "--"}, {"pc", "ssh", "ssh-add", "-l"}} {
+	for _, usage := range [][]string{{"pc"}, {"pc", "exec", "--", "true"}, {"pc", "ssh"}, {"pc", "ssh", "--"}, {"pc", "ssh", "ssh-add", "-l"}} {
 		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help pc") {
 			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
@@ -409,13 +411,21 @@ func TestPCSSHFailsAtOnceWithoutALinkOrASession(t *testing.T) {
 	if result := pcSSH(t, "ssh-add", "-l"); result.code != 1 || !strings.HasPrefix(result.stderr, "gripi pc: no computer is connected") || time.Since(started) > 5*time.Second {
 		t.Fatalf("gripi pc ssh without a link = %+v after %s", result, time.Since(started))
 	}
+	if code, stdout, stderr := runCLI("pc", "run", "--", "true"); code != 1 || stdout != "" || !strings.HasPrefix(stderr, "gripi pc: the gateway answered 503: no computer is connected") {
+		t.Fatalf("gripi pc run without a link = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
 	t.Setenv("PI_SESSION_FILE", alpha+".missing")
 	if result := pcSSH(t, "ssh-add", "-l"); result.code != 1 || !strings.HasPrefix(result.stderr, "gripi pc: the command runs in no session of yours") {
 		t.Fatalf("gripi pc ssh in an unknown session = %+v", result)
 	}
+	if code, _, stderr := runCLI("pc", "run", "--", "true"); code != 1 || !strings.HasPrefix(stderr, "gripi pc: the gateway answered 404: the command runs in no session of yours") {
+		t.Fatalf("gripi pc run in an unknown session = %d, stderr %q", code, stderr)
+	}
 	outsideSessions(t)
-	if code, _, stderr := runCLI("pc", "ssh", "--", "true"); code != 1 || !strings.Contains(stderr, "PI_SESSION_FILE") {
-		t.Fatalf("gripi pc ssh outside a session = %d, stderr %q", code, stderr)
+	for _, command := range [][]string{{"pc", "ssh", "--", "true"}, {"pc", "run", "--", "true"}} {
+		if code, _, stderr := runCLI(command...); code != 1 || !strings.Contains(stderr, "PI_SESSION_FILE") {
+			t.Fatalf("gripi %q outside a session = %d, stderr %q", command, code, stderr)
+		}
 	}
 }
 
@@ -1202,5 +1212,250 @@ func TestCancelInGripiRefusesARequestThatAComputerAsksToApprove(t *testing.T) {
 	case err := <-approvedAnswered:
 		t.Fatalf("the approved request got %v", err)
 	default:
+	}
+}
+
+// pcStarting tells the gateway, as the desktop app of the laptop does over link once the user approved the request id
+// and polkit confirmed it, that it is about to run the command, and returns whether it may.
+func pcStarting(t *testing.T, address, link, id string, change ...func(*http.Request)) int {
+	status, _ := pcLinkSend(t, address, "/pc/link/status", map[string]any{"link": link, "id": id, "starting": true}, change...)
+	return status
+}
+
+// pcResult is the desktop app's reply with how a command ended.
+func pcResult(code int, stdout, stderr string, truncated bool) map[string]any {
+	return map[string]any{"result": map[string]any{"exit_code": code, "stdout": []byte(stdout), "stderr": []byte(stderr), "truncated": truncated}}
+}
+
+// gripi pc run asks the computer where the session was last used to run the command, and passes on its output and
+// exit code.
+func TestPCRunRunsTheCommandOnTheComputerWhereTheSessionWasLastUsed(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "laptop", func(message pcMessage) map[string]any {
+		return pcResult(3, "out\n", "err\n", message.CWD == "")
+	})
+	pcDesktopOn(t, address, pcDeskToken, "desk", "desk", answeredBy("desk"))
+	pcPresence(t, pcBrowserToken, alpha, true)
+
+	if code, stdout, stderr := runCLI("pc", "run", "--cwd", "/srv/app", "--", "systemctl", "--user", "restart", "pipe wire"); code != 3 || stdout != "out\n" || stderr != "err\n" {
+		t.Fatalf("gripi pc run = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	request := nextPCMessage(t, messages, "run")
+	want := pcMessage{Type: "run", ID: request.ID, Session: alpha, SessionName: "Prompt for 0a1-alpha", Argv: []string{"systemctl", "--user", "restart", "pipe wire"}, CWD: "/srv/app"}
+	if len(request.ID) != 64 || !reflect.DeepEqual(request, want) {
+		t.Fatalf("the desktop app got %+v, want %+v", request, want)
+	}
+
+	// Without --cwd, the computer runs it in the user's home folder there, which the gateway doesn't know.
+	if code, _, stderr := runCLI("pc", "run", "--", "true"); code != 3 || stderr != "err\ngripi pc: the command printed more than 16 MiB to an output, and Gripi dropped the rest\n" {
+		t.Fatalf("gripi pc run without --cwd = %d, stderr %q", code, stderr)
+	}
+	if request := nextPCMessage(t, messages, "run"); request.CWD != "" || !reflect.DeepEqual(request.Argv, []string{"true"}) {
+		t.Fatalf("the desktop app got %+v", request)
+	}
+}
+
+// gripi pc run refuses at once what the computer couldn't run as given, rather than letting it wait for nothing.
+func TestPCRunRefusesACommandThatTheComputerCouldNotRunAsGiven(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "laptop", answeredBy("laptop"))
+	pcPresence(t, pcBrowserToken, alpha, true)
+
+	for _, usage := range [][]string{{"pc", "run"}, {"pc", "run", "--"}, {"pc", "run", "true"}, {"pc", "run", "--cwd", "app", "--", "true"}, {"pc", "run", "--cwd", "/srv/app", "true", "--", "true"}, {"pc", "run", "--root", "--", "true"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help pc") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	for name, command := range map[string][]string{
+		"a NUL":                          {"pc", "run", "--", "printf", "a\x00b"},
+		"a NUL in the folder":            {"pc", "run", "--cwd", "/srv/a\x00b", "--", "true"},
+		"invalid UTF-8":                  {"pc", "run", "--", "printf", "\xff"},
+		"an empty command":               {"pc", "run", "--", "", "true"},
+		"more than 256 words":            append([]string{"pc", "run", "--", "echo"}, make([]string, 256)...),
+		"a word of more than 4096 bytes": {"pc", "run", "--", "echo", strings.Repeat("x", 4097)},
+	} {
+		if code, _, stderr := runCLI(command...); code != 1 || !strings.HasPrefix(stderr, "gripi pc: the gateway answered 400: ") {
+			t.Fatalf("gripi pc run with %s = %d, stderr %q", name, code, stderr)
+		}
+	}
+	if code, _, stderr := runCLI("pc", "run", "--", "echo", strings.Repeat("x", 4096)); code != 1 || stderr != "gripi pc: the gateway answered 502: laptop\n" {
+		t.Fatalf("gripi pc run with a word of 4096 bytes = %d, stderr %q", code, stderr)
+	}
+	if request := nextPCMessage(t, messages, "run"); len(request.Argv) != 2 {
+		t.Fatalf("the desktop app got %+v", request)
+	}
+}
+
+// A desktop app from before gripi pc run drops its commands, so the gateway refuses them at once rather than letting gripi
+// wait for nothing.
+func TestPCRunNeedsADesktopAppThatRunsCommands(t *testing.T) {
+	alpha, address := pcGateway(t)
+	gateway.PCLinkStale = time.Minute
+	if status, _ := pcLinkSend(t, address, "/pc/link", map[string]any{"link": "app", "open": true, "name": "laptop"}); status != http.StatusOK {
+		t.Fatalf("open poll = %d", status)
+	}
+	pcPresence(t, pcBrowserToken, alpha, true)
+
+	if code, _, stderr := runCLI("pc", "run", "--", "true"); code != 1 || stderr != "gripi pc: the gateway answered 503: the Gripi desktop app on laptop can't run commands; ask the user to update it\n" {
+		t.Fatalf("gripi pc run = %d, stderr %q", code, stderr)
+	}
+}
+
+// The computer confirms that gripi pc run still waits right before it runs the command, so Cancel in Gripi wins until
+// then, and never acts once the command runs.
+func TestCancelInGripiWinsOverARunOnlyUntilTheComputerStartsIt(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	cancel := func(id string) *httptest.ResponseRecorder {
+		return browserRequest(http.MethodPost, "/pc/cancel", url.Values{"id": {id}}, "gripi_browser="+pcPhoneToken)
+	}
+
+	result := startCLI("pc", "run", "--", "true")
+	request := nextPCMessage(t, messages, "run")
+	pcAsking(t, address, pcBrowserToken, "app", request.ID, "/usr/bin/true")
+	if response := cancel(request.ID); response.Code != http.StatusOK {
+		t.Fatalf("cancel = %d %s", response.Code, response.Body)
+	}
+	if status := pcStarting(t, address, "app", request.ID); status != http.StatusNotFound {
+		t.Fatalf("starting after a cancel = %d", status)
+	}
+	if answered := <-result; answered.code != 1 || answered.stderr != "gripi pc: the gateway answered 502: cancelled in Gripi\n" {
+		t.Fatalf("gripi pc run that Gripi cancelled = %+v", answered)
+	}
+
+	// Once the command may start, gripi pc run waits for it however long it runs.
+	timeout := gateway.PCReplyTimeout
+	t.Cleanup(func() { gateway.PCReplyTimeout = timeout })
+	gateway.PCReplyTimeout = 200 * time.Millisecond
+	result = startCLI("pc", "run", "--", "true")
+	request = nextPCMessage(t, messages, "run")
+	pcAsking(t, address, pcBrowserToken, "app", request.ID, "/usr/bin/true")
+	if status := pcStarting(t, address, "app", request.ID); status != http.StatusOK {
+		t.Fatalf("starting = %d", status)
+	}
+	if response := cancel(request.ID); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"The command already runs."`) {
+		t.Fatalf("cancel of a command that runs = %d %s", response.Code, response.Body)
+	}
+	if approvals := pcApprovals(t, alpha); len(approvals) != 0 {
+		t.Fatalf("approvals while the command runs = %+v", approvals)
+	}
+	time.Sleep(2 * gateway.PCReplyTimeout)
+	reply := pcResult(0, "ran\n", "", false)
+	reply["link"], reply["id"] = "app", request.ID
+	if status, answer := pcLinkSend(t, address, "/pc/link/reply", reply); status != http.StatusOK {
+		t.Fatalf("reply = %d %+v", status, answer)
+	}
+	if answered := <-result; answered.code != 0 || answered.stdout != "ran\n" || answered.stderr != "" {
+		t.Fatalf("gripi pc run = %+v", answered)
+	}
+}
+
+// Only the link of a request may start it, and only while gripi pc run waits for it.
+func TestOnlyTheLinkOfAWaitingRunMayStartIt(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	pcDesktopOn(t, address, pcDeskToken, "desk", "desk", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, err := newGatewayClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan error, 1)
+	go func() {
+		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://gripi/pc/run", strings.NewReader(url.Values{"session": {alpha}, "argv": {"true"}}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		_, err := client.http.Do(request)
+		ended <- err
+	}()
+	request := nextPCMessage(t, messages, "run")
+
+	if status := pcStarting(t, address, "app", request.ID, asBrowser(pcDeskToken)); status != http.StatusConflict {
+		t.Fatalf("starting from another browser over the link = %d", status)
+	}
+	if status := pcStarting(t, address, "desk", request.ID, asBrowser(pcDeskToken)); status != http.StatusNotFound {
+		t.Fatalf("starting from another link = %d", status)
+	}
+	cancel()
+	<-ended
+	if cancelled := nextPCMessage(t, messages, "cancel"); cancelled.ID != request.ID {
+		t.Fatalf("the desktop app got %+v", cancelled)
+	}
+	if status := pcStarting(t, address, "app", request.ID); status != http.StatusNotFound {
+		t.Fatalf("starting once gripi pc run ended = %d", status)
+	}
+}
+
+// The desktop app keeps at most 16 MiB of each output, so the gateway takes no more.
+func TestPCRunTakesAtMost16MiBOfEachOutput(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+
+	result := startCLI("pc", "run", "--", "yes")
+	request := nextPCMessage(t, messages, "run")
+	for _, refused := range []map[string]any{pcResult(0, strings.Repeat("y", 16<<20+1), "", true), pcResult(0, "", strings.Repeat("y", 16<<20+1), true), {}} {
+		refused["link"], refused["id"] = "app", request.ID
+		if status, _ := pcLinkSend(t, address, "/pc/link/reply", refused); status != http.StatusBadRequest {
+			t.Fatalf("a reply of a result over 16 MiB, or of nothing = %d", status)
+		}
+	}
+	output := strings.Repeat("y", 16<<20)
+	reply := pcResult(0, output, output, true)
+	reply["link"], reply["id"] = "app", request.ID
+	if status, answer := pcLinkSend(t, address, "/pc/link/reply", reply); status != http.StatusOK {
+		t.Fatalf("a reply of 16 MiB of each output = %d %+v", status, answer)
+	}
+	if answered := <-result; answered.code != 0 || answered.stdout != output || !strings.HasPrefix(answered.stderr, output) {
+		t.Fatalf("gripi pc run = %d, %d bytes of stdout, %d of stderr", answered.code, len(answered.stdout), len(answered.stderr))
+	}
+}
+
+// gripi on a worker reaches the computer for the sessions that run there, routed by main's sessions, so also through a
+// parent on main, but not for a session on main.
+func TestPCOnAWorkerReachesTheComputerOnlyForSessionsThere(t *testing.T) {
+	requireTools(t, "ssh-add")
+	// Socket paths have a short system limit.
+	state := filepath.Dir(socketPath(t))
+	if err := os.MkdirAll(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	alpha, address := pcGateway(t, func(configured *config.Config) {
+		configured.ReadStatePath = filepath.Join(state, "read.json")
+		cfg = *configured
+	})
+	beta := filepath.Join(filepath.Dir(alpha), "beta.jsonl")
+	if code, _, stderr := runCLI("link", alpha, beta); code != 0 {
+		t.Fatalf("gripi link = %d, stderr %q", code, stderr)
+	}
+	pcDesktop(t, address, "laptop", func(message pcMessage) map[string]any {
+		if message.Type == "run" {
+			return pcResult(0, "ran on the laptop\n", "", false)
+		}
+		return map[string]any{"error": "laptop"}
+	})
+	pcPresence(t, pcBrowserToken, beta, true)
+	socket, stop, err := startWorkerSocket(cfg, browser, "beelink", fakePlacement{sessions: []string{alpha}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	t.Setenv("GRIPI_SOCKET_PATH", socket)
+
+	if code, stdout, stderr := runCLI("pc", "run", "--", "true"); code != 0 || stdout != "ran on the laptop\n" {
+		t.Fatalf("gripi pc run on the worker = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if answerer := pcAnswerer(t); answerer != "laptop" {
+		t.Fatalf("gripi pc ssh on the worker reached %q", answerer)
+	}
+	t.Setenv("PI_SESSION_FILE", beta)
+	if code, _, stderr := runCLI("pc", "run", "--", "true"); code != 1 || !strings.HasPrefix(stderr, "gripi pc: the gateway answered 404: the command runs in no session of yours") {
+		t.Fatalf("gripi pc run on the worker in a session on main = %d, stderr %q", code, stderr)
+	}
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, "the command runs in no session of yours") {
+		t.Fatalf("gripi pc ssh on the worker in a session on main = %q", answerer)
 	}
 }
