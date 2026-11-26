@@ -89,8 +89,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
         if (body.starting && starting === "late") return new Promise((resolve) => { harness.started = () => resolve({ status: 200, body: {} }); });
         if (body.starting && starting === "held") return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
-        // Such as an answer too large to read, or one that something on the way gave.
-        if (body.starting && starting === "unreadable") return Promise.resolve({ status: 200, body: null });
+        if (body.starting && typeof starting === "object" && starting) return Promise.resolve(starting);
         if (body.starting) return starting ? Promise.resolve({ status: starting, body: {} }) : Promise.reject(new Error("the server did not answer in time"));
         if (lostResults && body.result || lostReplies && path === "/pc/link/reply") return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
@@ -837,7 +836,9 @@ test("refuses at once a folder or command that isn't there, or a command too lon
 
 const unconfirmedStarts = [
   ["that the server no longer waits for", 404],
-  ["whose start the server's answer doesn't confirm, as it isn't the server's JSON", "unreadable"]
+  // Such as an answer too large to read, or one that something on the way gave.
+  ["whose start the server's answer doesn't confirm, as it isn't the server's JSON", { status: 200, body: null }],
+  ["whose start the server's answer doesn't confirm, as it has an error", { status: 200, body: { error: "authentication required" } }]
 ];
 for (const [what, starting] of unconfirmedStarts) {
   test(`runs nothing ${what} once the user approved it, nor asks polkit for one as root`, async (t) => {
@@ -985,21 +986,28 @@ for (const [what, options, unrunnable] of unanswered) {
   });
 }
 
-// Unlike the gateway's own, which say that the request no longer waits, or that the link is gone.
-test("a link whose answer to a command that may have started gets a 404 page from something else on the way ends", async (t) => {
-  const h = setup(t);
-  const link = h.link();
+// Unlike the gateway's own, which say that it took the answer, that the request no longer waits, or that the link is
+// gone.
+const foreignAnswers = [
+  ["a 404 page from something else on the way", { status: 404, body: null }, "HTTP 404 without a JSON object"],
+  ["a 200 that has an error", { status: 200, body: { error: "authentication required" } }, "HTTP 200: authentication required"]
+];
+for (const [what, answer, got] of foreignAnswers) {
+  test(`a link whose answer to a command that may have started gets ${what} ends`, async (t) => {
+    const h = setup(t);
+    const link = h.link();
 
-  h.respond = (path) => path === "/pc/link/reply" && { status: 404, body: null };
-  await h.deliver(run("1", ["true"]));
-  await h.prompted(1);
-  await h.answer("run");
-  await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
+    h.respond = (path) => path === "/pc/link/reply" && answer;
+    await h.deliver(run("1", ["true"]));
+    await h.prompted(1);
+    await h.answer("run");
+    await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
 
-  assert.deepEqual(h.replies().map((reply) => Object.keys(reply).at(-1)), ["result", "error"]);
-  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
-  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the reply to a command that may have started got HTTP 404 without a JSON object"]);
-});
+    assert.deepEqual(h.replies().map((reply) => Object.keys(reply).at(-1)), ["result", "error"]);
+    assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+    assert.deepEqual(h.warnings(), [`PC access: lost the link to home-server: the reply to a command that may have started got ${got}`]);
+  });
+}
 
 test("a link keeps refusals that don't reach Gripi before the server may have let the command start", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

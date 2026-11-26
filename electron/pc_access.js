@@ -524,9 +524,9 @@ function validAgentMessage(text) {
 }
 
 // Whether the gateway answered a request of a link with one of statuses. It answers with a JSON object, unlike something
-// else on the way, while an answer too large to read or cut short has none.
+// else on the way, while an answer too large to read or cut short has none, and a 200 with an error isn't its yes.
 function answeredWith({ status, body }, ...statuses) {
-  return statuses.includes(status) && typeof body === "object" && body !== null;
+  return statuses.includes(status) && typeof body === "object" && body !== null && !(status === 200 && "error" in body);
 }
 
 // Says what a request of a link got, for the log: the gateway's status and error, or the request's error.
