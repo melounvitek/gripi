@@ -59,6 +59,7 @@ import { VoiceCallController } from "./voice_call_controller.js";
 import { HermesPanelController } from "./hermes_panel_controller.js";
 import { ScratchController } from "./scratch_controller.js";
 import { SudoPromptController } from "./sudo_prompt_controller.js";
+import { PcApprovalsController } from "./pc_approvals_controller.js";
 import { WorkerController } from "./worker_controller.js";
 import { WorkerPickerController } from "./worker_picker_controller.js";
 
@@ -239,6 +240,7 @@ const editorPlaceCanFocus = () => automaticComposerFocusEnabled() && !modalIsOpe
   (document.activeElement === promptTextarea ? !promptTextarea.value : !editableElement(document.activeElement));
 // Unlike a dialog, the prompt leaves polling on, which notices its request answered elsewhere.
 const sudoPromptController = new SudoPromptController(window, { canFocus: editorPlaceCanFocus });
+const pcApprovalsController = new PcApprovalsController(document, window);
 // Polling brings the worker's state, which its block in the editor's place shows.
 const workerController = new WorkerController(document, window, {
   sessionPath: () => currentSessionPath(),
@@ -337,6 +339,7 @@ function bindSessionDom() {
   currentSessionFindController.bind();
   voiceCallController.bind(promptForm);
   sudoPromptController.bind(document.querySelector("[data-sudo-prompt]"), promptForm);
+  pcApprovalsController.bind(document.querySelector("[data-pc-waiting]"));
   sessionStatusBar = document.getElementById("session-status-bar");
   workerController.bind({
     badge: document.querySelector("[data-worker-badge]"),
@@ -2000,6 +2003,7 @@ async function pollEvents() {
       return;
     }
     sudoPromptController.update(payload.sudo_requests);
+    pcApprovalsController.update(payload.pc_approvals);
     workerController.update(payload.worker, payload.worker_notices);
     if (Number.isInteger(payload.last_seq)) {
       lastEventSeq = payload.last_seq;
@@ -2907,6 +2911,7 @@ async function copyText(text) {
 function resetSessionViewState() {
   voiceCallController.end();
   sudoPromptController.reset();
+  pcApprovalsController.reset();
   workerController.reset();
   pendingFinalAssistantReply = null;
   currentSessionFindController.close({ restoreFocus: false });
@@ -3869,6 +3874,7 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
   liveMessageRenderer.restoreActiveToolExecutions();
   hydrateExtensionUiState();
   sudoPromptController.update(JSON.parse(liveOutput.dataset.sudoRequests || "[]"));
+  pcApprovalsController.update(JSON.parse(liveOutput.dataset.pcApprovals || "[]"));
   workerController.update(JSON.parse(liveOutput.dataset.worker || "null"), JSON.parse(liveOutput.dataset.workerNotices || "[]"));
 }
 

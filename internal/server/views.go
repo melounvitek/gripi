@@ -68,6 +68,7 @@ type liveOutputData struct {
 	QueuedMessagesJSON       string
 	ExtensionUIJSON          string
 	SudoRequestsJSON         string
+	PCApprovalsJSON          string
 	WorkerJSON               string
 	WorkerNoticesJSON        string
 	WorkersAdded             bool
@@ -450,6 +451,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 		view.LiveOutput.SudoRequestsJSON = jsonData(app.sudoRequests.of(selected.Path))
+		view.LiveOutput.PCApprovalsJSON = jsonData(app.pcLinks.approvals(selected.Path))
 		location, notices := app.sessionWorker(selected.Path)
 		view.LiveOutput.WorkerJSON, view.LiveOutput.WorkerNoticesJSON = jsonData(location), jsonData(notices)
 		if app.workers != nil {

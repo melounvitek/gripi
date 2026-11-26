@@ -205,12 +205,19 @@ function createPcAccess({
       server: { names: host.names, hostKeyFingerprint: fingerprint(hostKey) },
       login: escapeForDisplay(user)
     };
+    const summary = `SSH login to ${host.names[0] || "a known host"} as ${prompt.login}`;
     return inTurn(async () => {
+      // A request cancelled while it waited for its turn needs no dialog, nor one that a grant made meanwhile covers.
+      if (signal.aborted) return "denied on the PC";
+      if (link.grants.get(grantKey) > now()) return null;
+
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(), DIALOG_TIMEOUT_MS);
       const approval = AbortSignal.any([signal, timeout.signal]);
+      // Gripi shows that the PC asks on the user's other devices, until the dialog and polkit's have ended.
+      status(entry, link, message.id, { asking: true, summary, expires_in: DIALOG_TIMEOUT_MS / 1000 }, signal);
       try {
-        const answer = approval.aborted ? "deny" : await confirm({ ...prompt, signal: approval }).catch((error) => {
+        const answer = await confirm({ ...prompt, signal: approval }).catch((error) => {
           console.warn("PC access: the approval dialog failed:", error);
           return "deny";
         });
@@ -224,8 +231,15 @@ function createPcAccess({
         return null;
       } finally {
         clearTimeout(timer);
+        status(entry, link, message.id, { asking: false }, signal);
       }
     });
+  }
+
+  // Tells the server whether the PC asks the user to approve a request. The dialog doesn't wait for it, and the server
+  // keeps a start that comes after the stop from showing.
+  function status(entry, link, id, fields, signal) {
+    if (!signal.aborted) request(entry.gateway, "/pc/link/status", { link: link.id, id, ...fields }, signal).catch(() => {});
   }
 
   // Runs one approval at a time, from its dialog to the end of polkit's, so that one never covers the other.

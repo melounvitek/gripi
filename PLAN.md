@@ -253,9 +253,14 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 2. Page and desktop: the `used` report on real input and on the user's switches, prompt retries marked, the computer's name on the open poll.
 3. Docs and skill.
 
-**Phase 3: show a waiting approval on every device.** Details under "Waiting approvals (phase 3)". Needs the user's pick of the mockups first.
+**Phase 3: show a waiting approval on every device. Done.** Details under "Waiting approvals (phase 3)".
+1. Gateway: the status on the waiter, the approvals in the page and live events, Cancel from Gripi, Web Push.
+2. Desktop: the status posts from the approval turn.
+3. Page: the line above the editor (direction B), and the service worker's focus check.
+4. Docs and skill.
 
 **Phase 4: `gripi pc run`** as the PC user.
+- Before it: Cancel from Gripi wins until the gateway hears the desktop's `asking: false` or reply, so it can refuse a login that the user just allowed on the PC (phase 3 accepted that for SSH, which only refuses). A run has side effects on the PC, so decide whether the desktop confirms with the gateway before it spawns.
 1. The run dialog, the runner with output caps and cancel, and a cwd that must be absolute and exist (home by default). `argv[0]` is resolved on the PC's PATH, and the dialog shows the resolved path.
 2. Workers: both socket routes go into `workerRoutes`, so sessions on workers can use the PC too. Routing uses main's session key, and the routes check the session's placement with `reachesSession`.
 3. Docs: when the gateway's `~/.ssh/config` names a key for a host with `IdentitiesOnly yes`, `gripi pc ssh` uses only that key there.
@@ -366,6 +371,11 @@ When the user is on the phone and a computer asks for approval, the phone must s
   - Web Push skips the approving link's own owner, whose app shows its native notification. `web_push_worker.js`'s focus check must also match the `/hermes` and `/` (default session) pages.
   - The B line stays visible outside `.prompt-form`'s sudo and worker hide scope, never takes the editor's focus or binds Escape, can show more than one approval, and keeps cancelled IDs so that polls in flight don't bring them back. It needs server-rendered initial data and a first-tap touch test on Cancel.
   - `live_output_bytes_test.go` needs updating for the new `/events` field.
+- **As built:**
+  - The line ends only when the gateway's list drops it, so a device whose clock is off still shows it; its clock only drives the countdown.
+  - A new session's waiting request moves with its key when Pi saves it, like the use record.
+  - The notification names its session while it stays within 3 KiB encoded, and the service worker asks each focused page which session it shows, as a page's URL may not name it (`/`, `/hermes`) or name an older key.
+  - The docs say that Cancel can still refuse a login allowed on the PC a moment before, and doesn't take back a 5-minute grant.
 - **Tests:**
   - Go:
     - status route checks, and status refused for another owner, link or unknown request;

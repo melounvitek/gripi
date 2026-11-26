@@ -413,34 +413,47 @@ func (app *application) notifySudo(view sudoRequestView) {
 		log.Printf("find whom to notify of a sudo request: %v", err)
 		return
 	}
-	title := "current session"
-	if session, found := app.sessionStore.Session(view.Session); found && strings.TrimSpace(session.DisplayName) != "" {
-		title = agent.NotificationPreview(session.DisplayName)
-	}
-	digest := sha256.Sum256([]byte(view.ID))
-	// The command shows as it is, without the Markdown of a reply.
-	payload, _ := json.Marshal(map[string]any{
-		"type":  "gripi-notification",
-		"title": title,
-		"body":  agent.NotificationBody("sudo: " + view.Display),
-		"plain": true,
-		"tag":   "gripi-sudo:" + hex.EncodeToString(digest[:16]),
-		"url":   completedReplyURL(view.Session, app.agentOf(view.Session)),
-	})
-	for _, owner := range owners {
+	owners = slices.DeleteFunc(owners, func(owner string) bool {
 		presenceOwner := singleUserOwner
 		if app.config.MultiUserMode {
 			presenceOwner = owner
 		}
-		if app.notificationPresence.Focused(presenceOwner, view.Session) {
-			continue
-		}
+		return app.notificationPresence.Focused(presenceOwner, view.Session)
+	})
+	// The command shows as it is.
+	app.notifyAtOnce(owners, view.Session, view.ID, "sudo", "sudo: "+view.Display)
+}
+
+// notifyAtOnce sends owners a notification of a request in session, of the kind given, at once, unlike of a reply, and
+// with body as plain text, without the Markdown of a reply. It names the session, which a page's URL may not, such as a
+// Hermes conversation's, so that a device's service worker skips it while the device shows the session; but only while
+// the notification stays well within the 4 KiB that a push message carries.
+func (app *application) notifyAtOnce(owners []string, session, id, kind, body string) {
+	title := "current session"
+	if found, ok := app.sessionStore.Session(session); ok && strings.TrimSpace(found.DisplayName) != "" {
+		title = agent.NotificationPreview(found.DisplayName)
+	}
+	digest := sha256.Sum256([]byte(id))
+	notification := map[string]any{
+		"type":  "gripi-notification",
+		"title": title,
+		"body":  agent.NotificationBody(body),
+		"plain": true,
+		"tag":   "gripi-" + kind + ":" + hex.EncodeToString(digest[:16]),
+		"url":   completedReplyURL(session, app.agentOf(session)),
+	}
+	payload, _ := json.Marshal(notification)
+	notification["session"] = session
+	if named, _ := json.Marshal(notification); len(named) <= 3<<10 {
+		payload = named
+	}
+	for _, owner := range owners {
 		// Each browser is an owner of its own, which a slow one mustn't hold up.
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 			defer cancel()
 			if err := app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
-				log.Printf("deliver a sudo request's notification: %v", err)
+				log.Printf("deliver the notification of a %s request: %v", kind, err)
 			}
 		}()
 	}

@@ -103,6 +103,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
   });
   harness.link = () => harness.polls.at(-1).body.link;
   harness.replies = () => harness.posts.filter((post) => post.path === "/pc/link/reply").map((post) => post.body);
+  harness.statuses = () => harness.posts.filter((post) => post.path === "/pc/link/status").map((post) => post.body);
   harness.deliver = async (...messages) => {
     harness.polls.shift().resolve({ status: 200, body: { messages } });
     await settle();
@@ -347,6 +348,40 @@ test("a failed password check denies and grants nothing", async (t) => {
   await h.deliver(ssh("2", sign(), { connection: "c2" }));
 
   assert.equal(h.prompts.length, 2);
+});
+
+test("tells the server while it asks, from its dialog to the end of the password check, which Gripi shows elsewhere", async (t) => {
+  let authenticated;
+  const h = setup(t, { authenticate: () => new Promise((resolve) => { authenticated = resolve; }) });
+
+  await h.deliver(ssh("1", sign({ user: "git\u001b" })), ssh("2", sign({ host: "host-gl" }), { connection: "c2" }));
+
+  const asking = { link: h.link(), id: "1", asking: true, summary: "SSH login to github.com as git\\u001b", expires_in: 120 };
+  assert.deepEqual(h.statuses(), [asking]);
+  await h.answer("once");
+  assert.deepEqual(h.statuses(), [asking]);
+
+  authenticated({ ok: true });
+  await settle();
+  assert.deepEqual(h.posts.filter((post) => post.body.id === "1").map((post) => post.path), ["/pc/link/status", "/pc/link/status", "/pc/link/reply"]);
+  assert.deepEqual(h.statuses(), [asking, { link: h.link(), id: "1", asking: false }, { ...asking, id: "2", summary: "SSH login to gitlab.com as git" }]);
+});
+
+test("says nothing of a login that a grant covers, also one made while it waited, nor of one cancelled meanwhile", async (t) => {
+  const h = setup(t);
+
+  await h.deliver(
+    ssh("1", sign()),
+    ssh("2", sign(), { connection: "c2" }),
+    ssh("3", sign({ user: "deploy" }), { connection: "c3" })
+  );
+  await h.deliver({ type: "cancel", id: "3" });
+  await h.answer("grant");
+  await h.deliver(ssh("4", sign(), { connection: "c4" }));
+
+  assert.equal(h.prompts.length, 1);
+  assert.deepEqual(h.statuses().map((status) => [status.id, status.asking]), [["1", true], ["1", false]]);
+  assert.deepEqual(h.replies().map((reply) => reply.id).sort(), ["1", "2", "4"]);
 });
 
 test("shows the next dialog only once the password check of the one before has ended", async (t) => {

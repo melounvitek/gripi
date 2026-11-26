@@ -55,8 +55,9 @@ Example:
 
 Exit codes:
   The command's own once it ran. When the computer signs no login, as when
-  gripi pc refused it or the user denied it, the agent answers with a failure,
-  and gripi pc prints why once, starting with "gripi pc:". When the command
+  gripi pc refused it, or the user denied it or cancelled it in Gripi, the
+  agent answers with a failure, and gripi pc prints why once, starting with
+  "gripi pc:". When the command
   cannot run, gripi pc prints why and exits with
   1  the command does not run in a Pi or Hermes session, or cannot start
   2  usage error

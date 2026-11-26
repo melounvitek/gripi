@@ -39,6 +39,10 @@ export class NotificationPresenceController {
     this.window.setInterval(() => {
       if (this.current().focused) this.reportCurrent(true);
     }, NOTIFICATION_PRESENCE_HEARTBEAT_MS);
+    // The service worker skips a notification of the session in front, which a page's URL may not name.
+    this.window.navigator?.serviceWorker?.addEventListener("message", (event) => {
+      if (event.data?.type === "gripi-shown-session") event.ports[0]?.postMessage(this.current().session);
+    });
     this.reportCurrent(true);
   }
 

@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -167,10 +170,190 @@ func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
 	}
 
 	links.closeConnection("connection")
-	if _, err := links.ask(context.Background(), link, pcMessage{Type: "ssh", ID: "request", Session: session, Connection: "connection"}); err != errPCClosed {
+	if _, err := links.ask(context.Background(), link, func() string { return session }, pcMessage{Type: "ssh", ID: "request", Session: session, Connection: "connection"}); err != errPCClosed {
 		t.Fatalf("ask = %v", err)
 	}
 	if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 || messages[0].Type != "ssh_close" {
 		t.Fatalf("the link got %+v (%v)", messages, err)
+	}
+}
+
+// A computer that begins to ask the user to approve a request notifies their other browsers at once and once, also
+// while they show the session: all clients are one for presence, also the computer that asks, which comes to the front
+// with a notification of its own.
+func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	handler := newPushTestHandler(t, false, false)
+	app := handler.app
+	path := writeNotificationSession(t, app.config.SessionsRoot, "Fix login redirect")
+	delivered := make(chan map[string]any, 10)
+	app.pushNotifier = pushNotifierFunc(func(_ context.Context, owner string, payload []byte) error {
+		var notification map[string]any
+		if err := json.Unmarshal(payload, &notification); err != nil {
+			return err
+		}
+		notification["owner"] = owner
+		delivered <- notification
+		return nil
+	})
+	owners := map[string]string{}
+	for _, token := range []string{"laptop", "phone"} {
+		if _, err := app.browserStore.ApproveCurrentBrowser(token, token); err != nil {
+			t.Fatal(err)
+		}
+		owners[token], _ = app.pushOwner(requestWithCookie("gripi_browser=" + token))
+		if err := app.pushSubscriptions.Upsert(owners[token], pushRouteSubscription(token)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{"laptop", "phone"} {
+		presence := pushJSON(t, map[string]any{"client_id": token, "session": path, "focused": true, "used": token == "laptop", "sequence": 1})
+		if response := pushRequest(handler, http.MethodPut, "/web-push/presence", presence, "gripi_browser="+token); response.Code != http.StatusNoContent {
+			t.Fatalf("presence = %d %s", response.Code, response.Body)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://gripi/pc/ssh-agent", strings.NewReader("connection=c&message=Cw%3D%3D&open=1&session="+url.QueryEscape(path)))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		handler.Local().ServeHTTP(httptest.NewRecorder(), request)
+	}()
+	var id string
+	for deadline := time.Now().Add(5 * time.Second); id == ""; {
+		messages, _ := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app"})
+		for _, message := range messages {
+			id = message.ID
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the link got no request")
+		}
+	}
+	status := func(asking bool) {
+		t.Helper()
+		body := pushJSON(t, map[string]any{"link": "app", "id": id, "asking": asking, "summary": "SSH login to github.com as git", "expires_in": 120})
+		request := httptest.NewRequest(http.MethodPost, "http://example.com/pc/link/status", strings.NewReader(body))
+		request.RemoteAddr = "127.0.0.1:40000"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Gripi-PC-Link", "1")
+		request.Header.Set("Cookie", "gripi_browser=laptop")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d %s", response.Code, response.Body)
+		}
+	}
+
+	status(true)
+	select {
+	case notification := <-delivered:
+		if notification["owner"] != owners["phone"] || notification["title"] != "Fix login redirect" || notification["body"] != "Approve on laptop: SSH login to github.com as git" || notification["plain"] != true || notification["url"] != "/?session="+url.QueryEscape(path) || notification["session"] != path || !strings.HasPrefix(notification["tag"].(string), "gripi-pc:") {
+			t.Fatalf("notification = %v", notification)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no notification")
+	}
+	status(true)
+	status(false)
+	status(true)
+	select {
+	case notification := <-delivered:
+		t.Fatalf("another notification = %v", notification)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// A new session has a pending key until Pi saves it, and a request that a computer asks to approve in it moves with it,
+// as the session's page and live events look it up by the saved key, also when Pi saves it before the request waits.
+func TestARequestThatAComputerAsksToApproveFollowsANewSessionWhenPiSavesIt(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	for _, early := range []bool{false, true} {
+		root := t.TempDir()
+		app := notificationTestApplication(t, root, false, false, nil)
+		pending, saved := filepath.Join(root, "pending.jsonl"), filepath.Join(root, "session.jsonl")
+		if err := app.rpcClients.Register(pending, &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": saved}}}); err != nil {
+			t.Fatal(err)
+		}
+		app.pendingSessions.Remember(pending, root, "")
+		links := &app.pcLinks
+		if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
+			t.Fatal(err)
+		}
+		links.use("owner", time.Now(), func() string { return pending })
+		link, key, err := links.route(nil, pending, "connection", true, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+		save := func() {
+			writeNotificationSession(t, root, "New session")
+			if session, err := app.canonicalRPCSessionPath(request, pending); err != nil || session != saved {
+				t.Fatalf("the pending session is %q (%v)", session, err)
+			}
+		}
+		if early {
+			save()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		resolve := func() string {
+			resolved, _, _ := app.resolveOwnedPendingPath(request, pending)
+			return resolved
+		}
+		go links.ask(ctx, link, resolve, pcMessage{Type: "ssh", ID: "request", Session: key, Connection: "connection"})
+		if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 || messages[0].Session != pending {
+			t.Fatalf("the link got %+v (%v)", messages, err)
+		}
+		if status, _ := links.status("owner", pcLinkBody{Link: "app", ID: "request", Asking: true, Summary: "SSH login", ExpiresIn: 120}); status != http.StatusOK {
+			t.Fatalf("status = %d", status)
+		}
+		if !early {
+			save()
+		}
+		if approvals := links.approvals(saved); len(approvals) != 1 || approvals[0].ID != "request" {
+			t.Fatalf("with Pi saving the session early %v, the saved session shows %+v", early, approvals)
+		}
+	}
+}
+
+// A Web Push message carries at most about 4 KiB, so a notification names its session only when it stays well within
+// that, which JSON's escapes can take a long session key or body over.
+func TestANotificationAtOnceNamesItsSessionOnlyWithinThePushLimit(t *testing.T) {
+	root := t.TempDir()
+	notifier := &recordingPushNotifier{}
+	app := notificationTestApplication(t, root, false, false, notifier)
+	short, long := filepath.Join(root, "session.jsonl"), filepath.Join(root, strings.Repeat("&", 200), "session.jsonl")
+
+	app.notifyAtOnce([]string{"owner"}, short, "request", "sudo", "sudo: true")
+	app.notifyAtOnce([]string{"owner"}, long, "request", "sudo", "sudo: "+strings.Repeat("<", 400))
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		notifier.mu.Lock()
+		count := len(notifier.payloads)
+		notifier.mu.Unlock()
+		if count == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d notifications", count)
+		}
+	}
+	sessions := map[string]bool{}
+	for _, payload := range notifier.payloads {
+		var notification map[string]any
+		if err := json.Unmarshal(payload, &notification); err != nil || len(payload) > 3<<10 {
+			t.Fatalf("a notification of %d bytes: %s (%v)", len(payload), payload, err)
+		}
+		session, _ := notification["session"].(string)
+		sessions[session] = true
+	}
+	if !reflect.DeepEqual(sessions, map[string]bool{short: true, "": true}) {
+		t.Fatalf("the notifications name %v", sessions)
 	}
 }

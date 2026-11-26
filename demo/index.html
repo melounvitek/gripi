@@ -319,7 +319,7 @@
     @media (hover: hover) and (pointer: fine) { .voice-call .voice-call-actions .voice-call-end:hover { color: #e08888; } }
     @media (max-width: 760px), (pointer: coarse) { .voice-call .voice-call-actions { gap: 0; } .voice-call-actions .picker-separator { display: none; } }
     /* Gripi's own prompt for a gripi sudo request takes the editor's place, framed by gold rules, above the editor's footer. */
-    .prompt-form[data-sudo] > :not(.composer-controls) { display: none; }
+    .prompt-form[data-sudo] > :not(.composer-controls, .pc-approvals) { display: none; }
     .sudo-prompt { display: grid; gap: 0.5rem; font: 0.86rem/1.45 var(--mono); }
     .sudo-prompt-editor { display: grid; gap: 0.55rem; padding: 0.6rem var(--text-inset) 0.7rem; border-block: 1px solid var(--gold); }
     .sudo-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
@@ -341,7 +341,7 @@
     /* 16px keeps iOS from zooming into the field. */
     @media (max-width: 760px), (pointer: coarse) { .sudo-prompt-field input { min-height: 2.75rem; font-size: 16px; } .sudo-prompt-remember { min-height: 2.75rem; } }
     /* Like the sudo prompt, moving to a worker or back, or losing it, takes the editor's place: gold rules while it moves, red when it needs an answer. */
-    .prompt-form[data-worker] > :not(.composer-controls) { display: none; }
+    .prompt-form[data-worker] > :not(.composer-controls, .pc-approvals) { display: none; }
     .worker-prompt { display: grid; gap: 0.5rem; font: 0.86rem/1.45 var(--mono); }
     .worker-prompt-editor { display: grid; gap: 0.55rem; padding: 0.6rem var(--text-inset) 0.7rem; border-block: 1px solid var(--danger); }
     .worker-prompt .worker-icon { display: inline-flex; color: var(--danger); }
@@ -362,6 +362,29 @@
     .worker-prompt-actions .worker-prompt-go { color: var(--gold); font-weight: 700; }
     .worker-prompt-actions .worker-prompt-go:disabled { color: var(--muted-soft); font-weight: 400; font-variant-numeric: tabular-nums; }
     .worker-prompt-actions .worker-prompt-go:disabled strong { color: var(--text); font-weight: 600; }
+    /* While a computer asks the user to approve a request of gripi pc, a slim line above the editor, tinted like a running
+       tool, says so on every device, also while the sudo prompt or a worker takes the editor's place. */
+    .pc-approvals { display: grid; gap: 0.15rem; margin-bottom: 0.15rem; }
+    /* Out of the editor's grid while empty, but not hidden, so that its live region announces the first line. */
+    .pc-approvals:empty { position: absolute; }
+    .pc-approval { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 0 0.75rem; padding: 0.4rem var(--text-inset); background: var(--tool-pending); color: var(--text); font: 0.8rem/1.45 var(--mono); }
+    .pc-approval-icon { display: inline-flex; color: var(--gold); }
+    .pc-approval-icon svg { width: 0.85rem; height: 0.85rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .pc-approval-text { min-width: 0; overflow-wrap: anywhere; }
+    .pc-approval-text strong { color: var(--gold); font-weight: 700; }
+    .pc-approval-time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pc-approval-error { color: var(--danger); }
+    .pc-approval .pc-approval-cancel { justify-self: auto; min-height: 0; padding: 0.15rem 0; border: 0; border-radius: 0; background: transparent; color: var(--text); font: inherit; letter-spacing: 0; text-transform: none; text-decoration: underline; text-decoration-color: var(--muted-soft); text-underline-offset: 0.2em; }
+    .pc-approval .pc-approval-cancel:is(:hover, :disabled) { background: transparent; }
+    @media (hover: hover) and (pointer: fine) { .pc-approval .pc-approval-cancel:not(:disabled):hover { color: #fff; } }
+    @media (max-width: 760px) {
+      .pc-approval { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "icon text text" ". time cancel"; padding-block: 0.5rem 0; }
+      .pc-approval-icon { grid-area: icon; align-self: start; padding-top: 0.15rem; }
+      .pc-approval-text { grid-area: text; }
+      .pc-approval-time { grid-area: time; }
+      .pc-approval .pc-approval-cancel { grid-area: cancel; }
+    }
+    @media (max-width: 760px), (pointer: coarse) { .pc-approval .pc-approval-cancel { min-height: 2.75rem; padding: 0 0.3rem; } }
     /* The worker in the header, as a quiet word that says more only when something is wrong; on phones, its icon alone. */
     .worker-badge { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 0.35rem; color: var(--muted); font: 500 0.72rem var(--mono); white-space: nowrap; }
     .worker-badge .worker-icon { display: inline-flex; }

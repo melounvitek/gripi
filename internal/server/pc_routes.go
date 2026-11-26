@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"mime"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +41,9 @@ const pcPollMessages = 64
 // pcPollBytes bounds the agent messages of a poll, whose JSON the desktop app reads only up to 8 MiB.
 const pcPollBytes = 2 << 20
 
+// pcSummaryLimit is the most characters of a request's summary that Gripi shows while a computer asks to approve it.
+const pcSummaryLimit = 200
+
 var (
 	errNoPCLink   = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
 	errPCLinkLost = errors.New("the computer's link to Gripi ended before it replied")
@@ -66,14 +71,18 @@ type pcMessage struct {
 }
 
 // pcLinkBody is what the desktop app sends on its link: a poll or a close names the link, and a reply also a request
-// and its message or error. A link's first poll opens it, and names the computer.
+// and its message or error. A link's first poll opens it, and names the computer. A status says whether the app asks
+// the user to approve a request, and while it does, what for, and for how many seconds more.
 type pcLinkBody struct {
-	Link    string `json:"link"`
-	Open    bool   `json:"open"`
-	Name    string `json:"name"`
-	ID      string `json:"id"`
-	Message []byte `json:"message"`
-	Error   string `json:"error"`
+	Link      string  `json:"link"`
+	Open      bool    `json:"open"`
+	Name      string  `json:"name"`
+	ID        string  `json:"id"`
+	Message   []byte  `json:"message"`
+	Error     string  `json:"error"`
+	Asking    bool    `json:"asking"`
+	Summary   string  `json:"summary"`
+	ExpiresIn float64 `json:"expires_in"`
 }
 
 // pcLink is a desktop app's link, which lives while it polls.
@@ -89,7 +98,26 @@ type pcLink struct {
 	queued chan struct{}
 	// gone closes when the link ends, which fails the requests that wait for its replies.
 	gone    chan struct{}
-	waiting map[string]chan pcLinkBody
+	waiting map[string]*pcWaiter
+}
+
+// pcWaiter is a request that waits for the desktop app's reply, and the approval that the app may ask the user for
+// meanwhile, which every Gripi client of the request's session shows.
+type pcWaiter struct {
+	replied  chan pcLinkBody
+	approval pcApproval
+	// asking is while the app asks, and asked once it began or stopped, as it asks only once: a start that comes after
+	// the stop, which it may overtake, doesn't show it again.
+	asking, asked bool
+}
+
+// pcApproval is a request that a computer asks the user to approve.
+type pcApproval struct {
+	ID        string    `json:"id"`
+	Computer  string    `json:"computer"`
+	Summary   string    `json:"summary"`
+	ExpiresAt time.Time `json:"expires_at"`
+	session   string
 }
 
 // pcLinks holds the links of the desktop apps, at most one for each approved browser, and what routes the requests of
@@ -161,7 +189,7 @@ func (links *pcLinks) poll(ctx context.Context, owner string, body pcLinkBody) (
 		links.mu.Unlock()
 		return nil, errPCTaken
 	case link == nil:
-		link = &pcLink{id: body.Link, owner: owner, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]chan pcLinkBody)}
+		link = &pcLink{id: body.Link, owner: owner, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]*pcWaiter)}
 		if links.byID == nil {
 			links.byID, links.names = make(map[string]*pcLink), make(map[string]string)
 		}
@@ -247,7 +275,8 @@ func (links *pcLinks) use(owner string, at time.Time, resolve func() string) {
 }
 
 // remapUse moves the use of a new session to the key that it has once Pi saved it, in the same step as remap, which
-// moves the session there, and keeps the newer one when both have one.
+// moves the session there, and keeps the newer one when both have one. The requests that wait in it move too, as Gripi
+// shows them by that key, while their messages keep the key that the desktop app knows.
 func (links *pcLinks) remapUse(from, to string, remap func()) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
@@ -256,6 +285,13 @@ func (links *pcLinks) remapUse(from, to string, remap func()) {
 		delete(links.uses, from)
 		if use.at.After(links.uses[to].at) {
 			links.uses[to] = use
+		}
+	}
+	for _, link := range links.byID {
+		for _, waiter := range link.waiting {
+			if waiter.approval.session == from {
+				waiter.approval.session = to
+			}
 		}
 	}
 }
@@ -321,9 +357,10 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 	return link, session, nil
 }
 
-// ask queues a request of an agent connection for link and waits for its reply. When the reply doesn't come in time, or
-// ctx ends first, the link gets a cancel of the request.
-func (links *pcLinks) ask(ctx context.Context, link *pcLink, message pcMessage) (pcLinkBody, error) {
+// ask queues a request of an agent connection in a session for link and waits for its reply. When the reply doesn't come
+// in time, or ctx ends first, the link gets a cancel of the request. session gives the session's key while remapUse
+// waits, so that Gripi shows the request by the key that the session has, also when Pi saved a new one just now.
+func (links *pcLinks) ask(ctx context.Context, link *pcLink, session func() string, message pcMessage) (pcLinkBody, error) {
 	links.mu.Lock()
 	if !links.live(link) {
 		links.mu.Unlock()
@@ -335,7 +372,7 @@ func (links *pcLinks) ask(ctx context.Context, link *pcLink, message pcMessage) 
 		return pcLinkBody{}, errPCClosed
 	}
 	replied := make(chan pcLinkBody, 1)
-	link.waiting[message.ID] = replied
+	link.waiting[message.ID] = &pcWaiter{replied: replied, approval: pcApproval{ID: message.ID, session: session()}}
 	link.send(message)
 	links.mu.Unlock()
 
@@ -373,13 +410,87 @@ func (links *pcLinks) reply(owner string, reply pcLinkBody) int {
 	if link == nil || link.owner != owner {
 		return http.StatusConflict
 	}
-	replied, waiting := link.waiting[reply.ID]
+	waiter, waiting := link.waiting[reply.ID]
 	if !waiting {
 		return http.StatusNotFound
 	}
 	delete(link.waiting, reply.ID)
-	replied <- reply
+	waiter.replied <- reply
 	return http.StatusOK
+}
+
+// status records whether the desktop app asks the user to approve a request that waits over a link of owner, and
+// returns the status of the app's request, and the approval once the app begins to ask. The app's summary is escaped
+// and cut, as it shows in Gripi.
+func (links *pcLinks) status(owner string, status pcLinkBody) (int, *pcApproval) {
+	links.mu.Lock()
+	defer links.mu.Unlock()
+	link := links.byID[status.Link]
+	if link == nil || link.owner != owner {
+		return http.StatusConflict, nil
+	}
+	waiter, waiting := link.waiting[status.ID]
+	switch {
+	case !waiting:
+		return http.StatusNotFound, nil
+	case !status.Asking:
+		waiter.asking, waiter.asked = false, true
+		return http.StatusOK, nil
+	case waiter.asked:
+		return http.StatusOK, nil
+	}
+	var summary []rune
+	for _, char := range status.Summary {
+		if len(summary) > pcSummaryLimit {
+			break
+		}
+		if unicode.In(char, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) {
+			summary = append(summary, []rune(fmt.Sprintf(`\u%04x`, char))...)
+		} else {
+			summary = append(summary, char)
+		}
+	}
+	if len(summary) > pcSummaryLimit {
+		summary = append(summary[:pcSummaryLimit-1], '…')
+	}
+	expiresIn := min(max(status.ExpiresIn, 1), PCReplyTimeout.Seconds())
+	waiter.approval.Computer, waiter.approval.Summary = links.names[owner], string(summary)
+	waiter.approval.ExpiresAt = time.Now().Add(time.Duration(expiresIn * float64(time.Second)))
+	waiter.asking, waiter.asked = true, true
+	approval := waiter.approval
+	return http.StatusOK, &approval
+}
+
+// approvals returns the requests in session that computers ask the user to approve, the oldest first.
+func (links *pcLinks) approvals(session string) []pcApproval {
+	links.mu.Lock()
+	defer links.mu.Unlock()
+	approvals := []pcApproval{}
+	for _, link := range links.byID {
+		for _, waiter := range link.waiting {
+			if waiter.asking && waiter.approval.session == session {
+				approvals = append(approvals, waiter.approval)
+			}
+		}
+	}
+	slices.SortFunc(approvals, func(left, right pcApproval) int { return left.ExpiresAt.Compare(right.ExpiresAt) })
+	return approvals
+}
+
+// cancel refuses a request that a computer asks the user to approve, if allowed accepts its session, and closes the
+// computer's dialog. It reports whether the computer was asking, as once it stopped, the user may have approved it.
+func (links *pcLinks) cancel(id string, allowed func(session string) bool) bool {
+	links.mu.Lock()
+	defer links.mu.Unlock()
+	for _, link := range links.byID {
+		if waiter := link.waiting[id]; waiter != nil && waiter.asking && allowed(waiter.approval.session) {
+			delete(link.waiting, id)
+			waiter.replied <- pcLinkBody{Error: "cancelled in Gripi"}
+			link.send(pcMessage{Type: "cancel", ID: id})
+			return true
+		}
+	}
+	return false
 }
 
 // closeConnection tells the link of an agent connection that it closed, and forgets the connection.
@@ -429,6 +540,8 @@ func (app *application) registerPCRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /pc/link", app.pollPCLink)
 	mux.HandleFunc("POST /pc/link/reply", app.replyOverPCLink)
 	mux.HandleFunc("POST /pc/link/close", app.closePCLink)
+	mux.HandleFunc("POST /pc/link/status", app.pcLinkStatus)
+	mux.HandleFunc("POST /pc/cancel", app.cancelPCApproval)
 }
 
 // pcAccessRefusal says why the gateway refuses PC access, or is empty when it allows it.
@@ -519,6 +632,58 @@ func (app *application) replyOverPCLink(response http.ResponseWriter, request *h
 	}
 }
 
+// pcLinkStatus takes the desktop app's word that it asks the user to approve a request, or that it stopped asking.
+func (app *application) pcLinkStatus(response http.ResponseWriter, request *http.Request) {
+	body, owner, ok := app.readPCLinkRequest(response, request)
+	if !ok {
+		return
+	}
+	if body.ID == "" || body.Asking && strings.TrimSpace(body.Summary) == "" {
+		writeJSONStatus(response, http.StatusBadRequest, map[string]string{"error": "a status needs the request's id, and while asking, a summary"})
+		return
+	}
+	status, began := app.pcLinks.status(owner, body)
+	switch status {
+	case http.StatusConflict:
+		writeJSONStatus(response, status, map[string]string{"error": "the link is not open"})
+	case http.StatusNotFound:
+		writeJSONStatus(response, status, map[string]string{"error": "the request no longer waits for a reply"})
+	default:
+		writeJSON(response, struct{}{})
+	}
+	if began != nil {
+		go app.notifyPCApproval(owner, *began)
+	}
+}
+
+// notifyPCApproval tells the user at once that a computer asks them to approve a request, on each of their browsers
+// but asker, the one of that computer, whose desktop app has a notification of its own. Unlike notifySudo, it goes out also
+// while a client shows the session: in single-user mode, all are one for presence, also the computer that asks, which
+// comes to the front. The service worker of a device that shows the session skips it instead.
+func (app *application) notifyPCApproval(asker string, approval pcApproval) {
+	owners, err := app.completionNotifications.owners(approval.session)
+	if err != nil {
+		log.Printf("find whom to notify of a PC access request: %v", err)
+		return
+	}
+	owners = slices.DeleteFunc(owners, func(owner string) bool { return owner == asker })
+	app.notifyAtOnce(owners, approval.session, approval.ID, "pc", "Approve on "+cmp.Or(approval.Computer, "your computer")+": "+approval.Summary)
+}
+
+// cancelPCApproval refuses, from any Gripi client of its session, a request that a computer asks the user to approve,
+// so that gripi pc needn't wait for the computer.
+func (app *application) cancelPCApproval(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	owned := func(session string) bool { return app.validOwnedSessionPath(request, session) }
+	if !app.pcLinks.cancel(request.PostFormValue("id"), owned) {
+		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "The request no longer waits for approval."})
+		return
+	}
+	writeJSON(response, map[string]bool{"ok": true})
+}
+
 func (app *application) closePCLink(response http.ResponseWriter, request *http.Request) {
 	body, owner, ok := app.readPCLinkRequest(response, request)
 	if !ok {
@@ -598,7 +763,11 @@ func (app *application) pcSSHAgent(response http.ResponseWriter, request *http.R
 	if found, ok := app.sessionStore.Session(session); ok {
 		name = agent.NotificationPreview(found.DisplayName)
 	}
-	reply, err := app.pcLinks.ask(request.Context(), link, pcMessage{Type: "ssh", ID: id, Session: key, SessionName: name, Connection: connection, Message: message})
+	displayed := func() string {
+		resolved, _, _ := app.resolveOwnedPendingPath(request, session)
+		return resolved
+	}
+	reply, err := app.pcLinks.ask(request.Context(), link, displayed, pcMessage{Type: "ssh", ID: id, Session: key, SessionName: name, Connection: connection, Message: message})
 	switch {
 	case request.Context().Err() != nil:
 	case errors.Is(err, errPCTimeout):

@@ -1,4 +1,6 @@
 (function installWebPushWorker(scope) {
+  const SHOWN_SESSION_TIMEOUT_MS = 1000;
+
   function notificationSession(url, origin) {
     try {
       return new URL(url || "/", origin).searchParams.get("session") || "";
@@ -7,13 +9,32 @@
     }
   }
 
+  // Asks a page which session it shows, which its URL may not name, such as at /, where the installed app starts, or
+  // not anymore, such as once a new session got its own key.
+  function shownSession(client) {
+    return new Promise((resolve) => {
+      const { port1, port2 } = new MessageChannel();
+      const answer = (shown) => {
+        clearTimeout(timer);
+        port1.close();
+        resolve(typeof shown === "string" ? shown : "");
+      };
+      // A page from before Gripi asked never answers.
+      const timer = setTimeout(answer, SHOWN_SESSION_TIMEOUT_MS);
+      port1.onmessage = (event) => answer(event.data);
+      client.postMessage({ type: "gripi-shown-session" }, [port2]);
+    });
+  }
+
   async function targetSessionFocused(data, worker) {
     if (data.type !== "gripi-notification") return false;
-    const targetSession = notificationSession(data.url, worker.location.origin);
+    // The URL of a Hermes conversation, or a long one, doesn't name the session, which the notification may.
+    const targetSession = data.session || notificationSession(data.url, worker.location.origin);
     if (!targetSession) return false;
 
     const clientList = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
-    return clientList.some((client) => client.focused && notificationSession(client.url, worker.location.origin) === targetSession);
+    const shown = await Promise.all(clientList.filter((client) => client.focused).map(shownSession));
+    return shown.includes(targetSession);
   }
 
   scope.gripiDisplayPushNotification = async function displayPushNotification(data, worker) {

@@ -4,12 +4,20 @@ import { test } from "node:test";
 import "../public/assets/notification_preview.js";
 import "../public/assets/web_push_worker.js";
 
+// A page answers the worker's question with the session that it shows, or not at all, as one from before Gripi asked.
+function page(shows, focused = true) {
+  return {
+    focused,
+    postMessage(message, [port]) {
+      assert.deepEqual(message, { type: "gripi-shown-session" });
+      if (shows !== undefined) port.postMessage(shows);
+    }
+  };
+}
+
 test("completed-reply pushes are suppressed only for the focused target session", async () => {
   const shown = [];
-  const worker = fakeWorker(shown, [
-    { focused: true, url: "https://gripi.test/?session=%2Fsessions%2Fcurrent.jsonl" },
-    { focused: false, url: "https://gripi.test/?session=%2Fsessions%2Fbackground.jsonl" }
-  ]);
+  const worker = fakeWorker(shown, [page("/sessions/current.jsonl"), page("/sessions/background.jsonl", false)]);
 
   const suppressed = await globalThis.gripiDisplayPushNotification({
     type: "gripi-notification",
@@ -53,7 +61,7 @@ test("a plain push shows its body as it is, such as the command of a sudo reques
 
 test("test pushes remain visible while the notification page is focused", async () => {
   const shown = [];
-  const worker = fakeWorker(shown, [{ focused: true, url: "https://gripi.test/notification-test" }]);
+  const worker = fakeWorker(shown, [page("")]);
 
   const displayed = await globalThis.gripiDisplayPushNotification({
     type: "gripi-notification-test",
@@ -64,6 +72,20 @@ test("test pushes remain visible while the notification page is focused", async 
 
   assert.equal(displayed, true);
   assert.equal(shown.length, 1);
+});
+
+test("a push that names its session, whose URL doesn't, is suppressed for the page in front, which says what it shows", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const hermes = { type: "gripi-notification", title: "Hermes", body: "Approve on laptop", plain: true, url: "/hermes", session: "hermes:abc" };
+  const shown = [];
+
+  assert.equal(await globalThis.gripiDisplayPushNotification(hermes, fakeWorker(shown, [page("hermes:abc")])), false);
+  assert.equal(await globalThis.gripiDisplayPushNotification(hermes, fakeWorker(shown, [page("hermes:abc", false), page("/sessions/other.jsonl")])), true);
+  const silent = globalThis.gripiDisplayPushNotification(hermes, fakeWorker(shown, [page()]));
+  await new Promise(setImmediate);
+  t.mock.timers.tick(1000);
+  assert.equal(await silent, true);
+  assert.equal(shown.length, 2);
 });
 
 function fakeWorker(shown, clientList) {
