@@ -426,8 +426,8 @@ func (app *application) notifySudo(view sudoRequestView) {
 
 // notifyAtOnce sends owners a notification of a request in session, of the kind given, at once, unlike of a reply, and
 // with body as plain text, without the Markdown of a reply. It names the session, which a page's URL may not, such as a
-// Hermes conversation's, so that a device's service worker skips it while the device shows the session; but only a
-// short one, as is the URL, since a push message carries about 4 KiB.
+// Hermes conversation's, so that a device's service worker skips it while the device shows the session; but only while
+// the notification stays well within the 4 KiB that a push message carries.
 func (app *application) notifyAtOnce(owners []string, session, id, kind, body string) {
 	title := "current session"
 	if found, ok := app.sessionStore.Session(session); ok && strings.TrimSpace(found.DisplayName) != "" {
@@ -442,10 +442,11 @@ func (app *application) notifyAtOnce(owners []string, session, id, kind, body st
 		"tag":   "gripi-" + kind + ":" + hex.EncodeToString(digest[:16]),
 		"url":   completedReplyURL(session, app.agentOf(session)),
 	}
-	if len(session) <= maxNotificationURLBytes {
-		notification["session"] = session
-	}
 	payload, _ := json.Marshal(notification)
+	notification["session"] = session
+	if named, _ := json.Marshal(notification); len(named) <= 3<<10 {
+		payload = named
+	}
 	for _, owner := range owners {
 		// Each browser is an owner of its own, which a slow one mustn't hold up.
 		go func() {

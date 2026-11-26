@@ -170,7 +170,7 @@ func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
 	}
 
 	links.closeConnection("connection")
-	if _, err := links.ask(context.Background(), link, session, pcMessage{Type: "ssh", ID: "request", Session: session, Connection: "connection"}); err != errPCClosed {
+	if _, err := links.ask(context.Background(), link, func() string { return session }, pcMessage{Type: "ssh", ID: "request", Session: session, Connection: "connection"}); err != errPCClosed {
 		t.Fatalf("ask = %v", err)
 	}
 	if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 || messages[0].Type != "ssh_close" {
@@ -269,57 +269,70 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 }
 
 // A new session has a pending key until Pi saves it, and a request that a computer asks to approve in it moves with it,
-// as the session's page and live events look it up by the saved key.
+// as the session's page and live events look it up by the saved key, also when Pi saves it before the request waits.
 func TestARequestThatAComputerAsksToApproveFollowsANewSessionWhenPiSavesIt(t *testing.T) {
 	poll := PCLinkPoll
 	PCLinkPoll = 10 * time.Millisecond
 	t.Cleanup(func() { PCLinkPoll = poll })
-	root := t.TempDir()
-	app := notificationTestApplication(t, root, false, false, nil)
-	pending, saved := filepath.Join(root, "pending.jsonl"), filepath.Join(root, "session.jsonl")
-	if err := app.rpcClients.Register(pending, &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": saved}}}); err != nil {
-		t.Fatal(err)
-	}
-	app.pendingSessions.Remember(pending, root, "")
-	links := &app.pcLinks
-	if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
-		t.Fatal(err)
-	}
-	links.use("owner", time.Now(), func() string { return pending })
-	link, key, err := links.route(nil, pending, "connection", true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go links.ask(ctx, link, pending, pcMessage{Type: "ssh", ID: "request", Session: key, Connection: "connection"})
-	if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 {
-		t.Fatalf("the link got %+v (%v)", messages, err)
-	}
-	if status, _ := links.status("owner", pcLinkBody{Link: "app", ID: "request", Asking: true, Summary: "SSH login", ExpiresIn: 120}); status != http.StatusOK {
-		t.Fatalf("status = %d", status)
-	}
-
-	writeNotificationSession(t, root, "New session")
-	if session, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://example.com/", nil), pending); err != nil || session != saved {
-		t.Fatalf("the pending session is %q (%v)", session, err)
-	}
-	if approvals := links.approvals(saved); len(approvals) != 1 || approvals[0].ID != "request" {
-		t.Fatalf("the saved session shows %+v", approvals)
+	for _, early := range []bool{false, true} {
+		root := t.TempDir()
+		app := notificationTestApplication(t, root, false, false, nil)
+		pending, saved := filepath.Join(root, "pending.jsonl"), filepath.Join(root, "session.jsonl")
+		if err := app.rpcClients.Register(pending, &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": saved}}}); err != nil {
+			t.Fatal(err)
+		}
+		app.pendingSessions.Remember(pending, root, "")
+		links := &app.pcLinks
+		if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
+			t.Fatal(err)
+		}
+		links.use("owner", time.Now(), func() string { return pending })
+		link, key, err := links.route(nil, pending, "connection", true, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+		save := func() {
+			writeNotificationSession(t, root, "New session")
+			if session, err := app.canonicalRPCSessionPath(request, pending); err != nil || session != saved {
+				t.Fatalf("the pending session is %q (%v)", session, err)
+			}
+		}
+		if early {
+			save()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		resolve := func() string {
+			resolved, _, _ := app.resolveOwnedPendingPath(request, pending)
+			return resolved
+		}
+		go links.ask(ctx, link, resolve, pcMessage{Type: "ssh", ID: "request", Session: key, Connection: "connection"})
+		if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 || messages[0].Session != pending {
+			t.Fatalf("the link got %+v (%v)", messages, err)
+		}
+		if status, _ := links.status("owner", pcLinkBody{Link: "app", ID: "request", Asking: true, Summary: "SSH login", ExpiresIn: 120}); status != http.StatusOK {
+			t.Fatalf("status = %d", status)
+		}
+		if !early {
+			save()
+		}
+		if approvals := links.approvals(saved); len(approvals) != 1 || approvals[0].ID != "request" {
+			t.Fatalf("with Pi saving the session early %v, the saved session shows %+v", early, approvals)
+		}
 	}
 }
 
-// A Web Push message carries at most about 4 KiB, so a notification names its session only when the session's key is
-// short, as its URL does.
-func TestANotificationAtOnceNamesOnlyASessionWithAShortKey(t *testing.T) {
+// A Web Push message carries at most about 4 KiB, so a notification names its session only when it stays well within
+// that, which JSON's escapes can take a long session key or body over.
+func TestANotificationAtOnceNamesItsSessionOnlyWithinThePushLimit(t *testing.T) {
 	root := t.TempDir()
 	notifier := &recordingPushNotifier{}
 	app := notificationTestApplication(t, root, false, false, notifier)
-	short, long := filepath.Join(root, "session.jsonl"), filepath.Join(root, strings.Repeat("deep/", 800), "session.jsonl")
+	short, long := filepath.Join(root, "session.jsonl"), filepath.Join(root, strings.Repeat("&", 200), "session.jsonl")
 
-	for _, session := range []string{short, long} {
-		app.notifyAtOnce([]string{"owner"}, session, "request", "pc", "Approve on laptop: SSH login")
-	}
+	app.notifyAtOnce([]string{"owner"}, short, "request", "sudo", "sudo: true")
+	app.notifyAtOnce([]string{"owner"}, long, "request", "sudo", "sudo: "+strings.Repeat("<", 400))
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
 		notifier.mu.Lock()
 		count := len(notifier.payloads)
@@ -334,7 +347,7 @@ func TestANotificationAtOnceNamesOnlyASessionWithAShortKey(t *testing.T) {
 	sessions := map[string]bool{}
 	for _, payload := range notifier.payloads {
 		var notification map[string]any
-		if err := json.Unmarshal(payload, &notification); err != nil || len(payload) > 1024 {
+		if err := json.Unmarshal(payload, &notification); err != nil || len(payload) > 3<<10 {
 			t.Fatalf("a notification of %d bytes: %s (%v)", len(payload), payload, err)
 		}
 		session, _ := notification["session"].(string)

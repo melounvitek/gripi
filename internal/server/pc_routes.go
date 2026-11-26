@@ -357,9 +357,10 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 	return link, session, nil
 }
 
-// ask queues a request of an agent connection in session for link and waits for its reply. When the reply doesn't come
-// in time, or ctx ends first, the link gets a cancel of the request.
-func (links *pcLinks) ask(ctx context.Context, link *pcLink, session string, message pcMessage) (pcLinkBody, error) {
+// ask queues a request of an agent connection in a session for link and waits for its reply. When the reply doesn't come
+// in time, or ctx ends first, the link gets a cancel of the request. session gives the session's key while remapUse
+// waits, so that Gripi shows the request by the key that the session has, also when Pi saved a new one just now.
+func (links *pcLinks) ask(ctx context.Context, link *pcLink, session func() string, message pcMessage) (pcLinkBody, error) {
 	links.mu.Lock()
 	if !links.live(link) {
 		links.mu.Unlock()
@@ -371,7 +372,7 @@ func (links *pcLinks) ask(ctx context.Context, link *pcLink, session string, mes
 		return pcLinkBody{}, errPCClosed
 	}
 	replied := make(chan pcLinkBody, 1)
-	link.waiting[message.ID] = &pcWaiter{replied: replied, approval: pcApproval{ID: message.ID, session: session}}
+	link.waiting[message.ID] = &pcWaiter{replied: replied, approval: pcApproval{ID: message.ID, session: session()}}
 	link.send(message)
 	links.mu.Unlock()
 
@@ -762,7 +763,11 @@ func (app *application) pcSSHAgent(response http.ResponseWriter, request *http.R
 	if found, ok := app.sessionStore.Session(session); ok {
 		name = agent.NotificationPreview(found.DisplayName)
 	}
-	reply, err := app.pcLinks.ask(request.Context(), link, session, pcMessage{Type: "ssh", ID: id, Session: key, SessionName: name, Connection: connection, Message: message})
+	displayed := func() string {
+		resolved, _, _ := app.resolveOwnedPendingPath(request, session)
+		return resolved
+	}
+	reply, err := app.pcLinks.ask(request.Context(), link, displayed, pcMessage{Type: "ssh", ID: id, Session: key, SessionName: name, Connection: connection, Message: message})
 	switch {
 	case request.Context().Err() != nil:
 	case errors.Is(err, errPCTimeout):
