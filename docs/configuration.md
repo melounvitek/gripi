@@ -240,7 +240,7 @@ To set it up, on your computer:
 
 The gateway must run in single-user mode with [access approval](#access-approval) on, and the app must reach it over HTTPS or from the gateway machine itself. A reverse proxy on the gateway machine must say that the request came over HTTPS, with `X-Forwarded-Proto` and [trusted proxy headers](#reverse-proxy): one that passes on plain HTTP without saying so looks local to the gateway. The gateway refuses PC access in [multi-user mode](#multi-user-mode), where all users’ agents run as one OS user, with approval [disabled](#disabling-approval), and over plain HTTP from another machine, even with `GRIPI_ALLOW_INSECURE_REMOTE_HTTP`.
 
-Plain `ssh` keeps using the gateway’s own keys. Pi in Gripi learns about `gripi pc` from the [built-in skill](#built-in-skill); with the skill off, or for Hermes, tell the agent, as for [`gripi sudo`](#running-commands-as-root). Like `gripi sudo`, it is Gripi’s own, and Pi CLI in a terminal knows nothing of it.
+Plain `ssh` keeps using the gateway’s own keys. `ssh` through `gripi pc ssh` still follows the gateway’s SSH configuration: for a host where `~/.ssh/config` names a key with `IdentityFile` and sets `IdentitiesOnly yes`, it offers only that key, so your computer’s keys work there only if that key is one of them. Pi in Gripi learns about `gripi pc` from the [built-in skill](#built-in-skill); with the skill off, or for Hermes, tell the agent, as for [`gripi sudo`](#running-commands-as-root). Like `gripi sudo`, it is Gripi’s own, and Pi CLI in a terminal knows nothing of it.
 
 Requirements and limits:
 
@@ -249,9 +249,34 @@ Requirements and limits:
 - You approve a login, not a command: once logged in, the gateway can do whatever the key may do on that server, such as push to any repository that the key can write to. An SSH connection that stays open, such as a `ControlMaster` one, outlives **Allow once** and the 5 minutes, which only stop new logins.
 - The gateway sees every public key in your SSH agent, with its comment.
 - A `gripi pc ssh` that is killed abruptly, such as with `SIGKILL`, can leave its agent connections counted against the app's limit of 32 until the app's link to the server drops. Turning PC access off and on again clears them.
-- Sessions on a [worker](#workers) can’t use it yet, nor can `!` commands, nested subagents and [scratch sessions](#scratch-sessions), as with `gripi sudo`.
+- Sessions on a [worker](#workers) can use it, as on main, but `!` commands, nested subagents and [scratch sessions](#scratch-sessions) can’t, as with `gripi sudo`.
 
 This keeps your private keys and password on your computer. It doesn’t protect against a hostile agent: anything that runs as the gateway’s OS user can ask in any session’s name. Check the server and the login name before you allow one, and turn PC access off for a server that you no longer trust with your keys.
+
+## Running commands on your computer
+
+An agent in a Pi or Hermes session can also run a command on your computer, the one where the [desktop app](../README.md#desktop-app) runs, as you, and get its output and exit code:
+
+```sh
+gripi pc run -- systemctl --user restart pipewire
+gripi pc run --cwd /home/you/Work/app -- sh -c 'git status | head'
+```
+
+Each command asks on your computer first, as a [login](#using-your-computers-ssh-keys) does. The app shows the session, the command with the file that your computer’s `PATH` finds for it, such as `/usr/bin/systemctl`, the folder and "As: you", with **Deny** and **Run**; then polkit’s password dialog confirms that it is you. Enter and Escape choose **Deny**. Every command asks: there is no approval for 5 minutes. A denial, 2 minutes without an answer, or a request while 5 others wait refuses it, and `gripi pc run` exits with 1 and says why after `gripi pc:`.
+
+The command runs in the folder that `--cwd` names on your computer, which must exist, or else in your home folder there, with the desktop app’s environment, without a shell and without input. Gripi passes on the first 16 MiB of each output. When `gripi pc run` ends first, such as when you stop the agent, the app sends the command’s process group SIGTERM, and SIGKILL 5 seconds later.
+
+While your computer asks, every Gripi client that shows the session says so in the line above the editor, with the command and **cancel**, as for a login. Your other devices with [Web Push notifications](#web-push-notifications) on get "Approve on laptop: run a command", without the command, which a locked screen would show. Right before your computer runs an approved command, it checks with the gateway that the command wasn't cancelled meanwhile. So **cancel** refuses a command until then, and afterwards answers that it already runs: Gripi never reports a command that runs as cancelled.
+
+The commands go to the computer where you last used the session, as logins do. They need only the first step of the logins’ setup, PC access on in the desktop app, and the same gateway.
+
+Limits:
+
+- An approved command can do whatever you can on your computer, and its output reaches the gateway and the agent. Read the command, and the file that runs, before you run it.
+- A process that the command starts in a process group of its own, such as with `setsid`, keeps running after the app ends the command.
+- A command has at most 256 words of up to 4096 bytes each, and the app refuses one that takes more than 4096 characters to show.
+- The app gives its output 40 seconds to reach the gateway once the command ends, which a slow upload of much output may take longer for. `gripi pc run` then fails, though the command ran, and says so.
+- Hermes stops a terminal command after 180 seconds unless its model sets a longer timeout, and the wait for your answer counts.
 
 ## Pinned session directories
 
@@ -305,7 +330,7 @@ The selected runtime must already work, authenticated and configured, for the ga
 
 ## Built-in skill
 
-Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root), to use [your computer’s SSH keys](#using-your-computers-ssh-keys), or to start sub-sessions when you ask. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
+Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root), to use [your computer’s SSH keys](#using-your-computers-ssh-keys) or [run commands on it](#running-commands-on-your-computer), or to start sub-sessions when you ask. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
 
 A skill of your own named `gripi`, such as `~/.pi/agent/skills/gripi/SKILL.md`, replaces it, because Pi keeps the first skill of a name and the skills it finds come before those passed with `--skill`. To leave the skill out:
 
@@ -557,7 +582,7 @@ The timeout is a whole number of seconds; `0` disables it. The sweep interval se
 
 Turn notifications on with the bell icon in the sidebar header, which is orange when they are on and crossed out when they are off or blocked. On iPhone and iPad, this requires iOS/iPadOS 16.4 or newer and Gripi added to the Home Screen.
 
-Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A [`gripi sudo`](#running-commands-as-root) request notifies at once, with its command, unless the session is open and focused in one of them. So does a login that your computer asks you to approve for [`gripi pc ssh`](#using-your-computers-ssh-keys), on each device but that computer, also while a client shows the session; only a device that shows it in front skips it. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, notifies and shows as unread only for the turns that its parent didn’t start, such as yours in the browser. The parent gets a report of its own turns instead.
+Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A [`gripi sudo`](#running-commands-as-root) request notifies at once, with its command, unless the session is open and focused in one of them. So does a login or command that your computer asks you to approve for [`gripi pc ssh`](#using-your-computers-ssh-keys) or [`gripi pc run`](#running-commands-on-your-computer), on each device but that computer, also while a client shows the session; only a device that shows it in front skips it. For a command, it says only that your computer asks to run one. A client that disconnects stops counting as focused after about 30 seconds. A sub-session, which [`gripi link`](../README.md#command-line) put under another session, notifies and shows as unread only for the turns that its parent didn’t start, such as yours in the browser. The parent gets a report of its own turns instead.
 
 Web Push requires HTTPS, such as [Tailscale Serve](examples.md#https-through-tailscale-serve). The gateway also needs outbound HTTPS access to the browser’s push service. Delivery is best-effort.
 

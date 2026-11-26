@@ -38,7 +38,7 @@ Session commands (need a running gateway on this machine):
   delete    Delete a session
   claim     Make a session that has no owner yours
   sudo      Run a command as root once the user agrees in Gripi
-  pc        Use the SSH keys of the computer that runs the desktop app
+  pc        Use the SSH keys of, or run commands on, the desktop app's computer
 
 Gateway commands:
   serve     Start the gateway
@@ -78,7 +78,7 @@ var commands = []command{
 	{name: "delete", summary: "Delete a session", run: deleteSession, help: deleteHelp},
 	{name: "claim", summary: "Make a session that has no owner yours", run: claimSession, help: claimHelp},
 	{name: "sudo", summary: "Run a command as root once the user agrees in Gripi", run: runAsRoot, help: sudoHelp},
-	{name: "pc", summary: "Use the SSH keys of the computer that runs the desktop app", run: runOnPC, help: pcHelp},
+	{name: "pc", summary: "Use the SSH keys of, or run commands on, the desktop app's computer", run: runOnPC, help: pcHelp},
 	{name: "serve", summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 
