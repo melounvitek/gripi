@@ -27,12 +27,21 @@ const pcHelp = `Usage:
   gripi pc ssh -- <command> [arguments]
 
 Runs a command on this machine, the gateway, with SSH_AUTH_SOCK pointing at
-the SSH agent of the user's computer: the one where the Gripi desktop app runs
-with File → Allow PC Access for This Server on. So ssh, and Git through it,
-log in with that computer's keys, which never leave it. The computer signs
-only logins to hosts in its known_hosts. Each login asks the user there to
-approve it and to enter their computer's password, unless they allowed the
-key on that host for 5 minutes.
+the SSH agent of the user's computer, where the Gripi desktop app runs with
+File → Allow PC Access for This Server on. So ssh, and Git through it, log in
+with that computer's keys, which never leave it. The computer signs only
+logins to hosts in its known_hosts. Each login asks the user there to approve
+it and to enter their computer's password, unless they allowed the key on
+that host for 5 minutes.
+
+The logins go to the computer where the user last used the session: sent a
+message in it, or clicked or typed in it in the desktop app, or else in the
+session that started it as a sub-session. They never go to another computer.
+gripi pc says why it refused one, such as when the session was last used on
+a phone, in a browser or on a computer whose app isn't connected, or not
+since the gateway started. Ask the user to open the session in the desktop
+app on the computer that should log in, and to click in it, rather than
+retrying.
 
 The command runs with gripi's input, output and environment, and with this
 machine's SSH configuration and known_hosts.
@@ -46,7 +55,7 @@ Example:
 
 Exit codes:
   The command's own once it ran. When the computer signs no login, as when
-  none is connected or the user denied it, the agent answers with a failure,
+  gripi pc refused it or the user denied it, the agent answers with a failure,
   and gripi pc prints why once, starting with "gripi pc:". When the command
   cannot run, gripi pc prints why and exits with
   1  the command does not run in a Pi or Hermes session, or cannot start
