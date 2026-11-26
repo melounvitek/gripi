@@ -68,6 +68,7 @@ func (app *application) registerActionRoutes(mux *http.ServeMux) {
 }
 
 func (app *application) prompt(response http.ResponseWriter, request *http.Request) {
+	received := time.Now()
 	// A prompt's form stays in memory, as it may hold a scratch session's images, so two large ones at a time do.
 	if request.ContentLength > 1<<20 {
 		if !acquireRequestSlot(response, request, app.promptUploads) {
@@ -80,6 +81,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	}
 	if request.MultipartForm != nil {
 		defer request.MultipartForm.RemoveAll()
+	}
+	// A message from the user, also from a phone, sends the session's PC requests to the computer where it was sent. It
+	// counts before anything here can refuse it for the page to retry, as the page's retries don't count.
+	if !commandRequest(request) && request.FormValue("retry") != "1" {
+		app.usedPC(request, request.FormValue("session"), received)
 	}
 	path, ok := app.actionSessionPath(response, request, request.FormValue("session"), true)
 	if !ok {

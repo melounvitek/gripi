@@ -35,6 +35,7 @@ function createPcAccess({
   connectAgent = connectLocalAgent,
   readKnownHosts = readLocalKnownHosts,
   now = Date.now,
+  hostname = os.hostname,
   sshAgentGuard = require("./ssh_agent_guard")
 }) {
   const { createConnectionGuard, findKnownHost, fingerprint, keyType } = sshAgentGuard;
@@ -73,7 +74,7 @@ function createPcAccess({
     while (!signal.aborted) {
       const link = entry.link;
       // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart.
-      const body = link.opened ? { link: link.id } : { link: link.id, open: true };
+      const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()) };
       link.opened = true;
       let response;
       try {
@@ -343,6 +344,12 @@ function linkRequest(url, body, { cookie, signal } = {}) {
 
 function sleep(ms, signal) {
   return timersPromises.setTimeout(ms, undefined, { signal }).catch(() => {});
+}
+
+// The computer's short hostname, which Gripi names it by, on one line and in at most 64 characters, as the gateway takes
+// it.
+function computerName(hostname) {
+  return [...hostname.split(".")[0].replace(/[^\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]/gu, "")].slice(0, 64).join("");
 }
 
 // Like the gateway's shellWords, so a session name or login can't hide or reorder what the dialog shows.

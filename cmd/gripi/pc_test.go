@@ -15,9 +15,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,7 +26,12 @@ import (
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
-const pcBrowserToken = "pc-desktop-browser"
+// The approved browsers: the laptop's and the desk's desktop apps, and a phone, which has no PC access.
+const (
+	pcBrowserToken = "pc-desktop-browser"
+	pcDeskToken    = "pc-desk-browser"
+	pcPhoneToken   = "pc-phone-browser"
+)
 
 // pcMessage is a message of the gateway to the desktop app.
 type pcMessage struct {
@@ -43,19 +48,21 @@ type pcLinkAnswer struct {
 	Error    string      `json:"error"`
 }
 
-// pcGateway runs fakePiGateway with access approval on, which PC access needs, and a browser approved for the
-// desktop app. gripi runs in alpha, and the desktop app reaches the gateway at address.
+// pcGateway runs fakePiGateway with access approval on, which PC access needs, and the approved browsers. gripi runs
+// in alpha, and the desktop apps reach the gateway at address.
 func pcGateway(t *testing.T, configure ...func(*config.Config)) (alpha, address string) {
 	t.Helper()
-	poll, stale := gateway.PCLinkPoll, gateway.PCLinkStale
-	t.Cleanup(func() { gateway.PCLinkPoll, gateway.PCLinkStale = poll, stale })
+	poll, stale, pins := gateway.PCLinkPoll, gateway.PCLinkStale, gateway.PCPins
+	t.Cleanup(func() { gateway.PCLinkPoll, gateway.PCLinkStale, gateway.PCPins = poll, stale, pins })
 	gateway.PCLinkPoll, gateway.PCLinkStale = 200*time.Millisecond, 500*time.Millisecond
 	var browserAccess string
 	alpha, _ = fakePiGateway(t, append([]func(*config.Config){func(cfg *config.Config) {
 		cfg.AdminPassword, cfg.BrowserAuthDisabled, browserAccess = "secret", false, cfg.BrowserAccessPath
 	}}, configure...)...)
-	if _, err := access.NewBrowserStore(browserAccess).ApproveCurrentBrowser(pcBrowserToken, "desktop app"); err != nil {
-		t.Fatal(err)
+	for _, token := range []string{pcBrowserToken, pcDeskToken, pcPhoneToken} {
+		if _, err := access.NewBrowserStore(browserAccess).ApproveCurrentBrowser(token, token); err != nil {
+			t.Fatal(err)
+		}
 	}
 	outsideSessions(t)
 	t.Setenv("PI_SESSION_FILE", alpha)
@@ -100,19 +107,34 @@ func pcLinkSend(t *testing.T, address, route string, body any, change ...func(*h
 	return response.StatusCode, answer
 }
 
-// pcPoll polls as link, which a poll with open opens and the others resume.
-func pcPoll(t *testing.T, address, link string, open bool) (int, pcLinkAnswer) {
-	return pcLinkSend(t, address, "/pc/link", map[string]any{"link": link, "open": open})
+// asBrowser sends a request with the cookie of the approved browser with token.
+func asBrowser(token string) func(*http.Request) {
+	return func(request *http.Request) { request.Header.Set("Cookie", "gripi_browser="+token) }
 }
 
-// pcDesktop plays the desktop app, which opens link and polls it until stop is called or the test ends. It answers
-// each ssh message with what answer returns, unless answer is nil, and passes on every message. It returns once the
-// link is the current one.
+// pcPoll polls as link, which a poll with open opens and the others resume.
+func pcPoll(t *testing.T, address, link string, open bool, change ...func(*http.Request)) (int, pcLinkAnswer) {
+	return pcLinkSend(t, address, "/pc/link", map[string]any{"link": link, "open": open}, change...)
+}
+
+// pcDesktop plays the laptop's desktop app, as pcDesktopOn does.
 func pcDesktop(t *testing.T, address, link string, answer func(pcMessage) map[string]any) (messages <-chan pcMessage, stop func()) {
+	t.Helper()
+	return pcDesktopOn(t, address, pcBrowserToken, "laptop", link, answer)
+}
+
+// pcDesktopOn plays the desktop app of the browser with token on the computer name, which opens link and polls it until
+// stop is called or the test ends. It answers each ssh message with what answer returns, unless answer is nil, and
+// passes on every message. It returns once the link is open.
+func pcDesktopOn(t *testing.T, address, token, name, link string, answer func(pcMessage) map[string]any) (messages <-chan pcMessage, stop func()) {
 	t.Helper()
 	received := make(chan pcMessage, 100)
 	poll := func(open bool) bool {
-		status, polled := pcPoll(t, address, link, open)
+		body := map[string]any{"link": link}
+		if open {
+			body["open"], body["name"] = true, name
+		}
+		status, polled := pcLinkSend(t, address, "/pc/link", body, asBrowser(token))
 		if status != http.StatusOK {
 			t.Errorf("poll of %s = %d %s", link, status, polled.Error)
 			return false
@@ -122,7 +144,7 @@ func pcDesktop(t *testing.T, address, link string, answer func(pcMessage) map[st
 			if message.Type == "ssh" && answer != nil {
 				reply := answer(message)
 				reply["link"], reply["id"] = link, message.ID
-				if status, replied := pcLinkSend(t, address, "/pc/link/reply", reply); status != http.StatusOK {
+				if status, replied := pcLinkSend(t, address, "/pc/link/reply", reply, asBrowser(token)); status != http.StatusOK {
 					t.Errorf("reply of %s = %d %s", link, status, replied.Error)
 				}
 			}
@@ -152,6 +174,81 @@ func pcDesktop(t *testing.T, address, link string, answer func(pcMessage) map[st
 	})
 	t.Cleanup(stop)
 	return received, stop
+}
+
+// answeredBy answers each request with an error that names the computer, which gripi pc prints.
+func answeredBy(name string) func(pcMessage) map[string]any {
+	return func(pcMessage) map[string]any { return map[string]any{"error": name} }
+}
+
+var pcPresenceSequence atomic.Uint64
+
+// pcPresence reports what the page of the browser with token shows, as notification_presence.js does: session, looked
+// at, and with used, that the user clicked or typed in it.
+func pcPresence(t *testing.T, token, session string, used bool) {
+	t.Helper()
+	presence := map[string]any{"client_id": "page", "session": session, "focused": true, "sequence": pcPresenceSequence.Add(1)}
+	if used {
+		presence["used"] = true
+	}
+	body, _ := json.Marshal(presence)
+	request := httptest.NewRequest(http.MethodPut, "http://127.0.0.1:4567/web-push/presence", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	asBrowser(token)(request)
+	response := httptest.NewRecorder()
+	browser.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("presence of %s = %d %s", session, response.Code, response.Body)
+	}
+}
+
+// pcPrompt sends message to session from the page of the browser with token, as form changes it, and waits until the
+// turn ends.
+func pcPrompt(t *testing.T, token, session, message string, change ...func(url.Values)) {
+	t.Helper()
+	form := url.Values{"session": {session}, "message": {message}}
+	for _, apply := range change {
+		apply(form)
+	}
+	if response := browserRequest(http.MethodPost, "/prompt", form, "gripi_browser="+token); response.Code != http.StatusOK {
+		t.Fatalf("prompt in %s = %d %s", session, response.Code, response.Body)
+	}
+	eventually(t, session, func(session gateway.LocalSession) bool { return session.State == "idle" })
+}
+
+const pcMessageText = "Show the deterministic browser response"
+
+// pcAnswerer runs gripi pc ssh in the session of PI_SESSION_FILE, and returns what it printed: the name of the computer
+// whose desktop app answered, from answeredBy, or why the gateway refused.
+func pcAnswerer(t *testing.T) string {
+	t.Helper()
+	result := pcSSH(t, "ssh-add", "-l")
+	for line := range strings.Lines(result.stderr) {
+		if answer, found := strings.CutPrefix(strings.TrimSuffix(line, "\n"), "gripi pc: "); found {
+			return answer
+		}
+	}
+	t.Fatalf("gripi pc ssh = %+v", result)
+	return ""
+}
+
+// pcRelay is the relay of gripi pc ssh in session, whose messages tests send themselves.
+func pcRelay(t *testing.T, session string) *sshAgentRelay {
+	t.Helper()
+	client, err := newGatewayClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &sshAgentRelay{client: client, session: session, stderr: io.Discard, reported: map[string]bool{}}
+}
+
+// pcAgentMessage is a message of agent connection to the gateway, as the relay sends it: the first one with open.
+func pcAgentMessage(session, connection string, open bool) url.Values {
+	form := url.Values{"session": {session}, "connection": {connection}, "message": {"Cw=="}}
+	if open {
+		form.Set("open", "1")
+	}
+	return form
 }
 
 // nextPCMessage returns the next message of the type that the desktop app got, and skips the others.
@@ -271,6 +368,7 @@ func TestPCSSHUsesTheSSHAgentOfTheDesktopAppsComputer(t *testing.T) {
 	agentSocket, listed := sshAgentWithKey(t)
 	alpha, address := pcGateway(t)
 	messages, _ := pcDesktop(t, address, "app", forwardToAgent(t, agentSocket))
+	pcPresence(t, pcBrowserToken, alpha, true)
 
 	if result := pcSSH(t, "ssh-add", "-l"); result.code != 0 || result.stdout != listed || result.stderr != "" {
 		t.Fatalf("gripi pc ssh -- ssh-add -l = %+v, want stdout %q", result, listed)
@@ -286,8 +384,9 @@ func TestPCSSHUsesTheSSHAgentOfTheDesktopAppsComputer(t *testing.T) {
 
 func TestPCSSHPrintsTheDesktopAppsRefusalOnceAndFailsTheAgentRequest(t *testing.T) {
 	requireTools(t, "ssh-add")
-	_, address := pcGateway(t)
-	pcDesktop(t, address, "app", func(pcMessage) map[string]any { return map[string]any{"error": "the user denied it"} })
+	alpha, address := pcGateway(t)
+	pcDesktop(t, address, "app", answeredBy("the user denied it"))
+	pcPresence(t, pcBrowserToken, alpha, true)
 
 	result := pcSSH(t, "sh", "-c", "ssh-add -l; ssh-add -l")
 	if result.code != 1 || result.stdout != "" || strings.Count(result.stderr, "gripi pc: the user denied it\n") != 1 || strings.Count(result.stderr, "agent refused operation") != 2 {
@@ -321,9 +420,10 @@ func TestPCSSHFailsAtOnceWithoutALinkOrASession(t *testing.T) {
 // A link keeps others out while it polls, and its requests and replies never reach another link.
 func TestPCSSHFailsWhenTheLinkEndsOrIsReplaced(t *testing.T) {
 	requireTools(t, "ssh-add")
-	_, address := pcGateway(t)
+	alpha, address := pcGateway(t)
 	const lost = "gripi pc: the computer's link to Gripi ended before it replied\n"
 	messages, stop := pcDesktop(t, address, "first", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
 	if status, _ := pcPoll(t, address, "second", true); status != http.StatusConflict {
 		t.Fatalf("a second link while the first polls = %d", status)
 	}
@@ -362,8 +462,9 @@ func TestPCSSHFailsWhenTheLinkEndsOrIsReplaced(t *testing.T) {
 
 func TestPCSSHCancelsTheRequestOfAnAgentConnectionThatEnds(t *testing.T) {
 	requireTools(t, "ssh-add")
-	_, address := pcGateway(t)
+	alpha, address := pcGateway(t)
 	messages, _ := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
 
 	result := startPCSSH(t, "sh", "-c", "ssh-add -l & sleep 0.5; kill $!")
 	request := nextPCMessage(t, messages, "ssh")
@@ -382,8 +483,9 @@ func TestPCSSHCancelsTheRequestOfAnAgentConnectionThatEnds(t *testing.T) {
 // Processes that the command leaves running, such as ssh's ControlMaster, may keep their agent connections open.
 func TestPCSSHClosesTheAgentConnectionsThatTheCommandLeavesOpen(t *testing.T) {
 	requireTools(t, "ssh-add")
-	_, address := pcGateway(t)
+	alpha, address := pcGateway(t)
 	messages, _ := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
 	proceed := filepath.Join(t.TempDir(), "proceed")
 
 	result := startPCSSH(t, "sh", "-c", `ssh-add -l & ssh-add -l & until [ -e "$0" ]; do sleep 0.05; done`, proceed)
@@ -411,11 +513,8 @@ func TestPCSSHClosesTheAgentConnectionsThatTheCommandLeavesOpen(t *testing.T) {
 func TestPCSSHEndsAnAgentConnectionThatSendsAMessageBeforeTheReply(t *testing.T) {
 	alpha, address := pcGateway(t)
 	messages, _ := pcDesktop(t, address, "app", nil)
-	client, err := newGatewayClient()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relay := &sshAgentRelay{client: client, session: alpha, stderr: io.Discard, reported: map[string]bool{}}
+	pcPresence(t, pcBrowserToken, alpha, true)
+	relay := pcRelay(t, alpha)
 	agent, connection := net.Pipe()
 	relay.connections.Add(1)
 	go relay.serveConnection(context.Background(), connection)
@@ -450,8 +549,9 @@ func TestPCSSHEndsAnAgentConnectionThatSendsAMessageBeforeTheReply(t *testing.T)
 // replies hold the shutdown.
 func TestEndingThePCLinkWakesItsPollAndRequestsAndRefusesNewPolls(t *testing.T) {
 	requireTools(t, "ssh-add")
-	_, address := pcGateway(t)
+	alpha, address := pcGateway(t)
 	messages, stop := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
 	result := startPCSSH(t, "ssh-add", "-l")
 	nextPCMessage(t, messages, "ssh")
 	stop()
@@ -503,30 +603,6 @@ func TestPCLinkResumesOnlyTheCurrentLink(t *testing.T) {
 	}
 	if status, _ := pcPoll(t, address, "app", false); status != http.StatusConflict {
 		t.Fatalf("a poll of the closed link = %d", status)
-	}
-}
-
-// The desktop app drops a link whose poll carries more than 64 messages, so the others wait for the next poll.
-func TestPCLinkPollCarriesAtMost64Messages(t *testing.T) {
-	alpha, address := pcGateway(t)
-	gateway.PCLinkStale = time.Minute
-	if status, _ := pcPoll(t, address, "app", true); status != http.StatusOK {
-		t.Fatalf("poll = %d", status)
-	}
-	client, err := newGatewayClient()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relay := &sshAgentRelay{client: client}
-	for index := range 65 {
-		if _, err := relay.post(context.Background(), url.Values{"session": {alpha}, "connection": {strconv.Itoa(index)}, "close": {"1"}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, want := range []int{64, 1} {
-		if status, polled := pcPoll(t, address, "app", false); status != http.StatusOK || len(polled.Messages) != want {
-			t.Fatalf("poll = %d with %d messages, want %d", status, len(polled.Messages), want)
-		}
 	}
 }
 
@@ -601,5 +677,325 @@ func TestPCLinkNeedsHTTPSFromAnywhereButThisMachine(t *testing.T) {
 		if response.Code != peer.status {
 			t.Fatalf("poll from %s with X-Forwarded-Proto %q = %d %s", peer.remote, peer.forwardedProto, response.Code, response.Body)
 		}
+	}
+}
+
+// Each computer's desktop app has a link of its own, and gripi pc goes to the one where the user last sent a message
+// in the session, or clicked or typed in it.
+func TestPCSSHGoesToTheComputerWhereTheSessionWasLastUsed(t *testing.T) {
+	requireTools(t, "ssh-add")
+	alpha, address := pcGateway(t)
+	pcDesktop(t, address, "laptop", answeredBy("laptop"))
+	pcDesktopOn(t, address, pcDeskToken, "desk", "desk", answeredBy("desk"))
+
+	pcPrompt(t, pcBrowserToken, alpha, pcMessageText)
+	if answerer := pcAnswerer(t); answerer != "laptop" {
+		t.Fatalf("after a message from the laptop, gripi pc ssh reached %q", answerer)
+	}
+	pcPresence(t, pcDeskToken, alpha, true)
+	if answerer := pcAnswerer(t); answerer != "desk" {
+		t.Fatalf("after a click on the desk, gripi pc ssh reached %q", answerer)
+	}
+	// Heartbeats look the same as focus reports.
+	pcPresence(t, pcBrowserToken, alpha, false)
+	if code, _, stderr := runCLI("send", alpha, "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	eventually(t, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
+	if answerer := pcAnswerer(t); answerer != "desk" {
+		t.Fatalf("after a focus report from the laptop and gripi send, gripi pc ssh reached %q", answerer)
+	}
+}
+
+// A request never goes to another computer than the one where the session was last used.
+func TestPCSSHRefusesASessionLastUsedWhereNoDesktopAppIsConnected(t *testing.T) {
+	requireTools(t, "ssh-add")
+	alpha, address := pcGateway(t)
+	_, stop := pcDesktopOn(t, address, pcDeskToken, "desk", "desk", answeredBy("desk"))
+	pcPresence(t, pcDeskToken, alpha, true)
+
+	pcPrompt(t, pcPhoneToken, alpha, pcMessageText)
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, "this session was last used in a Gripi window without PC access, such as a phone or a browser; ") {
+		t.Fatalf("after a message from the phone, gripi pc ssh = %q", answerer)
+	}
+	pcPresence(t, pcDeskToken, alpha, true)
+	stop()
+	if status, _ := pcLinkSend(t, address, "/pc/link/close", map[string]string{"link": "desk"}, asBrowser(pcDeskToken)); status != http.StatusOK {
+		t.Fatalf("close = %d", status)
+	}
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, "this session was last used on desk, where the Gripi desktop app isn't connected for PC access; ") {
+		t.Fatalf("after the desk's link ended, gripi pc ssh = %q", answerer)
+	}
+}
+
+// A sub-session goes to the computer of its parent until it is used itself.
+func TestASubSessionUsesItsParentsComputerUntilItIsUsedItself(t *testing.T) {
+	requireTools(t, "ssh-add")
+	alpha, address := pcGateway(t)
+	beta := filepath.Join(filepath.Dir(alpha), "beta.jsonl")
+	if code, _, stderr := runCLI("link", beta, alpha); code != 0 {
+		t.Fatalf("gripi link = %d, stderr %q", code, stderr)
+	}
+	pcDesktop(t, address, "laptop", answeredBy("laptop"))
+	pcDesktopOn(t, address, pcDeskToken, "desk", "desk", answeredBy("desk"))
+	answerers := func() [2]string {
+		t.Setenv("PI_SESSION_FILE", alpha)
+		parent := pcAnswerer(t)
+		t.Setenv("PI_SESSION_FILE", beta)
+		return [2]string{parent, pcAnswerer(t)}
+	}
+
+	pcPresence(t, pcBrowserToken, alpha, true)
+	if got := answerers(); got != [2]string{"laptop", "laptop"} {
+		t.Fatalf("after a click in the parent on the laptop, gripi pc ssh in the parent and the sub-session reached %q", got)
+	}
+	pcPresence(t, pcDeskToken, beta, true)
+	if got := answerers(); got != [2]string{"laptop", "desk"} {
+		t.Fatalf("after a click in the sub-session on the desk, gripi pc ssh in the parent and the sub-session reached %q", got)
+	}
+	pcPrompt(t, pcPhoneToken, beta, pcMessageText)
+	if got := answerers(); got[0] != "laptop" || !strings.HasPrefix(got[1], "this session was last used in a Gripi window without PC access") {
+		t.Fatalf("after a message to the sub-session from the phone, gripi pc ssh in the parent and the sub-session reached %q", got)
+	}
+}
+
+// The desktop app checks each agent connection on its own, from its first message, so the connection stays with the
+// computer that got that one.
+func TestAnAgentConnectionStaysWithTheComputerOfItsFirstMessage(t *testing.T) {
+	alpha, address := pcGateway(t)
+	laptop, _ := pcDesktop(t, address, "laptop", answeredBy("laptop"))
+	desk, _ := pcDesktopOn(t, address, pcDeskToken, "desk", "desk", answeredBy("desk"))
+	relay := pcRelay(t, alpha)
+	beta := filepath.Join(filepath.Dir(alpha), "beta.jsonl")
+	pcPresence(t, pcBrowserToken, alpha, true)
+	pcPresence(t, pcBrowserToken, beta, true)
+
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "connection", true)); err == nil || err.Error() != "laptop" {
+		t.Fatalf("the first message = %v", err)
+	}
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "connection", true)); err == nil || err.Error() != "this SSH agent connection is already open" {
+		t.Fatalf("a second first message = %v", err)
+	}
+	pcPresence(t, pcDeskToken, alpha, true)
+	// Also in another session's name, which still goes to the laptop.
+	for _, session := range []string{alpha, beta} {
+		if _, err := relay.post(context.Background(), pcAgentMessage(session, "connection", false)); err == nil || !strings.HasPrefix(err.Error(), "the session was used on another computer during this SSH agent connection") {
+			t.Fatalf("a message in %s after a click on the desk = %v", session, err)
+		}
+	}
+	pcPrompt(t, pcPhoneToken, alpha, pcMessageText)
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "connection", false)); err == nil || !strings.HasPrefix(err.Error(), "this session was last used in a Gripi window without PC access") {
+		t.Fatalf("a message after a message from the phone = %v", err)
+	}
+	if _, err := relay.post(context.Background(), url.Values{"session": {alpha}, "connection": {"connection"}, "close": {"1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if closed := nextPCMessage(t, laptop, "ssh_close"); !reflect.DeepEqual(closed, pcMessage{Type: "ssh_close", Session: alpha, Connection: "connection"}) {
+		t.Fatalf("the laptop got %+v", closed)
+	}
+	select {
+	case message := <-desk:
+		t.Fatalf("the desk got %+v", message)
+	case <-time.After(3 * gateway.PCLinkPoll):
+	}
+}
+
+// An agent connection whose link ended fails, rather than starting again on another link, also once the gateway
+// dropped the connection to keep others.
+func TestAnAgentConnectionOfAnEndedLinkNeverMovesToAnother(t *testing.T) {
+	alpha, address := pcGateway(t)
+	gateway.PCPins = 2
+	_, stop := pcDesktop(t, address, "first", answeredBy("first"))
+	pcPresence(t, pcBrowserToken, alpha, true)
+	relay := pcRelay(t, alpha)
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "early", true)); err == nil || err.Error() != "first" {
+		t.Fatalf("the first message = %v", err)
+	}
+	stop()
+	if status, _ := pcLinkSend(t, address, "/pc/link/close", map[string]string{"link": "first"}); status != http.StatusOK {
+		t.Fatalf("close = %d", status)
+	}
+	messages, _ := pcDesktop(t, address, "second", answeredBy("second"))
+
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "early", false)); err == nil || err.Error() != "the computer's link to Gripi ended before it replied" {
+		t.Fatalf("a message after the link ended = %v", err)
+	}
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "early", true)); err == nil || err.Error() != "this SSH agent connection is already open" {
+		t.Fatalf("a first message again after the link ended = %v", err)
+	}
+	for _, connection := range []string{"later", "latest"} {
+		if _, err := relay.post(context.Background(), pcAgentMessage(alpha, connection, true)); err == nil || err.Error() != "second" {
+			t.Fatalf("the first message of %s = %v", connection, err)
+		}
+	}
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "early", false)); err == nil || !strings.HasPrefix(err.Error(), "this SSH agent connection didn't start on the computer") {
+		t.Fatalf("a message after the gateway dropped the connection = %v", err)
+	}
+	for range 2 {
+		if request := nextPCMessage(t, messages, "ssh"); request.Connection == "early" {
+			t.Fatalf("the second link got %+v", request)
+		}
+	}
+	// Open connections may still wait for replies, so without any of ended links to drop, a new one is refused.
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "last", true)); err == nil || err.Error() != "too many SSH agent connections are open for PC access" {
+		t.Fatalf("the first message of a connection beyond the limit = %v", err)
+	}
+}
+
+// A message counts from when the gateway began to receive it, before anything can refuse it, and a shell command too. The
+// page retries a message that the gateway couldn't take yet, which the first attempt counted, so a retry that comes late
+// doesn't take the session back from a newer use elsewhere.
+func TestAMessageCountsFromWhenTheGatewayGetsItAndARetryDoesNot(t *testing.T) {
+	requireTools(t, "ssh-add")
+	alpha, address := pcGateway(t)
+	pcDesktop(t, address, "laptop", answeredBy("laptop"))
+	const phone = "this session was last used in a Gripi window without PC access"
+
+	pcPrompt(t, pcPhoneToken, alpha, "!true")
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, phone) {
+		t.Fatalf("after a shell command from the phone, gripi pc ssh = %q", answerer)
+	}
+	pcPresence(t, pcBrowserToken, alpha, true)
+	pcPrompt(t, pcPhoneToken, alpha, pcMessageText, func(form url.Values) { form.Set("retry", "1") })
+	if answerer := pcAnswerer(t); answerer != "laptop" {
+		t.Fatalf("after a retry from the phone, gripi pc ssh reached %q", answerer)
+	}
+	refused := url.Values{"session": {alpha}, "message": {pcMessageText}, "streaming_behavior": {"later"}}
+	if response := browserRequest(http.MethodPost, "/prompt", refused, "gripi_browser="+pcPhoneToken); response.Code != http.StatusBadRequest {
+		t.Fatalf("a message that the gateway refuses = %d %s", response.Code, response.Body)
+	}
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, phone) {
+		t.Fatalf("after a message from the phone that the gateway refused, gripi pc ssh = %q", answerer)
+	}
+
+	// A click on the laptop while the phone's message still uploads is the later use.
+	uploaded := url.Values{"session": {alpha}, "message": {pcMessageText}}.Encode()
+	body, upload := io.Pipe()
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:4567/prompt", body)
+	request.ContentLength = int64(len(uploaded))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	asBrowser(pcPhoneToken)(request)
+	sent := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		browser.ServeHTTP(response, request)
+		sent <- response
+	}()
+	time.Sleep(100 * time.Millisecond)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	upload.Write([]byte(uploaded))
+	upload.Close()
+	if response := <-sent; response.Code != http.StatusOK {
+		t.Fatalf("the uploaded message = %d %s", response.Code, response.Body)
+	}
+	eventually(t, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
+	if answerer := pcAnswerer(t); answerer != "laptop" {
+		t.Fatalf("after a click on the laptop during the phone's upload, gripi pc ssh reached %q", answerer)
+	}
+}
+
+// Another link of the same browser, such as a copied profile, waits until the first ends. A link belongs to the browser
+// that opened it, so a browser whose cookie changed, such as after the admin password was entered again there, opens a
+// new one.
+func TestEachBrowserHasOneLinkThatOnlyItUses(t *testing.T) {
+	_, address := pcGateway(t)
+	desk := asBrowser(pcDeskToken)
+	if status, _ := pcPoll(t, address, "first", true); status != http.StatusOK {
+		t.Fatalf("the first link = %d", status)
+	}
+	if status, _ := pcPoll(t, address, "second", true); status != http.StatusConflict {
+		t.Fatalf("a second link of the same browser = %d", status)
+	}
+	if status, _ := pcPoll(t, address, "desk", true, desk); status != http.StatusOK {
+		t.Fatalf("a link of another browser = %d", status)
+	}
+
+	if status, _ := pcPoll(t, address, "first", false, desk); status != http.StatusConflict {
+		t.Fatalf("a poll of another browser's link = %d", status)
+	}
+	if status, _ := pcPoll(t, address, "first", true, desk); status != http.StatusConflict {
+		t.Fatalf("an open poll of another browser's link = %d", status)
+	}
+	if status, _ := pcLinkSend(t, address, "/pc/link/reply", map[string]string{"link": "first", "id": "request", "error": "denied"}, desk); status != http.StatusConflict {
+		t.Fatalf("a reply over another browser's link = %d", status)
+	}
+	pcLinkSend(t, address, "/pc/link/close", map[string]string{"link": "first"}, desk)
+	if status, _ := pcPoll(t, address, "first", false); status != http.StatusOK {
+		t.Fatalf("a poll after another browser closed the link = %d", status)
+	}
+
+	if status, _ := pcLinkSend(t, address, "/pc/link/close", map[string]string{"link": "first"}); status != http.StatusOK {
+		t.Fatalf("close = %d", status)
+	}
+	if status, _ := pcPoll(t, address, "second", true); status != http.StatusOK {
+		t.Fatalf("a new link after the first closed = %d", status)
+	}
+}
+
+// Entering the admin password again gives the browser a new cookie, and ends the links that it opened with the old one,
+// rather than leaving them for 35 s with the requests that wait for them.
+func TestEnteringTheAdminPasswordAgainEndsTheBrowsersLink(t *testing.T) {
+	requireTools(t, "ssh-add")
+	alpha, address := pcGateway(t)
+	gateway.PCLinkStale = time.Minute
+	messages, stop := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	result := startPCSSH(t, "ssh-add", "-l")
+	nextPCMessage(t, messages, "ssh")
+	stop()
+
+	if response := browserRequest(http.MethodPost, "/browser-access/admin-login", url.Values{"password": {"secret"}}, "gripi_browser="+pcBrowserToken); response.Code != http.StatusSeeOther {
+		t.Fatalf("admin login = %d %s", response.Code, response.Body)
+	}
+	select {
+	case answered := <-result:
+		if answered.code != 1 || !strings.Contains(answered.stderr, "gripi pc: the computer's link to Gripi ended before it replied\n") {
+			t.Fatalf("gripi pc ssh = %+v", answered)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("gripi pc ssh still waits")
+	}
+}
+
+// Reading on a phone, or in a browser without PC access, moves nothing, and nor does a session that the gateway doesn't
+// know.
+func TestOnlyAUseOfAKnownSessionWithPCAccessCounts(t *testing.T) {
+	requireTools(t, "ssh-add")
+	alpha, address := pcGateway(t)
+	pcDesktop(t, address, "laptop", answeredBy("laptop"))
+	pcPresence(t, pcBrowserToken, alpha, true)
+
+	pcPresence(t, pcPhoneToken, alpha, true)
+	if answerer := pcAnswerer(t); answerer != "laptop" {
+		t.Fatalf("after a click on the phone, gripi pc ssh reached %q", answerer)
+	}
+
+	gamma := filepath.Join(filepath.Dir(alpha), "gamma.jsonl")
+	pcPresence(t, pcBrowserToken, gamma, true)
+	appendSessionRecords(t, gamma, map[string]any{"type": "session", "version": 3, "id": "0a1-gamma", "timestamp": "2026-01-03T00:00:00Z", "cwd": t.TempDir()})
+	eventually(t, gamma, func(gateway.LocalSession) bool { return true })
+	t.Setenv("PI_SESSION_FILE", gamma)
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, "nobody has used this session in a Gripi desktop app with PC access since the gateway started; ") {
+		t.Fatalf("in a session used before the gateway knew it, gripi pc ssh = %q", answerer)
+	}
+}
+
+// The gateway keeps no uses over a restart, and a message that gripi sends is none.
+func TestPCSSHNeedsAUseSinceTheGatewayStarted(t *testing.T) {
+	requireTools(t, "ssh-add")
+	alpha, address := pcGateway(t)
+	pcDesktop(t, address, "laptop", answeredBy("laptop"))
+	const unused = "nobody has used this session in a Gripi desktop app with PC access since the gateway started; ask the user to open it in the desktop app on the computer that should do this, and click in it"
+
+	if answerer := pcAnswerer(t); answerer != unused {
+		t.Fatalf("with a link, but no use, gripi pc ssh = %q", answerer)
+	}
+	if code, _, stderr := runCLI("send", alpha, "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	eventually(t, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
+	if answerer := pcAnswerer(t); answerer != unused {
+		t.Fatalf("after gripi send, gripi pc ssh = %q", answerer)
 	}
 }

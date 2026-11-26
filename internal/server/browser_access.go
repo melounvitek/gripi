@@ -150,6 +150,8 @@ func (app *application) adminLogin(response http.ResponseWriter, request *http.R
 			writeText(response, http.StatusInternalServerError, "Internal Server Error")
 			return
 		}
+		// The old token is no longer approved, so neither are the links that the browser opened with it.
+		app.pcLinks.endOwner(browserOwner(oldToken))
 		app.setBrowserToken(response, request, newToken)
 		redirect(response, request, returnTo, app.config.TrustProxyHeaders)
 		return

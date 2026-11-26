@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/push"
 )
@@ -96,10 +97,12 @@ func (app *application) removePushSubscription(response http.ResponseWriter, req
 }
 
 func (app *application) updateNotificationPresence(response http.ResponseWriter, request *http.Request) {
+	received := time.Now()
 	var input struct {
 		ClientID string `json:"client_id"`
 		Session  string `json:"session"`
 		Focused  bool   `json:"focused"`
+		Used     bool   `json:"used"`
 		Sequence uint64 `json:"sequence"`
 	}
 	if !decodePushJSON(response, request, &input) {
@@ -129,6 +132,11 @@ func (app *application) updateNotificationPresence(response http.ResponseWriter,
 		return
 	}
 	app.notificationPresence.Update(owner, input.ClientID, path, true, input.Sequence)
+	// A click or key in a desktop app with PC access sends the session's PC requests to its computer. Elsewhere, such
+	// as on a phone, reading moves nothing.
+	if browser, ok := app.pushOwner(request); ok && input.Used && app.pcLinks.linked(browser) {
+		app.usedPC(request, path, received)
+	}
 	response.WriteHeader(http.StatusNoContent)
 }
 
@@ -179,8 +187,13 @@ func (app *application) pushOwner(request *http.Request) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	return browserOwner(token), true
+}
+
+// browserOwner is the owner of the browser with token, in single-user mode with access approval.
+func browserOwner(token string) string {
 	digest := sha256.Sum256([]byte(token))
-	return "browser:" + hex.EncodeToString(digest[:]), true
+	return "browser:" + hex.EncodeToString(digest[:])
 }
 
 func decodePushJSON(response http.ResponseWriter, request *http.Request, target any) bool {

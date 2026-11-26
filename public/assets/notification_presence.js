@@ -1,6 +1,9 @@
 const NOTIFICATION_PRESENCE_CLIENT_KEY = "gripi:notification-presence-client";
 const NOTIFICATION_PRESENCE_SEQUENCE_KEY = "gripi:notification-presence-sequence";
 const NOTIFICATION_PRESENCE_HEARTBEAT_MS = 10_000;
+const NOTIFICATION_PRESENCE_TYPING_MS = 2_000;
+// The controls that open other sessions, whose input comes while the page still shows the session being left.
+const SESSION_NAVIGATION = '.session-sidebar, .session-relation-tree, [data-modal="command-palette-modal"]';
 
 export class NotificationPresenceController {
   // A page in a frame shares sessionStorage with the page around it, so it keeps its identity under its own scope.
@@ -17,6 +20,8 @@ export class NotificationPresenceController {
     this.lastSession = null;
     this.lastFocused = null;
     this.calling = false;
+    this.usedSession = null;
+    this.usedAt = 0;
   }
 
   start() {
@@ -28,14 +33,37 @@ export class NotificationPresenceController {
       this.window.addEventListener(eventName, () => this.reportCurrent(true));
     });
     this.window.addEventListener("pagehide", () => this.report("", false, true));
+    ["pointerdown", "keydown", "wheel"].forEach((eventName) => {
+      this.document.addEventListener(eventName, (event) => this.input(event), { capture: true, passive: true });
+    });
     this.window.setInterval(() => {
       if (this.current().focused) this.reportCurrent(true);
     }, NOTIFICATION_PRESENCE_HEARTBEAT_MS);
     this.reportCurrent(true);
   }
 
-  sessionChanged() {
-    this.reportCurrent();
+  // A switch that the user starts reports the session it opens as used.
+  sessionChanged({ used = false } = {}) {
+    if (!used || !this.use()) this.reportCurrent();
+  }
+
+  // The user's input in the session that the page shows tells the gateway at which computer they are, for PC access.
+  // Shortcuts, such as Ctrl+1, and the controls that open other sessions don't count for the one being left.
+  input(event) {
+    if (!event.isTrusted || event.repeat || event.ctrlKey || event.metaKey || event.target?.closest?.(SESSION_NAVIGATION)) return;
+    this.use(event.type !== "pointerdown");
+  }
+
+  // Reports a use at once, as one deferred could land after a newer use on another computer, and returns whether it did.
+  // Typing and scrolling report at most every 2 seconds.
+  use(typing = false) {
+    const session = String(this.sessionPath() || "");
+    if (!session || !this.lookedAt()) return false;
+    if (typing && session === this.usedSession && Date.now() - this.usedAt < NOTIFICATION_PRESENCE_TYPING_MS) return false;
+    this.usedSession = session;
+    this.usedAt = Date.now();
+    this.report(session, true, false, true);
+    return true;
   }
 
   // A voice call is in its session as much as looking at it, also with the screen off or the window in the background.
@@ -56,7 +84,7 @@ export class NotificationPresenceController {
     return { session: focused ? session : "", focused };
   }
 
-  report(session, focused, keepalive = false) {
+  report(session, focused, keepalive = false, used = false) {
     this.lastSession = session;
     this.lastFocused = focused;
     this.sequence += 1;
@@ -64,7 +92,7 @@ export class NotificationPresenceController {
     this.fetch("/web-push/presence", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: this.clientID, session, focused, sequence: this.sequence }),
+      body: JSON.stringify({ client_id: this.clientID, session, focused, ...(used && { used }), sequence: this.sequence }),
       keepalive
     }).catch(() => {});
   }
