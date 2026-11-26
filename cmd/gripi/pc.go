@@ -29,11 +29,12 @@ import (
 
 const pcHelp = `Usage:
   gripi pc ssh -- <command> [arguments]
-  gripi pc run [--cwd <folder>] -- <command> [arguments]
+  gripi pc run [--root] [--cwd <folder>] -- <command> [arguments]
 
 These use the user's computer, where the Gripi desktop app runs with
 File → Allow PC Access for This Server on. The user approves each use there,
-and for an SSH login also enters their computer's password.
+and for an SSH login or a command as root also enters their computer's
+password.
 
 gripi pc ssh runs a command on this machine, the gateway, with SSH_AUTH_SOCK
 pointing at the SSH agent of the user's computer. So ssh, and Git through it,
@@ -51,6 +52,14 @@ desktop app's environment, without a shell, so use sh -c for pipes, and with
 no input. Gripi keeps only the first 16 MiB of each output. When gripi pc run
 ends first, the computer stops the command.
 
+With --root, it runs as root there, through polkit's pkexec: after the user
+approves it in the app, polkit's own dialog asks for their password and runs
+it, in the same folder, but with pkexec's environment, such as root's home
+folder. gripi pc prints pkexec's words when pkexec didn't run the command,
+such as when the user cancelled polkit's dialog. Once the command runs as
+root, nothing in Gripi can stop it, also when gripi pc run ends. Use --root
+only for work on the user's computer that needs root.
+
 Both go to the computer where the user last used the session: sent a message
 in it, or clicked or typed in it in the desktop app, or else in the session
 that started it as a sub-session. They never go to another computer. gripi pc
@@ -66,6 +75,7 @@ sets.
 Examples:
   gripi pc ssh -- git push
   gripi pc run --cwd /home/me/app -- sh -c 'git status | head'
+  gripi pc run --root -- systemctl restart sshd
 
 Exit codes:
   The command's own once it ran. When the computer signs no login for
@@ -75,7 +85,8 @@ Exit codes:
   prints why and exits with
   1  the command does not run in a Pi or Hermes session, cannot start, or for
      gripi pc run, did not run on the computer, as when gripi pc refused it,
-     or the user denied it or cancelled it in Gripi
+     the user denied it or cancelled it in Gripi, or pkexec didn't run it as
+     root
   2  usage error
 `
 

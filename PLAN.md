@@ -267,14 +267,18 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 3. Workers: both socket routes go into `workerRoutes`, so sessions on workers can use the PC too. Routing uses main's session key, and the routes check the requesting session's placement with `reachesSession`.
 4. Docs and skill, also that when the gateway's `~/.ssh/config` names a key for a host with `IdentitiesOnly yes`, `gripi pc ssh` uses only that key there.
 
-**Phase 5: `--root`.**
+**Phase 5: `--root`. Done.** Details under "Running commands as root (phase 5)".
 - It runs `pkexec --disable-internal-agent --keep-cwd <resolved executable> <args>` with the spawn's cwd. polkit's dialog, which names the executable, is the auth step.
 - **Watchdog.** pkexec runs under a small `sh` wrapper that runs without root. The wrapper keeps a pipe from the app open, and kills pkexec when the pipe closes. So an app that crashes while polkit's dialog is open cancels it.
   - This works because pkexec keeps the user's real UID until it execs the command.
   - pkexec, being setuid, drops a parent-death signal, which is why a wrapper is needed.
 - pkexec's own refusals (126 and 127) come back with pkexec's stderr as they are.
 - A cancel kills `pkexec` while it still waits for the password, but a root process that has started can't be killed from the user's app. This is documented like the `gripi sudo` TODO.
-- **Gate:** the spike showed that a crash while polkit's dialog is open doesn't start the command. The watchdog is still best effort: a crash at the very moment polkit authorizes can still let the approved command start. The user decides whether that window is acceptable before phase 5, or root goes to `TODO.md`.
+- **Gate:** the spike showed that a crash while polkit's dialog is open doesn't start the command. The watchdog is still best effort: a crash at the very moment polkit authorizes can still let the approved command start. **The user accepted that window**, and the docs list it as a limit.
+1. Desktop: commands as the user without polkit's password dialog (user decision, see Decisions).
+2. Gateway and CLI: `--root`, the `root` field and capability, the Push, and the honest Cancel and link-end messages.
+3. Desktop: the root dialog, the wrapper, the start check before polkit's dialog, the turn until polkit's dialog ends, and pkexec's refusals.
+4. E2E with a fake pkexec, then docs and skill.
 
 ## Routing (phase 2)
 
@@ -430,6 +434,30 @@ When the user is on the phone and a computer asks for approval, the phone must s
   - Quitting and turning access off track the process groups that got SIGTERM until their SIGKILL, also once the command's first process ended, as a process that it started in the background may still run.
 
 **Workers:** both socket routes go into `workerRoutes`. `validOwnedSessionPath` checks the requesting session's placement with `reachesSession`, and routing then walks main's session keys, so a sub-session on a worker follows its parent on main.
+
+## Running commands as root (phase 5)
+
+**The sequence.** pkexec runs the command as soon as polkit authorizes it, so the gateway hears `starting` before polkit's dialog shows, never after it:
+1. The `run` message has `"root": true`. The app checks the folder and resolves the command as in phase 4, and finds `pkexec` on its `PATH`, refusing at once without one.
+2. The app's dialog says "As: root", with a line that polkit's dialog then runs the command, which Gripi can't stop. Gripi's line says "run a command as root: <command>", and the Push "Approve on laptop: run a command as root".
+3. On Run, with no `pkexec /usr/bin/true` step, the app posts `starting` within the approval turn and spawns only on 200. From then on the gateway treats the command as possibly running: the line goes, a browser Cancel gets 409 "The command may already run as root, which Gripi can't stop.", and the waiter has no timeout.
+4. The app spawns `/bin/sh -c <wrapper> sh <pkexec> <exe> <args>` in the folder, detached, with `stdio: ['pipe', 'pipe', 'pipe', 'pipe']`. The wrapper, which runs as the user, keeps the app's pipe (stdin) on fd 4, runs `pkexec --disable-internal-agent --keep-cwd <exe> <args>` in the background with no input, and a watchdog subshell that kills pkexec once the pipe reaches EOF. It then waits for pkexec and exits with its code, killing the watchdog. `wait 2>/dev/null` keeps dash's "Terminated" out of the command's stderr.
+5. pkexec sets close-on-exec on fds 3 and up (its binary has "Error setting close-on-exec for file descriptors"), so the app's fd 3 closes when pkexec runs the command or exits: polkit's dialog has ended. The approval turn, and its 2-minute deadline, last until then, so dialogs stay one at a time without a long root command holding the turn.
+6. While polkit's dialog is open, `gripi pc run` ending (the gateway's cancel), a lost link, access turned off, quitting, a crash, or the deadline close the app's pipe, and the watchdog kills pkexec, which closes the dialog without running the command. After the command started, the kill fails, as the command runs as root.
+7. The outcome: the command's result, or an error when pkexec didn't run it. Exit 126 or 127 with empty stdout and stderr starting with `Error executing ` or `Cannot run program ` is pkexec's refusal: "not run as root on the PC: pkexec: <stderr as is>", so `gripi pc run` exits 1 with `gripi pc:`. A pkexec that the deadline stopped (143, no output) is "denied on the PC: nobody answered there in 2 minutes".
+
+**Honest about what can't be stopped.** A cancel for a root command only closes the pipe: no SIGTERM or SIGKILL timers, and quitting doesn't wait to kill it. When the link ends after `starting` of a root command, `gripi pc run` gets "the computer's link to Gripi ended before it replied; if the command started as root there, it keeps running". The docs and `TODO.md` say that a root command can't be stopped from Gripi.
+
+**Protocol:** `POST /pc/run` takes `root=1`. The `run` message carries `"root": true`. The open poll carries `"root": true`, and the gateway refuses a root command at once (503, "can't run commands as root; ask the user to update it") for a link without it, as a phase 4 app would run it as the user.
+
+**Changes from the plan:**
+- Commands as the user no longer ask for polkit's password (user decision during this phase). So the password step is SSH logins' `pkexec /usr/bin/true` and root's pkexec.
+- The approval turn ends when pkexec closes fd 3, rather than when pkexec exits, as pkexec becomes the command.
+- pkexec's refusals come back as errors with its stderr as is, rather than as a result, so that they're told apart from the command's exit codes as far as the words allow.
+- The root command gets pkexec's environment, not the app's.
+- The spike script wasn't on disk any more, so the wrapper was written anew and checked with bash, dash and busybox `sh`.
+
+**Tests:** Node with a real `sh` and a fake pkexec on `PATH` (the sequence, the turn ending at authorization while the command runs, cancel and the deadline killing pkexec, the pipe closing as on a crash, refusals against the command's own 126 and 127, no pkexec, quitting); Go (the `root` field, the capability refusal, the root Cancel and link-end messages, the Push); E2E with a fake pkexec on `PATH` for the whole chain on desktop and a phone's Cancel on mobile.
 
 ## Trust model
 
