@@ -149,3 +149,28 @@ func TestAMessageThatThePageRetriesCountsAtOnce(t *testing.T) {
 		t.Fatalf("the session routes to %v (%v)", link, err)
 	}
 }
+
+// gripi closes an agent connection once its request ended, and the close may overtake the request on its way to the
+// link, which mustn't open the connection again there.
+func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	links := &pcLinks{}
+	if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
+		t.Fatal(err)
+	}
+	links.use("owner", time.Now(), func() string { return "session" })
+	link, session, err := links.route(nil, "session", "connection", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	links.closeConnection("connection")
+	if _, err := links.ask(context.Background(), link, pcMessage{Type: "ssh", ID: "request", Session: session, Connection: "connection"}); err != errPCClosed {
+		t.Fatalf("ask = %v", err)
+	}
+	if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 || messages[0].Type != "ssh_close" {
+		t.Fatalf("the link got %+v (%v)", messages, err)
+	}
+}

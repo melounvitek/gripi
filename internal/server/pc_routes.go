@@ -52,6 +52,7 @@ var (
 	errPCNotOpen  = errors.New("this SSH agent connection didn't start on the computer that the session uses; run the command again")
 	errPCReopened = errors.New("this SSH agent connection is already open")
 	errPCPinned   = errors.New("too many SSH agent connections are open for PC access")
+	errPCClosed   = errors.New("the SSH agent connection closed")
 )
 
 // pcMessage is a message of the gateway to the desktop app.
@@ -320,13 +321,18 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 	return link, session, nil
 }
 
-// ask queues a request for link and waits for its reply. When the reply doesn't come in time, or ctx ends first, the
-// link gets a cancel of the request.
+// ask queues a request of an agent connection for link and waits for its reply. When the reply doesn't come in time, or
+// ctx ends first, the link gets a cancel of the request.
 func (links *pcLinks) ask(ctx context.Context, link *pcLink, message pcMessage) (pcLinkBody, error) {
 	links.mu.Lock()
 	if !links.live(link) {
 		links.mu.Unlock()
 		return pcLinkBody{}, errPCLinkLost
+	}
+	// A request after its connection's close, which may overtake it, would open the connection again on the link.
+	if links.pins[message.Connection].link != link {
+		links.mu.Unlock()
+		return pcLinkBody{}, errPCClosed
 	}
 	replied := make(chan pcLinkBody, 1)
 	link.waiting[message.ID] = replied
