@@ -106,6 +106,21 @@ test("a cancel that comes too late says why on the line for 10 seconds, and one 
   assert.deepEqual(sent.map((request) => request.body), ["id=one", "id=two", "id=two"]);
 });
 
+test("a line stays while its cancel waits for the gateway, so that a poll meanwhile can't make a late cancel look done", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
+  let answer;
+  const { controller, element, lines, cancel } = fixture([new Promise((resolve) => { answer = resolve; })]);
+  controller.update([approval("one")]);
+
+  await cancel(0);
+  controller.update([]);
+  assert.equal(element.children.length, 1);
+
+  answer(reply(409, { error: "The command already runs." }));
+  for (let tick = 0; tick < 3; tick++) await new Promise(setImmediate);
+  assert.deepEqual(lines().map((line) => line.time), ["The command already runs."]);
+});
+
 test("another session's view starts without the lines of the one before", (t) => {
   t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
   const { controller, element } = fixture();

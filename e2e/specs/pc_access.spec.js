@@ -503,6 +503,38 @@ test("a phone cancels a command as root that the computer asks to run, so that p
   }
 });
 
+test("a phone's Cancel that comes once the computer may run a command as root says so, on the screen", async ({ browser, page, baseURL, isMobile }) => {
+  test.skip(!isMobile, "Touch flow");
+  test.setTimeout(40_000);
+  const laptop = await approvedPage(browser);
+  try {
+    let approve;
+    const desktop = await allowPcAccess(laptop.context(), { id: "e2e", name: "E2E gateway", url: baseURL }, () => new Promise((resolve) => { approve = resolve; }));
+    await useSession(laptop, desktop);
+    await page.goto(`/?session=${encodeURIComponent(sessionFile())}`);
+
+    const ran = gripi(["pc", "run", "--root", "--", "touch", file("late")]);
+    const line = page.locator(".pc-approval");
+    await expect(line).toBeVisible({ timeout: 10_000 });
+    // The phone doesn't hear yet that the computer let the command start, before polkit's dialog.
+    const events = (url) => url.pathname === "/events";
+    await page.route(events, (route) => route.abort());
+    approve("run");
+    await pkexecAsked();
+    await line.getByRole("button", { name: /^cancel / }).tap();
+
+    const answer = line.locator(".pc-approval-error");
+    await expect(answer).toHaveText("The command may already run as root, which Gripi can't stop.");
+    const box = await answer.boundingBox();
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize().width);
+    await page.unroute(events);
+    answerPkexec("dismiss");
+    expect((await ran).code).toBe(1);
+  } finally {
+    await laptop.context().close();
+  }
+});
+
 function onPath(command) {
   if (path.isAbsolute(command)) return fs.existsSync(command);
   return process.env.PATH.split(path.delimiter).some((directory) => fs.existsSync(path.join(directory, command)));

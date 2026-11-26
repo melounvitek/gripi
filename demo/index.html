@@ -377,7 +377,7 @@
     .pc-approval-text { min-width: 0; overflow-wrap: anywhere; }
     .pc-approval-text strong { color: var(--gold); font-weight: 700; }
     .pc-approval-time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .pc-approval-error { color: var(--danger); }
+    .pc-approval-error { color: var(--danger); white-space: normal; }
     .pc-approval .pc-approval-cancel { justify-self: auto; min-height: 0; padding: 0.15rem 0; border: 0; border-radius: 0; background: transparent; color: var(--text); font: inherit; letter-spacing: 0; text-transform: none; text-decoration: underline; text-decoration-color: var(--muted-soft); text-underline-offset: 0.2em; }
     .pc-approval .pc-approval-cancel:is(:hover, :disabled) { background: transparent; }
     @media (hover: hover) and (pointer: fine) { .pc-approval .pc-approval-cancel:not(:disabled):hover { color: #fff; } }
@@ -387,6 +387,7 @@
       .pc-approval-text { grid-area: text; }
       .pc-approval-time { grid-area: time; }
       .pc-approval .pc-approval-cancel { grid-area: cancel; }
+      .pc-approval:has(.pc-approval-cancel[hidden]) { padding-block-end: 0.5rem; }
     }
     @media (max-width: 760px), (pointer: coarse) { .pc-approval .pc-approval-cancel { min-height: 2.75rem; padding: 0 0.3rem; } }
     /* The worker in the header, as a quiet word that says more only when something is wrong; on phones, its icon alone. */

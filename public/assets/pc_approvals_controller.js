@@ -41,7 +41,8 @@ export class PcApprovalsController {
     if (!this.element) return;
     const shown = this.approvals.filter((approval) => !this.finished.has(approval.id));
     for (const [id, line] of this.lines) {
-      if (line.until ? line.until > Date.now() : shown.some((approval) => approval.id === id)) continue;
+      // A line stays while its cancel waits for the gateway's answer, which it may then show.
+      if (line.cancel.disabled || (line.until ? line.until > Date.now() : shown.some((approval) => approval.id === id))) continue;
       line.element.remove();
       this.lines.delete(id);
     }
@@ -98,8 +99,10 @@ export class PcApprovalsController {
     line.cancel.disabled = true;
     line.failed = false;
     let response = null;
+    let answer = null;
     try {
       response = await this.window.fetch("/pc/cancel", { method: "POST", body: new URLSearchParams({ id }), headers: { Accept: "application/json" } });
+      if (response.status === 409) answer = await response.json().catch(() => null);
     } catch (_error) {
     }
     line.cancel.disabled = false;
@@ -112,7 +115,7 @@ export class PcApprovalsController {
       line.until = Date.now() + ANSWER_MS;
       line.cancel.hidden = true;
       line.countdown.textContent = "";
-      line.error.textContent = (await response.json().catch(() => null))?.error || "too late to cancel";
+      line.error.textContent = answer?.error || "too late to cancel";
     } else {
       line.failed = true;
     }

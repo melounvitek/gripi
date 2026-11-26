@@ -39,7 +39,8 @@ const AGENT_HINT = 'start one with "systemctl --user enable --now ssh-agent" and
 // crashes, the wrapper stops pkexec, and with it polkit's dialog, which pkexec, being setuid, wouldn't do on its own.
 // That works only while pkexec waits, as it runs as the user until polkit authorizes it, and then runs the command as
 // root. pkexec closes descriptor 3 when it runs the command or exits, which tells the app that polkit's dialog ended,
-// and the app then sends a line, after which the wrapper stops nothing.
+// and the app then sends a line, after which the watchdog ends without stopping anything. The wrapper waits for it
+// rather than signal it, as shells reap it meanwhile, so that its process ID may be another's by then.
 const ROOT_WRAPPER = `exec 4<&0 </dev/null
 pkexec=$1
 shift
@@ -52,7 +53,7 @@ exec 4<&-
 # Some shells note there that pkexec was stopped, which isn't the command's output.
 wait "$pid" 2>/dev/null
 code=$?
-kill "$watchdog" 2>/dev/null
+wait "$watchdog"
 exit "$code"`;
 
 function createPcAccess({

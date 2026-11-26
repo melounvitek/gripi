@@ -33,8 +33,8 @@ const pcHelp = `Usage:
 
 These use the user's computer, where the Gripi desktop app runs with
 File → Allow PC Access for This Server on. The user approves each use there,
-and for an SSH login or a command as root also enters their computer's
-password.
+and for an SSH login or a command as root, polkit then checks that it is
+them, usually with their computer's password.
 
 gripi pc ssh runs a command on this machine, the gateway, with SSH_AUTH_SOCK
 pointing at the SSH agent of the user's computer. So ssh, and Git through it,
@@ -53,8 +53,8 @@ no input. Gripi keeps only the first 16 MiB of each output. When gripi pc run
 ends first, the computer stops the command.
 
 With --root, it runs as root there, through polkit's pkexec: after the user
-approves it in the app, polkit's own dialog asks for their password and runs
-it, in the same folder, but with pkexec's environment, such as root's home
+approves it in the app, polkit checks that it is them, usually with its own
+password dialog, and runs it, in the same folder, but with pkexec's environment, such as root's home
 folder. gripi pc prints pkexec's words when pkexec didn't run the command,
 such as when the user cancelled polkit's dialog. Once the command runs as
 root, nothing in Gripi can stop it, also when gripi pc run ends. Use --root
