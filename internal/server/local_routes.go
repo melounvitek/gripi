@@ -133,6 +133,7 @@ func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tags", app.tags)
 	mux.HandleFunc("POST /sudo", app.sudo)
 	mux.HandleFunc("POST /pc/ssh-agent", app.pcSSHAgent)
+	mux.HandleFunc("POST /pc/run", app.pcRun)
 	mux.HandleFunc("POST /workers/move", app.moveToWorker)
 	mux.HandleFunc("POST /workers/return", app.returnFromWorker)
 	mux.HandleFunc("POST /workers/forward", app.forwardPort)

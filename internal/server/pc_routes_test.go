@@ -180,11 +180,20 @@ func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
 
 // A computer that begins to ask the user to approve a request notifies their other browsers at once and once, also
 // while they show the session: all clients are one for presence, also the computer that asks, which comes to the front
-// with a notification of its own.
+// with a notification of its own. A command shows on a locked screen, so only that it asks to run one does.
 func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.T) {
 	poll := PCLinkPoll
 	PCLinkPoll = 10 * time.Millisecond
 	t.Cleanup(func() { PCLinkPoll = poll })
+	for _, request := range []struct{ route, form, summary, body string }{
+		{"/pc/ssh-agent", "connection=c&message=Cw%3D%3D&open=1", "SSH login to github.com as git", "Approve on laptop: SSH login to github.com as git"},
+		{"/pc/run", "argv=cat&argv=.env", "/usr/bin/cat .env", "Approve on laptop: run a command"},
+	} {
+		t.Run(request.route, func(t *testing.T) { notifiesOnce(t, request.route, request.form, request.summary, request.body) })
+	}
+}
+
+func notifiesOnce(t *testing.T, route, form, summary, body string) {
 	handler := newPushTestHandler(t, false, false)
 	app := handler.app
 	path := writeNotificationSession(t, app.config.SessionsRoot, "Fix login redirect")
@@ -220,7 +229,7 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {
-		request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://gripi/pc/ssh-agent", strings.NewReader("connection=c&message=Cw%3D%3D&open=1&session="+url.QueryEscape(path)))
+		request := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://gripi"+route, strings.NewReader(form+"&session="+url.QueryEscape(path)))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		handler.Local().ServeHTTP(httptest.NewRecorder(), request)
 	}()
@@ -236,8 +245,8 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	}
 	status := func(asking bool) {
 		t.Helper()
-		body := pushJSON(t, map[string]any{"link": "app", "id": id, "asking": asking, "summary": "SSH login to github.com as git", "expires_in": 120})
-		request := httptest.NewRequest(http.MethodPost, "http://example.com/pc/link/status", strings.NewReader(body))
+		status := pushJSON(t, map[string]any{"link": "app", "id": id, "asking": asking, "summary": summary, "expires_in": 120})
+		request := httptest.NewRequest(http.MethodPost, "http://example.com/pc/link/status", strings.NewReader(status))
 		request.RemoteAddr = "127.0.0.1:40000"
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Gripi-PC-Link", "1")
@@ -252,7 +261,7 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	status(true)
 	select {
 	case notification := <-delivered:
-		if notification["owner"] != owners["phone"] || notification["title"] != "Fix login redirect" || notification["body"] != "Approve on laptop: SSH login to github.com as git" || notification["plain"] != true || notification["url"] != "/?session="+url.QueryEscape(path) || notification["session"] != path || !strings.HasPrefix(notification["tag"].(string), "gripi-pc:") {
+		if notification["owner"] != owners["phone"] || notification["title"] != "Fix login redirect" || notification["body"] != body || notification["plain"] != true || notification["url"] != "/?session="+url.QueryEscape(path) || notification["session"] != path || !strings.HasPrefix(notification["tag"].(string), "gripi-pc:") {
 			t.Fatalf("notification = %v", notification)
 		}
 	case <-time.After(5 * time.Second):

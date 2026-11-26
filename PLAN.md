@@ -259,7 +259,7 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 3. Page: the line above the editor (direction B), and the service worker's focus check.
 4. Docs and skill.
 
-**Phase 4: `gripi pc run`** as the PC user.
+**Phase 4: `gripi pc run`** as the PC user. Details under "Running commands (phase 4)".
 - Before it: Cancel from Gripi wins until the gateway hears the desktop's `asking: false` or reply, so it can refuse a login that the user just allowed on the PC (phase 3 accepted that for SSH, which only refuses). A run has side effects on the PC, so decide whether the desktop confirms with the gateway before it spawns.
 1. The run dialog, the runner with output caps and cancel, and a cwd that must be absolute and exist (home by default). `argv[0]` is resolved on the PC's PATH, and the dialog shows the resolved path.
 2. Workers: both socket routes go into `workerRoutes`, so sessions on workers can use the PC too. Routing uses main's session key, and the routes check the session's placement with `reachesSession`.
@@ -386,6 +386,45 @@ When the user is on the phone and a computer asks for approval, the phone must s
   - Frontend: live rendering.
   - E2E: a phone-sized context sees the line and cancels, which aborts the fake desktop's dialog.
 - **Not in scope:** a mark in the sidebar and `gripi list`, which `TODO.md` already has for `gripi sudo`; it gets PC requests added.
+
+## Running commands (phase 4)
+
+**The race with Cancel.** The user decided that the desktop confirms with the gateway right before it spawns.
+- After the dialog and polkit, still in the approval turn, the app posts `POST /pc/link/status` with `{link, id, starting: true}`, and spawns only on 200.
+- The gateway answers 200 only while the request's waiter is live: not cancelled, timed out, or ended by gripi or the link's end. From then on:
+  - the waiter no longer asks, as after `asking: false`, so the line and Cancel go;
+  - a browser Cancel gets 409 "The command already runs.", never a cancel;
+  - the waiter waits for the reply without `PCReplyTimeout`, as a command may run long. gripi's end or the link's still end it, and the app then kills the command.
+- Otherwise it answers 404, or 409 for a link that isn't open, and the app doesn't run the command.
+- So Cancel in Gripi wins until the gateway hears `starting`, and the command runs only if it didn't.
+
+**Protocol:**
+- CLI → gateway: `POST /pc/run` on the socket, with the form fields:
+  - `session`, as for `/pc/ssh-agent`;
+  - `argv`, repeated: 1 to 256 words of up to 4096 bytes of UTF-8 without NUL, the first not empty;
+  - `cwd`, optional: an absolute path on the PC.
+
+  It answers `200` with a `SudoResult` (`exit_code`, `stdout` and `stderr` in base64, `truncated`). Errors are as for `/pc/ssh-agent`: 400, 403, 404, 503, 504 when the command didn't start in time, and 502 for the desktop's own `error`. It is routed like `/pc/ssh-agent`, without connection pins.
+- Gateway → desktop: `{"type": "run", "id", "session", "session_name", "argv", "cwd"}`, without `cwd` for the home folder. It needs a reply with that `id`.
+- Desktop → gateway:
+  - `POST /pc/link/reply` with `{"link", "id", "result": {"exit_code", "stdout", "stderr", "truncated"}}` or `{"link", "id", "error"}`. A reply's body may be up to 48 MiB, for 16 MiB per output in base64.
+  - `POST /pc/link/status` may carry `"starting": true`, as above.
+- The Push says "Approve on laptop: run a command", while the line shows the command.
+
+**Desktop:**
+- **Checks before the dialog**, which refuse at once with an error reply:
+  - the message: `argv` of 1 to 256 strings of up to 4096 characters, the first not empty, and `cwd` a string if given;
+  - the folder: absolute and an existing one, or the user's home folder without `cwd`;
+  - the command: `argv[0]` with a slash is resolved against the folder, and otherwise on the app's `PATH`, skipping relative entries, to an executable file, as a shell would;
+  - the command as shown at most 4096 characters, so the dialog stays readable.
+- **The dialog** shows the session, the command with the resolved path and the other words quoted like `shellWords`, the folder and "As: you", with **Deny** (default and cancel) and **Run**. The approval turn's summary for Gripi's line is the command as shown.
+- **The runner** spawns the resolved path with the other words, in the folder, with no shell, `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true` and the app's own environment.
+  - It keeps 16 MiB of each output and drops the rest, with `truncated`.
+  - The exit code is the command's, or 128 plus the signal that killed it.
+  - A cancel, a lost link or turning access off sends SIGTERM to the process group, and SIGKILL 5 s later, so that Git can remove its lock files first.
+  - When the result's reply fails, such as a large one on a slow uplink, it sends an error instead, as gripi pc run would otherwise wait for good.
+
+**Workers:** both socket routes go into `workerRoutes`. `validOwnedSessionPath` checks the requesting session's placement with `reachesSession`, and routing then walks main's session keys, so a sub-session on a worker follows its parent on main.
 
 ## Trust model
 

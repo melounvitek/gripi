@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -17,10 +18,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
 const pcHelp = `Usage:
@@ -70,8 +74,11 @@ const (
 )
 
 func runOnPC(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(arguments) > 0 && arguments[0] == "run" {
+		return runCommandOnPC(arguments[1:], stdout, stderr)
+	}
 	if len(arguments) == 0 || arguments[0] != "ssh" {
-		return usageError(stderr, "pc", "needs ssh, as in 'gripi pc ssh -- git push'")
+		return usageError(stderr, "pc", "needs ssh or run, as in 'gripi pc ssh -- git push'")
 	}
 	if len(arguments) < 3 || arguments[1] != "--" {
 		return usageError(stderr, "pc", "put the command after --, as in 'gripi pc ssh -- git push'")
@@ -122,6 +129,51 @@ func runOnPC(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	case <-time.After(5 * time.Second):
 	}
 	return code
+}
+
+// runCommandOnPC asks the user's computer to run a command, and passes on its output and exit code.
+func runCommandOnPC(arguments []string, stdout, stderr io.Writer) int {
+	separator := slices.Index(arguments, "--")
+	if separator < 0 || separator == len(arguments)-1 {
+		return usageError(stderr, "pc", "put the command after --, as in 'gripi pc run -- systemctl --user restart pipewire'")
+	}
+	flags := flag.NewFlagSet("pc run", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	cwd := flags.String("cwd", "", "")
+	if err := flags.Parse(arguments[:separator]); err != nil {
+		return usageError(stderr, "pc", err.Error())
+	}
+	if flags.NArg() > 0 || *cwd != "" && !filepath.IsAbs(*cwd) {
+		return usageError(stderr, "pc", "takes only --cwd with an absolute folder on the computer before --")
+	}
+	session := runningSession()
+	if session == "" {
+		return failure(stderr, "pc", errors.New("run it from a Pi or Hermes session in Gripi; neither PI_SESSION_FILE nor HERMES_SESSION_ID is set"))
+	}
+	client, err := newGatewayClient()
+	if err != nil {
+		return failure(stderr, "pc", err)
+	}
+	form := url.Values{"session": {session}, "argv": arguments[separator+1:]}
+	if *cwd != "" {
+		form.Set("cwd", *cwd)
+	}
+	request, err := http.NewRequest(http.MethodPost, "http://gripi/pc/run", strings.NewReader(form.Encode()))
+	if err != nil {
+		return failure(stderr, "pc", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// The gateway answers once the command has run, however long that takes.
+	var result gateway.SudoResult
+	if err := client.do(request, 0, &result); err != nil {
+		return failure(stderr, "pc", err)
+	}
+	stdout.Write(result.Stdout)
+	stderr.Write(result.Stderr)
+	if result.Truncated {
+		fmt.Fprintln(stderr, "gripi pc: the command printed more than 16 MiB to an output, and Gripi dropped the rest")
+	}
+	return result.ExitCode
 }
 
 // runForwardingSignals runs a command, passes on the signals that would stop gripi, and returns the command's exit
