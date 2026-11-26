@@ -31,6 +31,9 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // Longer than the gateway's 25-second link poll.
 const REQUEST_TIMEOUT_MS = 40 * 1000;
 const MAX_BACKOFF_MS = 30 * 1000;
+// The waits before a request of a link that got no answer, such as in a short network drop, is sent again, which span
+// about the 35 seconds for which the gateway keeps a link without polls.
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const LINK_TAKEN_RETRY_MS = 10 * 1000;
 const REFUSED_RETRY_MS = 60 * 1000;
 const AGENT_HINT = 'start one with "systemctl --user enable --now ssh-agent" and load your keys with "ssh-add"';
@@ -197,10 +200,19 @@ function createPcAccess({
   }
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
-  // Returns the server's answer, or the request's error without one.
-  async function reply(entry, link, id, fields, signal) {
-    if (signal.aborted) return { error: signal.reason };
-    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).catch((error) => ({ error }));
+  function reply(entry, link, id, fields, signal) {
+    return post(entry, "/pc/link/reply", { link: link.id, id, ...fields }, signal);
+  }
+
+  // Sends a request of a link, and again after each of RETRY_DELAYS_MS while it gets no answer, unless signal ends it.
+  // Returns the server's answer, or the error of the last try.
+  async function post(entry, path, body, signal) {
+    for (let attempt = 0; ; attempt++) {
+      if (signal.aborted) return { error: signal.reason };
+      const answer = await request(entry.gateway, path, body, signal).catch((error) => ({ error }));
+      if (!answer.error || attempt === RETRY_DELAYS_MS.length) return answer;
+      await sleep(RETRY_DELAYS_MS[attempt], signal);
+    }
   }
 
   async function handleSsh(entry, link, connection, message, signal) {
@@ -345,8 +357,8 @@ function createPcAccess({
         // it, so the server hears it before that dialog shows.
         approved: async (_answer, approval) => {
           starting = true;
-          const started = await request(entry.gateway, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval).catch(() => null);
-          if (started?.status !== 200) return "not run on the PC: Gripi no longer waits for it";
+          const started = await post(entry, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval);
+          if (started.status !== 200) return "not run on the PC: Gripi no longer waits for it";
           if (!root) return null;
           if (approval.aborted) return "denied on the PC";
           running = runCommand(executable, args, folder, approval, pkexec);
@@ -425,7 +437,7 @@ function createPcAccess({
   // Tells the server whether the PC asks the user to approve a request. The dialog doesn't wait for it, and the server
   // keeps a start that comes after the stop from showing.
   function status(entry, link, id, fields, signal) {
-    if (!signal.aborted) request(entry.gateway, "/pc/link/status", { link: link.id, id, ...fields }, signal).catch(() => {});
+    post(entry, "/pc/link/status", { link: link.id, id, ...fields }, signal);
   }
 
   // Runs one approval at a time, from its dialog to the end of polkit's, if any, so that one never covers the other.
