@@ -1397,3 +1397,50 @@ func TestPCRunTakesAtMost16MiBOfEachOutput(t *testing.T) {
 		t.Fatalf("gripi pc run = %d, %d bytes of stdout, %d of stderr", answered.code, len(answered.stdout), len(answered.stderr))
 	}
 }
+
+// gripi on a worker reaches the computer for the sessions that run there, routed by main's sessions, so also through a
+// parent on main, but not for a session on main.
+func TestPCOnAWorkerReachesTheComputerOnlyForSessionsThere(t *testing.T) {
+	requireTools(t, "ssh-add")
+	// Socket paths have a short system limit.
+	state := filepath.Dir(socketPath(t))
+	if err := os.MkdirAll(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	alpha, address := pcGateway(t, func(configured *config.Config) {
+		configured.ReadStatePath = filepath.Join(state, "read.json")
+		cfg = *configured
+	})
+	beta := filepath.Join(filepath.Dir(alpha), "beta.jsonl")
+	if code, _, stderr := runCLI("link", alpha, beta); code != 0 {
+		t.Fatalf("gripi link = %d, stderr %q", code, stderr)
+	}
+	pcDesktop(t, address, "laptop", func(message pcMessage) map[string]any {
+		if message.Type == "run" {
+			return pcResult(0, "ran on the laptop\n", "", false)
+		}
+		return map[string]any{"error": "laptop"}
+	})
+	pcPresence(t, pcBrowserToken, beta, true)
+	socket, stop, err := startWorkerSocket(cfg, browser, "beelink", fakePlacement{sessions: []string{alpha}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	t.Setenv("GRIPI_SOCKET_PATH", socket)
+
+	if code, stdout, stderr := runCLI("pc", "run", "--", "true"); code != 0 || stdout != "ran on the laptop\n" {
+		t.Fatalf("gripi pc run on the worker = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if answerer := pcAnswerer(t); answerer != "laptop" {
+		t.Fatalf("gripi pc ssh on the worker reached %q", answerer)
+	}
+	t.Setenv("PI_SESSION_FILE", beta)
+	if code, _, stderr := runCLI("pc", "run", "--", "true"); code != 1 || !strings.HasPrefix(stderr, "gripi pc: the gateway answered 404: the command runs in no session of yours") {
+		t.Fatalf("gripi pc run on the worker in a session on main = %d, stderr %q", code, stderr)
+	}
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, "the command runs in no session of yours") {
+		t.Fatalf("gripi pc ssh on the worker in a session on main = %q", answerer)
+	}
+}
