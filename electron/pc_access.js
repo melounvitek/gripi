@@ -31,6 +31,9 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // Longer than the gateway's 25-second link poll.
 const REQUEST_TIMEOUT_MS = 40 * 1000;
 const MAX_BACKOFF_MS = 30 * 1000;
+// The waits before a request of a link that got no answer, such as in a short network drop, is sent again, which span
+// about the 35 seconds for which the gateway keeps a link without polls.
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const LINK_TAKEN_RETRY_MS = 10 * 1000;
 const REFUSED_RETRY_MS = 60 * 1000;
 const AGENT_HINT = 'start one with "systemctl --user enable --now ssh-agent" and load your keys with "ssh-add"';
@@ -86,18 +89,18 @@ function createPcAccess({
     runLink(entry);
   }
 
-  async function stop(id) {
+  async function stop(id, reason = "PC access was turned off") {
     const entry = gateways.get(id);
     if (!entry) return;
 
     gateways.delete(id);
     entry.controller.abort();
-    await dropLink(entry, entry.link);
+    await loseLink(entry, entry.link, reason);
   }
 
   // The app quits before SIGKILL's 5 seconds, so the process groups of stopped commands get it after a second.
   async function stopAll() {
-    const stopped = Promise.all([...gateways.keys()].map(stop));
+    const stopped = Promise.all([...gateways.keys()].map((id) => stop(id, "the app quits")));
     if (stopping.size) await sleep(QUIT_KILL_DELAY_MS);
     for (const kill of stopping) kill("SIGKILL");
     stopping.clear();
@@ -109,31 +112,27 @@ function createPcAccess({
     let backoff = 0;
     while (!signal.aborted) {
       const link = entry.link;
-      // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart.
+      // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart. Until a
+      // poll has an answer, the gateway may not have the link yet.
       const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()), run: true, root: true };
-      link.opened = true;
-      let response;
-      try {
-        response = await request(entry.gateway, "/pc/link", body, link.controller.signal);
-      } catch (_error) {
-        response = null;
-      }
+      const response = await request(entry.gateway, "/pc/link", body, link.controller.signal).catch((error) => ({ error }));
       if (signal.aborted) return;
 
-      const messages = response?.status === 200 ? response.body?.messages : null;
-      if (Array.isArray(messages) && messages.length <= MAX_POLL_MESSAGES && withinBudget(link, messages)) {
-        for (const message of messages) receive(entry, link, message);
+      const failure = pollFailure(link, response);
+      if (!failure) {
+        link.opened = true;
+        for (const message of response.body.messages) receive(entry, link, message);
         backoff = 0;
         continue;
       }
 
-      // Any failed poll may have lost the link, for example to another app or a restarted gateway, so what it was
-      // asked and allowed goes with it. So does a poll with more messages than a link may take or have in progress.
-      entry.link = newLink();
-      dropLink(entry, link);
-      if (response?.status === 409) {
+      // A poll without an answer, such as in a short network drop, keeps the link, which the gateway keeps for 35 seconds
+      // without polls and refuses to resume after that. Any other failed poll may have lost the link, for example to
+      // another app or a restarted gateway, so what it was asked and allowed goes with it.
+      if (!response.error) loseLink(entry, link, failure);
+      if (response.status === 409) {
         await sleep(LINK_TAKEN_RETRY_MS, signal);
-      } else if (response?.status === 403) {
+      } else if (response.status === 403) {
         await sleep(REFUSED_RETRY_MS, signal);
       } else {
         backoff = Math.min(backoff ? backoff * 2 : 1000, MAX_BACKOFF_MS);
@@ -142,10 +141,18 @@ function createPcAccess({
     }
   }
 
-  // A batch that would take the link over the requests it may have in progress drops the link before any of them starts.
-  function withinBudget(link, messages) {
+  // Says why a poll's answer loses the link, or returns null for one that it takes. A batch that would take the link over
+  // the requests that it may have in progress loses it before any of them starts.
+  function pollFailure(link, answer) {
+    const messages = answer.body?.messages;
+    if (answer.status !== 200) return `the poll got ${answered(answer)}`;
+    if (!Array.isArray(messages)) return "the poll's answer is malformed";
+    if (messages.length > MAX_POLL_MESSAGES) return `the poll brought ${messages.length} messages, more than ${MAX_POLL_MESSAGES}`;
     const requests = messages.filter((message) => message?.type === "ssh" || message?.type === "run").length;
-    return link.requests.size + link.refusals + requests <= MAX_REQUESTS_IN_PROGRESS;
+    if (link.requests.size + link.refusals + requests > MAX_REQUESTS_IN_PROGRESS) {
+      return `the poll's messages would take the link over ${MAX_REQUESTS_IN_PROGRESS} requests in progress`;
+    }
+    return null;
   }
 
   function receive(entry, link, message) {
@@ -193,10 +200,21 @@ function createPcAccess({
   }
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
-  // Returns the status of the server's answer, or null without one.
-  async function reply(entry, link, id, fields, signal) {
-    if (signal.aborted) return null;
-    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).then(({ status }) => status, () => null);
+  function reply(entry, link, id, fields, signal) {
+    return post(entry, link, "/pc/link/reply", { id, ...fields }, signal);
+  }
+
+  // Sends a request of a link, and again after each of RETRY_DELAYS_MS while it gets no answer, unless signal ends it. A
+  // refusal of the gateway, which no longer knows the link, loses it, so that nothing more is sent on it. Returns the
+  // server's answer, or the error of the last try.
+  async function post(entry, link, path, fields, signal) {
+    for (let attempt = 0; ; attempt++) {
+      if (signal.aborted) return { error: signal.reason };
+      const answer = await request(entry.gateway, path, { link: link.id, ...fields }, signal).catch((error) => ({ error }));
+      if (answer.status === 409) loseLink(entry, link, `${path} got ${answered(answer)}`);
+      if (!answer.error || attempt === RETRY_DELAYS_MS.length) return answer;
+      await sleep(RETRY_DELAYS_MS[attempt], signal);
+    }
   }
 
   async function handleSsh(entry, link, connection, message, signal) {
@@ -312,8 +330,10 @@ function createPcAccess({
     // answer that doesn't reach Gripi then ends the link, which ends the wait.
     let starting = false;
     const answerWith = async (fields) => {
-      const status = await send(fields);
-      if (starting && !signal.aborted && ![200, 404, 409].includes(status)) link.controller.abort();
+      const answer = await send(fields);
+      if (starting && !signal.aborted && !answeredWith(answer, 200, 404, 409)) {
+        loseLink(entry, link, `the reply to a command that may have started got ${answered(answer)}`);
+      }
     };
     try {
       const root = message.root === true;
@@ -339,8 +359,8 @@ function createPcAccess({
         // it, so the server hears it before that dialog shows.
         approved: async (_answer, approval) => {
           starting = true;
-          const started = await request(entry.gateway, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval).catch(() => null);
-          if (started?.status !== 200) return "not run on the PC: Gripi no longer waits for it";
+          const started = await post(entry, link, "/pc/link/status", { id: message.id, starting: true }, approval);
+          if (!answeredWith(started, 200)) return "not run on the PC: Gripi didn't confirm that it may start";
           if (!root) return null;
           if (approval.aborted) return "denied on the PC";
           running = runCommand(executable, args, folder, approval, pkexec);
@@ -356,7 +376,7 @@ function createPcAccess({
       if (signal.aborted) return;
       const failure = root && pkexecFailure(result, executable, run.stopped);
       if (failure) return await answerWith({ error: failure });
-      if (await send({ result }) === 200) return;
+      if (answeredWith(await send({ result }), 200)) return;
       await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
     } catch (error) {
       await answerWith({ error: error.message });
@@ -419,7 +439,7 @@ function createPcAccess({
   // Tells the server whether the PC asks the user to approve a request. The dialog doesn't wait for it, and the server
   // keeps a start that comes after the stop from showing.
   function status(entry, link, id, fields, signal) {
-    if (!signal.aborted) request(entry.gateway, "/pc/link/status", { link: link.id, id, ...fields }, signal).catch(() => {});
+    post(entry, link, "/pc/link/status", { id, ...fields }, signal);
   }
 
   // Runs one approval at a time, from its dialog to the end of polkit's, if any, so that one never covers the other.
@@ -445,8 +465,12 @@ function createPcAccess({
     closeAgent(connection);
   }
 
-  // Releases the link on the gateway too, so the next one needn't wait for it to go stale.
-  function dropLink(entry, link) {
+  // Ends a link, unless it has ended, and logs why. What it was asked and allowed goes with it, and the gateway releases
+  // it too, so that the next one needn't wait for it to go stale.
+  function loseLink(entry, link, reason) {
+    if (link.controller.signal.aborted) return;
+    console.warn(`PC access: lost the link to ${entry.gateway.name}: ${reason}`);
+    if (entry.link === link) entry.link = newLink();
     link.controller.abort();
     for (const connection of link.connections.values()) closeAgent(connection);
     link.requests.clear();
@@ -499,6 +523,19 @@ function validAgentMessage(text) {
   return body.length > 0 && body.length <= MAX_AGENT_MESSAGE_BYTES && body.toString("base64") === text;
 }
 
+// Whether the gateway answered a request of a link with one of statuses. It answers with a JSON object, unlike something
+// else on the way, while an answer too large to read or cut short has none, and a 200 with an error isn't its yes.
+function answeredWith({ status, body }, ...statuses) {
+  return statuses.includes(status) && typeof body === "object" && body !== null && !(status === 200 && "error" in body);
+}
+
+// Says what a request of a link got, for the log: the gateway's status and error, or the request's error.
+function answered({ status, body, error }) {
+  if (error) return `no answer: ${error.code || error.message}`;
+  if (typeof body !== "object" || body === null) return `HTTP ${status} without a JSON object`;
+  return `HTTP ${status}${typeof body.error === "string" ? `: ${escapeForDisplay(body.error.slice(0, 200))}` : ""}`;
+}
+
 function connectionKey(message) {
   return JSON.stringify([message.session, message.connection]);
 }
@@ -517,15 +554,24 @@ function linkRequest(url, body, { cookie, signal } = {}) {
   let timer;
   return new Promise((resolve, reject) => {
     const client = url.protocol === "https:" ? https : http;
+    let status;
+    // A status other than 200 is an answer also when its body is cut short, unlike a 200, whose messages are lost.
+    const fail = (error) => (status && status !== 200 ? resolve({ status, body: null }) : reject(error));
     const request = client.request(url, { method: "POST", headers, signal }, (response) => {
+      status = response.statusCode;
       const chunks = [];
       let size = 0;
       response.on("data", (chunk) => {
         size += chunk.length;
-        if (size > MAX_RESPONSE_BYTES) request.destroy(new Error("the server's answer is too large"));
-        else chunks.push(chunk);
+        if (size <= MAX_RESPONSE_BYTES) {
+          chunks.push(chunk);
+        } else {
+          // Still an answer, unlike one that the network cuts, but one that nothing takes.
+          resolve({ status: response.statusCode, body: null });
+          request.destroy();
+        }
       });
-      response.on("error", reject);
+      response.on("error", fail);
       response.on("end", () => {
         try {
           resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
@@ -536,7 +582,7 @@ function linkRequest(url, body, { cookie, signal } = {}) {
     });
     // A deadline for the whole request, as an idle timeout wouldn't stop an answer that keeps trickling in.
     timer = setTimeout(() => request.destroy(new Error("the server did not answer in time")), REQUEST_TIMEOUT_MS);
-    request.on("error", reject);
+    request.on("error", fail);
     request.end(payload);
   }).finally(() => clearTimeout(timer));
 }

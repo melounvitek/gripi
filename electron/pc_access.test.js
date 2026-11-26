@@ -78,13 +78,18 @@ async function settle() {
 
 function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan", starting = 200, lostResults = false, lostReplies = false } = {}) {
   const harness = { polls: [], posts: [], prompts: [], agents: [], spawned: [], auths: 0, time: 0 };
+  const warn = t.mock.method(console, "warn", () => {});
+  harness.warnings = () => warn.mock.calls.map((call) => call.arguments.join(" "));
   harness.pc = createPcAccess({
     request(_gateway, path, body, signal) {
       if (path !== "/pc/link") {
         harness.posts.push({ path, body });
+        if (harness.offline) return Promise.reject(Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" }));
+        if (harness.respond?.(path)) return Promise.resolve(harness.respond(path));
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
         if (body.starting && starting === "late") return new Promise((resolve) => { harness.started = () => resolve({ status: 200, body: {} }); });
         if (body.starting && starting === "held") return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
+        if (body.starting && typeof starting === "object" && starting) return Promise.resolve(starting);
         if (body.starting) return starting ? Promise.resolve({ status: starting, body: {} }) : Promise.reject(new Error("the server did not answer in time"));
         if (lostResults && body.result || lostReplies && path === "/pc/link/reply") return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
@@ -153,6 +158,11 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
     }
   };
   harness.prompted = (count) => harness.until(() => harness.prompts.length >= count);
+  // Advances the mocked clock a second at a time until done, such as through the retries of a request.
+  harness.ticked = (done) => harness.until(() => {
+    t.mock.timers.tick(1000);
+    return done();
+  });
   // Waits for ms of real time, also while the test mocks timers.
   harness.waited = (ms) => {
     const end = Date.now() + ms;
@@ -203,6 +213,17 @@ test("opens each link with its first poll, which names the computer, and resumes
 
   assert.notEqual(h.link(), link);
   assert.deepEqual(h.polls[0].body, { link: h.link(), open: true, name: "laptop", run: true, root: true });
+});
+
+test("opens a link again with the same ID after an opening poll without an answer, which the gateway may never have got", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const link = h.link();
+
+  h.polls.shift().reject(new Error("offline"));
+  await expectPollAfter(t, h, 1000);
+
+  assert.deepEqual(h.polls[0].body, { link, open: true, name: "laptop", run: true, root: true });
 });
 
 test("names the computer on one line of at most 64 characters", (t) => {
@@ -265,7 +286,6 @@ test("shows at most 200 characters of a session name, escaped first", async (t) 
 });
 
 test("ignores malformed messages", async (t) => {
-  t.mock.method(console, "warn", () => {});
   const h = setup(t);
   const link = h.link();
 
@@ -351,6 +371,7 @@ test("a poll that would take the link over 256 requests in progress, refusals be
 
   assert.equal(h.replies().length, 255);
   assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the poll's messages would take the link over 256 requests in progress"]);
   await expectPollAfter(t, h, 1000);
   assert.notEqual(h.link(), link);
 });
@@ -514,6 +535,7 @@ test("stopping closes the link, its dialogs and agent connections, and forgets g
 
   assert.equal(h.prompts[1].signal.aborted, true);
   assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: PC access was turned off"]);
   assert.equal(h.agents[0].closed, true);
   await settle();
   assert.equal(h.replies().length, 2);
@@ -557,33 +579,148 @@ test("the 2 minutes cover the password check, which is stopped when they end", a
   assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "denied on the PC: nobody answered there in 2 minutes" }]);
 });
 
-test("backs off on network errors from 1 second to 30, and polls at once after a success", async (t) => {
+// A network drop that the gateway outlasts with the link, which it keeps for 35 seconds without polls.
+test("a poll without an answer keeps the link, its dialogs, grants and agent connections, and resumes it after a second", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t);
+  const link = h.link();
+  await h.deliver(ssh("1", LIST), ssh("2", sign()));
+  await h.answer("grant");
+  await h.deliver(ssh("3", sign({ user: "deploy" }), { connection: "c2" }));
+
+  h.polls.shift().reject(Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }));
+  await expectPollAfter(t, h, 1000);
+
+  assert.deepEqual(h.polls[0].body, { link });
+  assert.equal(h.prompts[1].signal.aborted, false);
+  assert.equal(h.agents[0].closed, false);
+  assert.deepEqual(h.warnings(), []);
+  await h.deliver(ssh("4", sign(), { connection: "c3" }));
+  await h.answer("once");
+
+  assert.equal(h.prompts.length, 2);
+  assert.deepEqual(h.replies().map((reply) => [reply.link, reply.id]), [[link, "1"], [link, "2"], [link, "4"], [link, "3"]]);
+  assert.equal(h.posts.some(({ path }) => path === "/pc/link/close"), false);
+});
+
+// Such as once the network is back after more than the 35 seconds for which the gateway keeps a link without polls.
+test("keeps the link through polls without an answer, backing off from 1 second to 30 until a poll has an answer, and loses it once the gateway refuses to resume it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const link = h.link();
+  await h.deliver(ssh("1", LIST), ssh("2", sign()));
+  await h.answer("grant");
+  await h.deliver(ssh("3", sign({ user: "deploy" }), { connection: "c2" }));
 
   for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
-    h.polls.shift().reject(new Error("offline"));
+    h.polls.shift().reject(new Error("the server did not answer in time"));
     await expectPollAfter(t, h, delay);
+    assert.equal(h.link(), link);
   }
-  await h.deliver();
+  assert.equal(h.prompts[1].signal.aborted, false);
+  h.polls.shift().resolve({ status: 409, body: { error: "the link is not open, such as after the gateway restarted" } });
+  await settle();
+
+  assert.equal(h.prompts[1].signal.aborted, true);
+  assert.equal(h.agents[0].closed, true);
+  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the poll got HTTP 409: the link is not open, such as after the gateway restarted"]);
+  await expectPollAfter(t, h, 10 * 1000);
+  assert.notEqual(h.link(), link);
+  assert.equal(h.polls[0].body.open, true);
+  await h.deliver(ssh("4", sign()));
+
+  assert.equal(h.prompts.length, 3);
   assert.equal(h.polls.length, 1);
   h.polls.shift().reject(new Error("offline"));
   await expectPollAfter(t, h, 1000);
 });
 
+test("sends a reply or status that gets no answer again a second later, keeping the link", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const link = h.link();
+
+  h.offline = true;
+  await h.deliver(ssh("1", LIST), ssh("2", sign(), { connection: "c2" }));
+  h.offline = false;
+  t.mock.timers.tick(1000);
+  await settle();
+
+  const reply = { link, id: "1", message: agentReply(LIST) };
+  const asking = { link, id: "2", asking: true, summary: "SSH login to github.com as git", expires_in: 120 };
+  assert.deepEqual(h.replies(), [reply, reply]);
+  assert.deepEqual(h.statuses(), [asking, asking]);
+  assert.equal(h.prompts[0].signal.aborted, false);
+  assert.deepEqual(h.polls.map((poll) => poll.body.link), [link]);
+  assert.deepEqual(h.warnings(), []);
+});
+
+// About as long as the gateway keeps a link without polls.
+test("gives up on a reply that gets no answer after trying again 1, 2, 4, 8 and 16 seconds later", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+
+  h.offline = true;
+  await h.deliver(ssh("1", LIST));
+
+  for (const [index, delay] of [1000, 2000, 4000, 8000, 16000].entries()) {
+    t.mock.timers.tick(delay - 1);
+    await settle();
+    assert.equal(h.replies().length, index + 1, `no reply before ${delay} ms`);
+    t.mock.timers.tick(1);
+    await settle();
+    assert.equal(h.replies().length, index + 2, `a reply after ${delay} ms`);
+  }
+  t.mock.timers.tick(60 * 1000);
+  await settle();
+  assert.equal(h.replies().length, 6);
+});
+
+test("stops sending a reply that gets no answer once the gateway refuses to resume its link", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+
+  h.offline = true;
+  await h.deliver(ssh("1", LIST));
+  h.polls.shift().resolve({ status: 409, body: { error: "the link is not open" } });
+  await settle();
+  t.mock.timers.tick(60 * 1000);
+  await settle();
+
+  assert.equal(h.replies().length, 1);
+});
+
+test("a reply or status that the gateway refuses, as it no longer knows the link, loses the link at once", async (t) => {
+  const h = setup(t);
+  const link = h.link();
+  await h.deliver(ssh("1", sign()));
+
+  h.respond = (path) => path === "/pc/link/reply" && { status: 409, body: { error: "the link is not open" } };
+  await h.deliver(ssh("2", LIST, { connection: "c2" }));
+
+  assert.equal(h.prompts[0].signal.aborted, true);
+  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: /pc/link/reply got HTTP 409: the link is not open"]);
+});
+
 const failedPolls = [
-  ["a network error", 1000, (poll) => poll.reject(new Error("offline"))],
-  ["a refusal", 60 * 1000, (poll) => poll.resolve({ status: 403, body: { error: "refused" } })],
-  ["a conflict over another app's link or one that a restarted server forgot", 10 * 1000, (poll) => poll.resolve({ status: 409, body: { error: "the link is not open" } })],
-  ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null })],
-  ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } })],
+  ["a refusal", 60 * 1000, (poll) => poll.resolve({ status: 403, body: { error: "refused\u001b[2J" } }), "the poll got HTTP 403: refused\\u001b[2J"],
+  [
+    "a conflict over another app's link or one that a restarted server forgot",
+    10 * 1000,
+    (poll) => poll.resolve({ status: 409, body: { error: "the link is not open" } }),
+    "the poll got HTTP 409: the link is not open"
+  ],
+  ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null }), "the poll got HTTP 502 without a JSON object"],
+  ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } }), "the poll's answer is malformed"],
   ["a poll of more than 64 messages", 1000, (poll) => poll.resolve({
     status: 200,
     body: { messages: Array.from({ length: 65 }, (_, index) => ssh(`x${index}`, LIST, { connection: `x${index}` })) }
-  })]
+  }), "the poll brought 65 messages, more than 64"]
 ];
-for (const [failure, retryMs, fail] of failedPolls) {
-  test(`${failure} loses the link: it closes its dialogs and agent connections, forgets grants and retries with a new ID`, async (t) => {
+for (const [failure, retryMs, fail, reason] of failedPolls) {
+  test(`${failure} loses the link, saying why: it closes its dialogs and agent connections, forgets grants and retries with a new ID`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const h = setup(t);
     const link = h.link();
@@ -597,6 +734,7 @@ for (const [failure, retryMs, fail] of failedPolls) {
     assert.equal(h.prompts[1].signal.aborted, true);
     assert.equal(h.agents[0].closed, true);
     assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+    assert.deepEqual(h.warnings(), [`PC access: lost the link to home-server: ${reason}`]);
     await expectPollAfter(t, h, retryMs);
     assert.notEqual(h.link(), link);
     await h.deliver(ssh("4", sign()));
@@ -696,20 +834,47 @@ test("refuses at once a folder or command that isn't there, or a command too lon
   assert.equal(h.prompts.length, 0);
 });
 
-test("runs nothing that the server no longer waits for once the user approved it, nor asks polkit for one as root", async (t) => {
-  const h = setup(t, { starting: 404 });
-  const pkexec = fakePkexec(t);
+const unconfirmedStarts = [
+  ["that the server no longer waits for", 404],
+  // Such as an answer too large to read, or one that something on the way gave.
+  ["whose start the server's answer doesn't confirm, as it isn't the server's JSON", { status: 200, body: null }],
+  ["whose start the server's answer doesn't confirm, as it has an error", { status: 200, body: { error: "authentication required" } }]
+];
+for (const [what, starting] of unconfirmedStarts) {
+  test(`runs nothing ${what} once the user approved it, nor asks polkit for one as root`, async (t) => {
+    const h = setup(t, { starting });
+    const pkexec = fakePkexec(t);
 
-  for (const [count, root] of [[1, false], [2, true]]) {
-    await h.deliver(run(String(count), ["true"], { root }));
-    await h.prompted(count);
-    await h.answer("run");
-    await h.replied(count);
-  }
+    for (const [count, root] of [[1, false], [2, true]]) {
+      await h.deliver(run(String(count), ["true"], { root }));
+      await h.prompted(count);
+      await h.answer("run");
+      await h.replied(count);
+    }
 
-  assert.deepEqual(h.replies().map((reply) => reply.error), ["not run on the PC: Gripi no longer waits for it", "not run on the PC: Gripi no longer waits for it"]);
+    assert.deepEqual(h.replies().map((reply) => reply.error), Array(2).fill("not run on the PC: Gripi didn't confirm that it may start"));
+    assert.equal(h.spawned.length, 0);
+    assert.deepEqual(pkexec.calls(), []);
+  });
+}
+
+test("asks again whether a command may start when that gets no answer, and runs it only once the server says so", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+
+  await h.deliver(run("1", ["true"]));
+  await h.prompted(1);
+  h.offline = true;
+  await h.answer("run");
+  assert.equal(h.posts.filter(({ body }) => body.starting).length, 1);
   assert.equal(h.spawned.length, 0);
-  assert.deepEqual(pkexec.calls(), []);
+  h.offline = false;
+  t.mock.timers.tick(1000);
+
+  const [{ result }] = await h.replied(1);
+  assert.equal(result.exit_code, 0);
+  assert.equal(h.posts.filter(({ body }) => body.starting).length, 2);
+  assert.equal(h.spawned.length, 1);
 });
 
 test("a cancel while the server is asked whether the command may start runs nothing", async (t) => {
@@ -779,16 +944,20 @@ test("stopping all, as the app quits, kills the process groups of commands that 
   t.mock.timers.tick(1000);
   await stopping;
   await h.ended(sleep);
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the app quits"]);
 });
 
 test("a result that can't reach the server becomes an error, as gripi pc run would wait for it for good", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t, { lostResults: true });
 
   await h.deliver(run("1", ["true"]));
   await h.prompted(1);
   await h.answer("run");
+  await h.ticked(() => h.replies().some((reply) => reply.error));
 
-  assert.deepEqual((await h.replied(2)).at(-1), { link: h.link(), id: "1", error: "the command ran on the PC, but its result could not reach Gripi" });
+  assert.equal(h.replies().filter((reply) => reply.result).length, 6);
+  assert.deepEqual(h.replies().at(-1), { link: h.link(), id: "1", error: "the command ran on the PC, but its result could not reach Gripi" });
 });
 
 // Once the server may have let the command start, gripi pc run waits for an answer however long it takes.
@@ -799,6 +968,7 @@ const unanswered = [
 ];
 for (const [what, options, unrunnable] of unanswered) {
   test(`a link that takes no answer to ${what}, not even an error, ends, which ends gripi pc run's wait`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const h = setup(t, { lostReplies: true, ...options });
     const link = h.link();
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
@@ -809,22 +979,48 @@ for (const [what, options, unrunnable] of unanswered) {
     // A folder that goes while the PC asks fails the spawn.
     if (unrunnable) fs.rmSync(folder, { recursive: true });
     await h.answer("run");
-    await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
+    await h.ticked(() => h.posts.some(({ path }) => path === "/pc/link/close"));
 
     assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+    assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the reply to a command that may have started got no answer: the server did not answer in time"]);
+  });
+}
+
+// Unlike the gateway's own, which say that it took the answer, that the request no longer waits, or that the link is
+// gone.
+const foreignAnswers = [
+  ["a 404 page from something else on the way", { status: 404, body: null }, "HTTP 404 without a JSON object"],
+  ["a 200 that has an error", { status: 200, body: { error: "authentication required" } }, "HTTP 200: authentication required"]
+];
+for (const [what, answer, got] of foreignAnswers) {
+  test(`a link whose answer to a command that may have started gets ${what} ends`, async (t) => {
+    const h = setup(t);
+    const link = h.link();
+
+    h.respond = (path) => path === "/pc/link/reply" && answer;
+    await h.deliver(run("1", ["true"]));
+    await h.prompted(1);
+    await h.answer("run");
+    await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
+
+    assert.deepEqual(h.replies().map((reply) => Object.keys(reply).at(-1)), ["result", "error"]);
+    assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+    assert.deepEqual(h.warnings(), [`PC access: lost the link to home-server: the reply to a command that may have started got ${got}`]);
   });
 }
 
 test("a link keeps refusals that don't reach Gripi before the server may have let the command start", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t, { lostReplies: true });
-  const replied = (count) => h.until(() => h.replies().length === count).then(settle);
+  // Each is tried 6 times.
+  const gaveUp = (count) => h.ticked(() => h.replies().length === count).then(settle);
 
   await h.deliver(run("1", ["no-such-command"]));
-  await replied(1);
+  await gaveUp(6);
   await h.deliver(run("2", ["true"]));
   await h.prompted(1);
   await h.answer("deny");
-  await replied(2);
+  await gaveUp(12);
 
   assert.equal(h.posts.some(({ path }) => path === "/pc/link/close"), false);
   assert.deepEqual(h.polls.map((poll) => poll.body.link), [h.link()]);
@@ -948,6 +1144,29 @@ test("pkexec's refusals come back as errors with its words, unlike the command's
     127,
     126
   ]);
+});
+
+// gripi pc run waits for good once the command may have started, so a refusal that never reached Gripi would end the link.
+test("polkit's refusal of a command as root that gets no answer at first reaches Gripi a second later, keeping the link", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const pkexec = fakePkexec(t);
+  const link = h.link();
+
+  await h.deliver(run("1", ["true"], { root: true }));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => pkexec.asked());
+  h.offline = true;
+  pkexec.answer("dismiss");
+  await h.replied(1);
+  h.offline = false;
+  await h.ticked(() => h.replies().length === 2);
+
+  const refusal = { link, id: "1", error: "not run as root on the PC: pkexec: Error executing command as another user: Request dismissed" };
+  assert.deepEqual(h.replies(), [refusal, refusal]);
+  assert.equal(h.posts.some(({ path }) => path === "/pc/link/close"), false);
+  assert.deepEqual(h.warnings(), []);
 });
 
 test("refuses a command as root at once on a PC without pkexec", async (t) => {
@@ -1077,6 +1296,18 @@ async function listen(t, handler) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
+// The messages of a cut 200 are lost, as in a network drop, but a refusal stays one.
+test("linkRequest takes a status other than 200 whose body is cut short as an answer, unlike a cut 200", async (t) => {
+  const origin = await listen(t, (request, response) => {
+    request.resume();
+    response.writeHead(request.url === "/refused" ? 409 : 200, { "Content-Type": "application/json", "Content-Length": 100 });
+    response.write("{\"error\":", () => response.socket.destroy());
+  });
+
+  assert.deepEqual(await linkRequest(new URL("/refused", origin), {}), { status: 409, body: null });
+  await assert.rejects(linkRequest(new URL("/messages", origin), {}));
+});
+
 test("linkRequest posts JSON with the link header and cookies, and doesn't follow redirects", async (t) => {
   const received = [];
   const origin = await listen(t, (request, response) => {
@@ -1101,7 +1332,8 @@ test("linkRequest posts JSON with the link header and cookies, and doesn't follo
   assert.equal(received[1].headers.cookie, undefined);
 });
 
-test("linkRequest gives up on an answer over 8 MiB, or one that takes longer than 40 seconds", { timeout: 10 * 1000 }, async (t) => {
+// An answer over 8 MiB is still one, unlike one that the network cuts, so a poll that gets it loses the link.
+test("linkRequest takes no body from an answer over 8 MiB, and gives up on one that takes longer than 40 seconds", { timeout: 10 * 1000 }, async (t) => {
   let trickling;
   const origin = await listen(t, (request, response) => {
     request.resume();
@@ -1114,7 +1346,7 @@ test("linkRequest gives up on an answer over 8 MiB, or one that takes longer tha
     t.after(() => clearInterval(trickling));
   });
 
-  await assert.rejects(linkRequest(new URL("/large", origin), {}), /the server's answer is too large/);
+  assert.deepEqual(await linkRequest(new URL("/large", origin), {}), { status: 200, body: null });
 
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const slow = linkRequest(new URL("/slow", origin), {});
