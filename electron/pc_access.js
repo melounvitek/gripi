@@ -172,9 +172,10 @@ function createPcAccess({
   }
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
+  // Returns the status of the server's answer, or null without one.
   async function reply(entry, link, id, fields, signal) {
-    if (signal.aborted) return;
-    await request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).catch(() => {});
+    if (signal.aborted) return null;
+    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).then(({ status }) => status, () => null);
   }
 
   async function handleSsh(entry, link, connection, message, signal) {
@@ -281,10 +282,7 @@ function createPcAccess({
   }
 
   async function handleRun(entry, link, message, signal) {
-    const send = async (fields) => {
-      if (signal.aborted) return null;
-      return request(entry.gateway, "/pc/link/reply", { link: link.id, id: message.id, ...fields }, signal).then(({ status }) => status, () => null);
-    };
+    const send = (fields) => reply(entry, link, message.id, fields, signal);
     // Once the server may have let the command start, gripi pc run waits for an answer however long it takes, so an
     // answer that doesn't reach Gripi then ends the link, which ends the wait.
     let starting = false;
