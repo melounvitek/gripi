@@ -119,8 +119,8 @@ function gripiPc(command) {
   });
 }
 
-// Turns PC access on for the gateway in the desktop app of context, answering each approval dialog with answer, and
-// returns what the user saw there and the requests that reached it.
+// Turns PC access on for the gateway in the desktop app of context, answering each approval dialog with answer, or what
+// answer returns for the dialog's signal, and returns what the user saw there and the requests that reached it.
 async function allowPcAccess(context, gateway, answer) {
   const cookie = (await context.cookies(gateway.url)).map(({ name, value }) => `${name}=${value}`).join("; ");
   const desktop = { seen: [], requests: [] };
@@ -133,7 +133,7 @@ async function allowPcAccess(context, gateway, answer) {
     },
     confirm: async ({ signal, ...prompt }) => {
       desktop.seen.push(prompt);
-      return answer;
+      return typeof answer === "function" ? answer(signal) : answer;
     },
     authenticate: async () => {
       desktop.seen.push("password");
@@ -164,7 +164,8 @@ async function reachedBy(desktop) {
   return listed.stdout.includes(fingerprintOf("client")) && desktop.requests.length > requests;
 }
 
-test("a login allowed for 5 minutes pushes, then fetches without asking again", async ({ context, page, baseURL }) => {
+test("a login allowed for 5 minutes pushes, then fetches without asking again", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
   const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
   const desktop = await allowPcAccess(context, gateway, "grant");
   await useSession(page, desktop);
@@ -187,7 +188,8 @@ test("a login allowed for 5 minutes pushes, then fetches without asking again", 
   expect(seen).toEqual([prompt, "password"]);
 });
 
-test("a denied login fails the push with the PC's refusal", async ({ context, page, baseURL }) => {
+test("a denied login fails the push with the PC's refusal", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
   const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, "deny");
   await useSession(page, desktop);
   const { seen } = desktop;
@@ -199,7 +201,8 @@ test("a denied login fails the push with the PC's refusal", async ({ context, pa
   expect(git("--git-dir", file("repo.git"), "for-each-ref", "refs/heads/denied")).toBe("");
 });
 
-test("a session's requests go to the desktop app where it was last clicked in", async ({ browser, context, page, baseURL }) => {
+test("a session's requests go to the desktop app where it was last clicked in", async ({ browser, context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
   const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
   // Another computer's desktop app, which has an approved browser of its own.
   const deskContext = await browser.newContext({ storageState: { cookies: [], origins: [] } });
@@ -229,6 +232,74 @@ test("a session's requests go to the desktop app where it was last clicked in", 
   } finally {
     await deskContext.close();
   }
+});
+
+// What the line above the editor says while the computer asks to approve the push.
+const waitingLine = () => `Waiting for you on ${os.hostname().split(".")[0]}: SSH login to ${knownHosts.split(" ")[0]} as ${os.userInfo().username}`;
+
+async function expectJustAboveTheEditor(page, line) {
+  const lineBox = await line.boundingBox();
+  const editorBox = await page.locator(".composer-input-row").boundingBox();
+  expect(editorBox.y - (lineBox.y + lineBox.height)).toBeGreaterThanOrEqual(0);
+  expect(editorBox.y - (lineBox.y + lineBox.height)).toBeLessThan(16);
+}
+
+test("the session shows the login that the computer asks to approve above the editor, which stays usable", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(isMobile, "Desktop app flow");
+  test.setTimeout(40_000);
+  let approve;
+  const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, () => new Promise((resolve) => { approve = resolve; }));
+  await useSession(page, desktop);
+
+  const push = gripiPc(["git", "push", "origin", "main:refs/heads/waiting"]);
+  const line = page.locator(".pc-approval");
+  await expect(line).toBeVisible({ timeout: 10_000 });
+  await expect(line.locator(".pc-approval-text")).toHaveText(waitingLine());
+  await expect(line.locator(".pc-approval-time")).toHaveText(/^expires in 1:[45]\d$/);
+  await expectJustAboveTheEditor(page, line);
+  const editor = page.getByLabel("Message to Pi");
+  await editor.fill("Typed while the computer asks");
+  await expect(editor).toHaveValue("Typed while the computer asks");
+
+  // Also after a reload, from the page.
+  await page.reload();
+  await expect(line).toBeVisible();
+
+  approve("once");
+  expect((await push).code).toBe(0);
+  await expect(line).toBeHidden({ timeout: 10_000 });
+});
+
+test("a phone shows the login that the computer asks to approve, and cancels it with one tap", async ({ context, page, baseURL, isMobile }) => {
+  test.skip(!isMobile, "Touch flow");
+  test.setTimeout(40_000);
+  let dismissed = false;
+  // Like Electron's message box, the dialog closes with Deny when its signal aborts.
+  const desktop = await allowPcAccess(context, { id: "e2e", name: "E2E gateway", url: baseURL }, (signal) => new Promise((resolve) => {
+    signal.addEventListener("abort", () => {
+      dismissed = true;
+      resolve("deny");
+    });
+  }));
+  await useSession(page, desktop);
+
+  const push = gripiPc(["git", "push", "origin", "main:refs/heads/cancelled"]);
+  const line = page.locator(".pc-approval");
+  await expect(line).toBeVisible({ timeout: 10_000 });
+  await expect(line.locator(".pc-approval-text")).toHaveText(waitingLine());
+  await expectJustAboveTheEditor(page, line);
+  const cancel = line.getByRole("button", { name: "cancel" });
+  const box = await cancel.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(44);
+
+  await cancel.tap();
+  await expect(line).toBeHidden();
+  const pushed = await push;
+  expect(pushed.code).not.toBe(0);
+  expect(pushed.stderr).toContain("gripi pc: cancelled in Gripi\n");
+  expect(dismissed).toBe(true);
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("TEXTAREA");
+  expect(git("--git-dir", file("repo.git"), "for-each-ref", "refs/heads/cancelled")).toBe("");
 });
 
 function onPath(command) {
