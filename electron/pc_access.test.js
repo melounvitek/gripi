@@ -78,6 +78,8 @@ async function settle() {
 
 function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan", starting = 200, lostResults = false, lostReplies = false } = {}) {
   const harness = { polls: [], posts: [], prompts: [], agents: [], spawned: [], auths: 0, time: 0 };
+  const warn = t.mock.method(console, "warn", () => {});
+  harness.warnings = () => warn.mock.calls.map((call) => call.arguments.join(" "));
   harness.pc = createPcAccess({
     request(_gateway, path, body, signal) {
       if (path !== "/pc/link") {
@@ -265,7 +267,6 @@ test("shows at most 200 characters of a session name, escaped first", async (t) 
 });
 
 test("ignores malformed messages", async (t) => {
-  t.mock.method(console, "warn", () => {});
   const h = setup(t);
   const link = h.link();
 
@@ -351,6 +352,7 @@ test("a poll that would take the link over 256 requests in progress, refusals be
 
   assert.equal(h.replies().length, 255);
   assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the poll's messages would take the link over 256 requests in progress"]);
   await expectPollAfter(t, h, 1000);
   assert.notEqual(h.link(), link);
 });
@@ -514,6 +516,7 @@ test("stopping closes the link, its dialogs and agent connections, and forgets g
 
   assert.equal(h.prompts[1].signal.aborted, true);
   assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: PC access was turned off"]);
   assert.equal(h.agents[0].closed, true);
   await settle();
   assert.equal(h.replies().length, 2);
@@ -572,18 +575,23 @@ test("backs off on network errors from 1 second to 30, and polls at once after a
 });
 
 const failedPolls = [
-  ["a network error", 1000, (poll) => poll.reject(new Error("offline"))],
-  ["a refusal", 60 * 1000, (poll) => poll.resolve({ status: 403, body: { error: "refused" } })],
-  ["a conflict over another app's link or one that a restarted server forgot", 10 * 1000, (poll) => poll.resolve({ status: 409, body: { error: "the link is not open" } })],
-  ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null })],
-  ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } })],
+  ["a network error", 1000, (poll) => poll.reject(new Error("offline")), "the poll got no answer: offline"],
+  ["a refusal", 60 * 1000, (poll) => poll.resolve({ status: 403, body: { error: "refused\u001b[2J" } }), "the poll got HTTP 403: refused\\u001b[2J"],
+  [
+    "a conflict over another app's link or one that a restarted server forgot",
+    10 * 1000,
+    (poll) => poll.resolve({ status: 409, body: { error: "the link is not open" } }),
+    "the poll got HTTP 409: the link is not open"
+  ],
+  ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null }), "the poll got HTTP 502"],
+  ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } }), "the poll's answer is malformed"],
   ["a poll of more than 64 messages", 1000, (poll) => poll.resolve({
     status: 200,
     body: { messages: Array.from({ length: 65 }, (_, index) => ssh(`x${index}`, LIST, { connection: `x${index}` })) }
-  })]
+  }), "the poll brought 65 messages, more than 64"]
 ];
-for (const [failure, retryMs, fail] of failedPolls) {
-  test(`${failure} loses the link: it closes its dialogs and agent connections, forgets grants and retries with a new ID`, async (t) => {
+for (const [failure, retryMs, fail, reason] of failedPolls) {
+  test(`${failure} loses the link, saying why: it closes its dialogs and agent connections, forgets grants and retries with a new ID`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const h = setup(t);
     const link = h.link();
@@ -597,6 +605,7 @@ for (const [failure, retryMs, fail] of failedPolls) {
     assert.equal(h.prompts[1].signal.aborted, true);
     assert.equal(h.agents[0].closed, true);
     assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+    assert.deepEqual(h.warnings(), [`PC access: lost the link to home-server: ${reason}`]);
     await expectPollAfter(t, h, retryMs);
     assert.notEqual(h.link(), link);
     await h.deliver(ssh("4", sign()));
@@ -779,6 +788,7 @@ test("stopping all, as the app quits, kills the process groups of commands that 
   t.mock.timers.tick(1000);
   await stopping;
   await h.ended(sleep);
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the app quits"]);
 });
 
 test("a result that can't reach the server becomes an error, as gripi pc run would wait for it for good", async (t) => {
@@ -812,6 +822,7 @@ for (const [what, options, unrunnable] of unanswered) {
     await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
 
     assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+    assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the reply to a command that may have started got no answer: the server did not answer in time"]);
   });
 }
 

@@ -86,18 +86,18 @@ function createPcAccess({
     runLink(entry);
   }
 
-  async function stop(id) {
+  async function stop(id, reason = "PC access was turned off") {
     const entry = gateways.get(id);
     if (!entry) return;
 
     gateways.delete(id);
     entry.controller.abort();
-    await dropLink(entry, entry.link);
+    await loseLink(entry, entry.link, reason);
   }
 
   // The app quits before SIGKILL's 5 seconds, so the process groups of stopped commands get it after a second.
   async function stopAll() {
-    const stopped = Promise.all([...gateways.keys()].map(stop));
+    const stopped = Promise.all([...gateways.keys()].map((id) => stop(id, "the app quits")));
     if (stopping.size) await sleep(QUIT_KILL_DELAY_MS);
     for (const kill of stopping) kill("SIGKILL");
     stopping.clear();
@@ -112,28 +112,22 @@ function createPcAccess({
       // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart.
       const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()), run: true, root: true };
       link.opened = true;
-      let response;
-      try {
-        response = await request(entry.gateway, "/pc/link", body, link.controller.signal);
-      } catch (_error) {
-        response = null;
-      }
+      const response = await request(entry.gateway, "/pc/link", body, link.controller.signal).catch((error) => ({ error }));
       if (signal.aborted) return;
 
-      const messages = response?.status === 200 ? response.body?.messages : null;
-      if (Array.isArray(messages) && messages.length <= MAX_POLL_MESSAGES && withinBudget(link, messages)) {
-        for (const message of messages) receive(entry, link, message);
+      const failure = pollFailure(link, response);
+      if (!failure) {
+        for (const message of response.body.messages) receive(entry, link, message);
         backoff = 0;
         continue;
       }
 
       // Any failed poll may have lost the link, for example to another app or a restarted gateway, so what it was
-      // asked and allowed goes with it. So does a poll with more messages than a link may take or have in progress.
-      entry.link = newLink();
-      dropLink(entry, link);
-      if (response?.status === 409) {
+      // asked and allowed goes with it.
+      loseLink(entry, link, failure);
+      if (response.status === 409) {
         await sleep(LINK_TAKEN_RETRY_MS, signal);
-      } else if (response?.status === 403) {
+      } else if (response.status === 403) {
         await sleep(REFUSED_RETRY_MS, signal);
       } else {
         backoff = Math.min(backoff ? backoff * 2 : 1000, MAX_BACKOFF_MS);
@@ -142,10 +136,18 @@ function createPcAccess({
     }
   }
 
-  // A batch that would take the link over the requests it may have in progress drops the link before any of them starts.
-  function withinBudget(link, messages) {
+  // Says why a poll's answer loses the link, or returns null for one that it takes. A batch that would take the link over
+  // the requests that it may have in progress loses it before any of them starts.
+  function pollFailure(link, answer) {
+    const messages = answer.body?.messages;
+    if (answer.status !== 200) return `the poll got ${answered(answer)}`;
+    if (!Array.isArray(messages)) return "the poll's answer is malformed";
+    if (messages.length > MAX_POLL_MESSAGES) return `the poll brought ${messages.length} messages, more than ${MAX_POLL_MESSAGES}`;
     const requests = messages.filter((message) => message?.type === "ssh" || message?.type === "run").length;
-    return link.requests.size + link.refusals + requests <= MAX_REQUESTS_IN_PROGRESS;
+    if (link.requests.size + link.refusals + requests > MAX_REQUESTS_IN_PROGRESS) {
+      return `the poll's messages would take the link over ${MAX_REQUESTS_IN_PROGRESS} requests in progress`;
+    }
+    return null;
   }
 
   function receive(entry, link, message) {
@@ -193,10 +195,10 @@ function createPcAccess({
   }
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
-  // Returns the status of the server's answer, or null without one.
+  // Returns the server's answer, or the request's error without one.
   async function reply(entry, link, id, fields, signal) {
-    if (signal.aborted) return null;
-    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).then(({ status }) => status, () => null);
+    if (signal.aborted) return { error: signal.reason };
+    return request(entry.gateway, "/pc/link/reply", { link: link.id, id, ...fields }, signal).catch((error) => ({ error }));
   }
 
   async function handleSsh(entry, link, connection, message, signal) {
@@ -312,8 +314,10 @@ function createPcAccess({
     // answer that doesn't reach Gripi then ends the link, which ends the wait.
     let starting = false;
     const answerWith = async (fields) => {
-      const status = await send(fields);
-      if (starting && !signal.aborted && ![200, 404, 409].includes(status)) link.controller.abort();
+      const answer = await send(fields);
+      if (starting && !signal.aborted && ![200, 404, 409].includes(answer.status)) {
+        loseLink(entry, link, `the reply to a command that may have started got ${answered(answer)}`);
+      }
     };
     try {
       const root = message.root === true;
@@ -356,7 +360,7 @@ function createPcAccess({
       if (signal.aborted) return;
       const failure = root && pkexecFailure(result, executable, run.stopped);
       if (failure) return await answerWith({ error: failure });
-      if (await send({ result }) === 200) return;
+      if ((await send({ result })).status === 200) return;
       await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
     } catch (error) {
       await answerWith({ error: error.message });
@@ -445,8 +449,12 @@ function createPcAccess({
     closeAgent(connection);
   }
 
-  // Releases the link on the gateway too, so the next one needn't wait for it to go stale.
-  function dropLink(entry, link) {
+  // Ends a link, unless it has ended, and logs why. What it was asked and allowed goes with it, and the gateway releases
+  // it too, so that the next one needn't wait for it to go stale.
+  function loseLink(entry, link, reason) {
+    if (link.controller.signal.aborted) return;
+    console.warn(`PC access: lost the link to ${entry.gateway.name}: ${reason}`);
+    if (entry.link === link) entry.link = newLink();
     link.controller.abort();
     for (const connection of link.connections.values()) closeAgent(connection);
     link.requests.clear();
@@ -497,6 +505,12 @@ function validAgentMessage(text) {
   const body = Buffer.from(text, "base64");
   // Node's decoder skips what isn't base64, so only text that encodes back the same is.
   return body.length > 0 && body.length <= MAX_AGENT_MESSAGE_BYTES && body.toString("base64") === text;
+}
+
+// Says what a request of a link got, for the log: the gateway's status and error, or the request's error.
+function answered({ status, body, error }) {
+  if (error) return `no answer: ${error.code || error.message}`;
+  return `HTTP ${status}${typeof body?.error === "string" ? `: ${escapeForDisplay(body.error.slice(0, 200))}` : ""}`;
 }
 
 function connectionKey(message) {
