@@ -266,3 +266,44 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+// A new session has a pending key until Pi saves it, and a request that a computer asks to approve in it moves with it,
+// as the session's page and live events look it up by the saved key.
+func TestARequestThatAComputerAsksToApproveFollowsANewSessionWhenPiSavesIt(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	root := t.TempDir()
+	app := notificationTestApplication(t, root, false, false, nil)
+	pending, saved := filepath.Join(root, "pending.jsonl"), filepath.Join(root, "session.jsonl")
+	if err := app.rpcClients.Register(pending, &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": saved}}}); err != nil {
+		t.Fatal(err)
+	}
+	app.pendingSessions.Remember(pending, root, "")
+	links := &app.pcLinks
+	if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
+		t.Fatal(err)
+	}
+	links.use("owner", time.Now(), func() string { return pending })
+	link, key, err := links.route(nil, pending, "connection", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go links.ask(ctx, link, pending, pcMessage{Type: "ssh", ID: "request", Session: key, Connection: "connection"})
+	if messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"}); err != nil || len(messages) != 1 {
+		t.Fatalf("the link got %+v (%v)", messages, err)
+	}
+	if status, _ := links.status("owner", pcLinkBody{Link: "app", ID: "request", Asking: true, Summary: "SSH login", ExpiresIn: 120}); status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+
+	writeNotificationSession(t, root, "New session")
+	if session, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://example.com/", nil), pending); err != nil || session != saved {
+		t.Fatalf("the pending session is %q (%v)", session, err)
+	}
+	if approvals := links.approvals(saved); len(approvals) != 1 || approvals[0].ID != "request" {
+		t.Fatalf("the saved session shows %+v", approvals)
+	}
+}

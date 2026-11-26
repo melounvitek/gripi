@@ -45,20 +45,19 @@ const pcPollBytes = 2 << 20
 const pcSummaryLimit = 200
 
 var (
-	errNoPCLink    = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
-	errPCLinkLost  = errors.New("the computer's link to Gripi ended before it replied")
-	errPCTimeout   = errors.New("the computer did not reply in time")
-	errPCTaken     = errors.New("another link of this browser is open, such as one of a desktop app that just restarted")
-	errPCUnknown   = errors.New("the link is not open, such as after the gateway restarted")
-	errPCEnded     = errors.New("the link ended")
-	errPCUnused    = errors.New("nobody has used this session in a Gripi desktop app with PC access since the gateway started; ask the user to open it in the desktop app on the computer that should do this, and click in it")
-	errPCNoAccess  = errors.New("this session was last used in a Gripi window without PC access, such as a phone or a browser; ask the user to open it in the desktop app on the computer that should do this, and click in it")
-	errPCMoved     = errors.New("the session was used on another computer during this SSH agent connection; run the command again")
-	errPCNotOpen   = errors.New("this SSH agent connection didn't start on the computer that the session uses; run the command again")
-	errPCReopened  = errors.New("this SSH agent connection is already open")
-	errPCPinned    = errors.New("too many SSH agent connections are open for PC access")
-	errPCClosed    = errors.New("the SSH agent connection closed")
-	errPCCancelled = errors.New("cancelled in Gripi")
+	errNoPCLink   = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
+	errPCLinkLost = errors.New("the computer's link to Gripi ended before it replied")
+	errPCTimeout  = errors.New("the computer did not reply in time")
+	errPCTaken    = errors.New("another link of this browser is open, such as one of a desktop app that just restarted")
+	errPCUnknown  = errors.New("the link is not open, such as after the gateway restarted")
+	errPCEnded    = errors.New("the link ended")
+	errPCUnused   = errors.New("nobody has used this session in a Gripi desktop app with PC access since the gateway started; ask the user to open it in the desktop app on the computer that should do this, and click in it")
+	errPCNoAccess = errors.New("this session was last used in a Gripi window without PC access, such as a phone or a browser; ask the user to open it in the desktop app on the computer that should do this, and click in it")
+	errPCMoved    = errors.New("the session was used on another computer during this SSH agent connection; run the command again")
+	errPCNotOpen  = errors.New("this SSH agent connection didn't start on the computer that the session uses; run the command again")
+	errPCReopened = errors.New("this SSH agent connection is already open")
+	errPCPinned   = errors.New("too many SSH agent connections are open for PC access")
+	errPCClosed   = errors.New("the SSH agent connection closed")
 )
 
 // pcMessage is a message of the gateway to the desktop app.
@@ -118,8 +117,7 @@ type pcApproval struct {
 	Computer  string    `json:"computer"`
 	Summary   string    `json:"summary"`
 	ExpiresAt time.Time `json:"expires_at"`
-	// session is the request's, and asker the browser whose computer asks.
-	session, asker string
+	session   string
 }
 
 // pcLinks holds the links of the desktop apps, at most one for each approved browser, and what routes the requests of
@@ -277,7 +275,8 @@ func (links *pcLinks) use(owner string, at time.Time, resolve func() string) {
 }
 
 // remapUse moves the use of a new session to the key that it has once Pi saved it, in the same step as remap, which
-// moves the session there, and keeps the newer one when both have one.
+// moves the session there, and keeps the newer one when both have one. The requests that wait in it move too, as Gripi
+// shows them by that key, while their messages keep the key that the desktop app knows.
 func (links *pcLinks) remapUse(from, to string, remap func()) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
@@ -286,6 +285,13 @@ func (links *pcLinks) remapUse(from, to string, remap func()) {
 		delete(links.uses, from)
 		if use.at.After(links.uses[to].at) {
 			links.uses[to] = use
+		}
+	}
+	for _, link := range links.byID {
+		for _, waiter := range link.waiting {
+			if waiter.approval.session == from {
+				waiter.approval.session = to
+			}
 		}
 	}
 }
@@ -365,7 +371,7 @@ func (links *pcLinks) ask(ctx context.Context, link *pcLink, session string, mes
 		return pcLinkBody{}, errPCClosed
 	}
 	replied := make(chan pcLinkBody, 1)
-	link.waiting[message.ID] = &pcWaiter{replied: replied, approval: pcApproval{ID: message.ID, session: session, asker: link.owner}}
+	link.waiting[message.ID] = &pcWaiter{replied: replied, approval: pcApproval{ID: message.ID, session: session}}
 	link.send(message)
 	links.mu.Unlock()
 
@@ -434,6 +440,9 @@ func (links *pcLinks) status(owner string, status pcLinkBody) (int, *pcApproval)
 	}
 	var summary []rune
 	for _, char := range status.Summary {
+		if len(summary) > pcSummaryLimit {
+			break
+		}
 		if unicode.In(char, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) {
 			summary = append(summary, []rune(fmt.Sprintf(`\u%04x`, char))...)
 		} else {
@@ -475,7 +484,7 @@ func (links *pcLinks) cancel(id string, allowed func(session string) bool) bool 
 	for _, link := range links.byID {
 		if waiter := link.waiting[id]; waiter != nil && waiter.asking && allowed(waiter.approval.session) {
 			delete(link.waiting, id)
-			waiter.replied <- pcLinkBody{Error: errPCCancelled.Error()}
+			waiter.replied <- pcLinkBody{Error: "cancelled in Gripi"}
 			link.send(pcMessage{Type: "cancel", ID: id})
 			return true
 		}
@@ -642,21 +651,21 @@ func (app *application) pcLinkStatus(response http.ResponseWriter, request *http
 		writeJSON(response, struct{}{})
 	}
 	if began != nil {
-		go app.notifyPCApproval(*began)
+		go app.notifyPCApproval(owner, *began)
 	}
 }
 
 // notifyPCApproval tells the user at once that a computer asks them to approve a request, on each of their browsers
-// but the one of that computer, whose desktop app has a notification of its own. Unlike notifySudo, it goes out also
+// but asker, the one of that computer, whose desktop app has a notification of its own. Unlike notifySudo, it goes out also
 // while a client shows the session: in single-user mode, all are one for presence, also the computer that asks, which
 // comes to the front. The service worker of a device that shows the session skips it instead.
-func (app *application) notifyPCApproval(approval pcApproval) {
+func (app *application) notifyPCApproval(asker string, approval pcApproval) {
 	owners, err := app.completionNotifications.owners(approval.session)
 	if err != nil {
 		log.Printf("find whom to notify of a PC access request: %v", err)
 		return
 	}
-	owners = slices.DeleteFunc(owners, func(owner string) bool { return owner == approval.asker })
+	owners = slices.DeleteFunc(owners, func(owner string) bool { return owner == asker })
 	app.notifyAtOnce(owners, approval.session, approval.ID, "pc", "Approve on "+cmp.Or(approval.Computer, "your computer")+": "+approval.Summary)
 }
 
