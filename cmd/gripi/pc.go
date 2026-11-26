@@ -152,11 +152,12 @@ func runCommandOnPC(arguments []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("pc run", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	cwd := flags.String("cwd", "", "")
+	root := flags.Bool("root", false, "")
 	if err := flags.Parse(arguments[:separator]); err != nil {
 		return usageError(stderr, "pc", err.Error())
 	}
 	if flags.NArg() > 0 || *cwd != "" && !filepath.IsAbs(*cwd) {
-		return usageError(stderr, "pc", "takes only --cwd with an absolute folder on the computer before --")
+		return usageError(stderr, "pc", "takes only --root, and --cwd with an absolute folder on the computer, before --")
 	}
 	session := runningSession()
 	if session == "" {
@@ -169,6 +170,9 @@ func runCommandOnPC(arguments []string, stdout, stderr io.Writer) int {
 	form := url.Values{"session": {session}, "argv": arguments[separator+1:]}
 	if *cwd != "" {
 		form.Set("cwd", *cwd)
+	}
+	if *root {
+		form.Set("root", "1")
 	}
 	request, err := http.NewRequest(http.MethodPost, "http://gripi/pc/run", strings.NewReader(form.Encode()))
 	if err != nil {

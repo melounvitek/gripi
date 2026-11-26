@@ -228,7 +228,7 @@ func TestARequestOfAClosedAgentConnectionNeverReachesTheLink(t *testing.T) {
 
 // A computer that begins to ask the user to approve a request notifies their other browsers at once and once, also
 // while they show the session: all clients are one for presence, also the computer that asks, which comes to the front
-// with a notification of its own. A command shows on a locked screen, so only that it asks to run one does.
+// with a notification of its own. A command shows on a locked screen, so only that it asks to run one, and as whom, does.
 func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.T) {
 	poll := PCLinkPoll
 	PCLinkPoll = 10 * time.Millisecond
@@ -236,8 +236,9 @@ func TestAComputerThatAsksToApproveNotifiesTheUsersOtherBrowsersOnce(t *testing.
 	for _, request := range []struct{ route, form, summary, body string }{
 		{"/pc/ssh-agent", "connection=c&message=Cw%3D%3D&open=1", "SSH login to github.com as git", "Approve on laptop: SSH login to github.com as git"},
 		{"/pc/run", "argv=cat&argv=.env", "/usr/bin/cat .env", "Approve on laptop: run a command"},
+		{"/pc/run", "argv=cat&argv=.env&root=1", "run a command as root: /usr/bin/cat .env", "Approve on laptop: run a command as root"},
 	} {
-		t.Run(request.route, func(t *testing.T) { notifiesOnce(t, request.route, request.form, request.summary, request.body) })
+		t.Run(request.body, func(t *testing.T) { notifiesOnce(t, request.route, request.form, request.summary, request.body) })
 	}
 }
 
@@ -265,7 +266,7 @@ func notifiesOnce(t *testing.T, route, form, summary, body string) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop", Run: true}); err != nil {
+	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop", Run: true, Root: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range []string{"laptop", "phone"} {

@@ -45,6 +45,7 @@ type pcMessage struct {
 	Message     []byte   `json:"message"`
 	Argv        []string `json:"argv"`
 	CWD         string   `json:"cwd"`
+	Root        bool     `json:"root"`
 }
 
 type pcLinkAnswer struct {
@@ -136,7 +137,7 @@ func pcDesktopOn(t *testing.T, address, token, name, link string, answer func(pc
 	poll := func(open bool) bool {
 		body := map[string]any{"link": link}
 		if open {
-			body["open"], body["name"], body["run"] = true, name, true
+			body["open"], body["name"], body["run"], body["root"] = true, name, true, true
 		}
 		status, polled := pcLinkSend(t, address, "/pc/link", body, asBrowser(token))
 		if status != http.StatusOK {
@@ -1253,6 +1254,13 @@ func TestPCRunRunsTheCommandOnTheComputerWhereTheSessionWasLastUsed(t *testing.T
 	if request := nextPCMessage(t, messages, "run"); request.CWD != "" || !reflect.DeepEqual(request.Argv, []string{"true"}) {
 		t.Fatalf("the desktop app got %+v", request)
 	}
+
+	if code, _, _ := runCLI("pc", "run", "--root", "--cwd", "/etc", "--", "systemctl", "restart", "sshd"); code != 3 {
+		t.Fatalf("gripi pc run --root = %d", code)
+	}
+	if request := nextPCMessage(t, messages, "run"); !request.Root || request.CWD != "/etc" || !reflect.DeepEqual(request.Argv, []string{"systemctl", "restart", "sshd"}) {
+		t.Fatalf("the desktop app got %+v for a command as root", request)
+	}
 }
 
 // gripi pc run refuses at once what the computer couldn't run as given, rather than letting it wait for nothing.
@@ -1261,7 +1269,7 @@ func TestPCRunRefusesACommandThatTheComputerCouldNotRunAsGiven(t *testing.T) {
 	messages, _ := pcDesktop(t, address, "laptop", answeredBy("laptop"))
 	pcPresence(t, pcBrowserToken, alpha, true)
 
-	for _, usage := range [][]string{{"pc", "run"}, {"pc", "run", "--"}, {"pc", "run", "true"}, {"pc", "run", "--cwd", "app", "--", "true"}, {"pc", "run", "--cwd", "/srv/app", "true", "--", "true"}, {"pc", "run", "--root", "--", "true"}} {
+	for _, usage := range [][]string{{"pc", "run"}, {"pc", "run", "--"}, {"pc", "run", "true"}, {"pc", "run", "--cwd", "app", "--", "true"}, {"pc", "run", "--cwd", "/srv/app", "true", "--", "true"}, {"pc", "run", "--root=maybe", "--", "true"}} {
 		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help pc") {
 			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
 		}
@@ -1286,18 +1294,32 @@ func TestPCRunRefusesACommandThatTheComputerCouldNotRunAsGiven(t *testing.T) {
 	}
 }
 
-// A desktop app from before gripi pc run drops its commands, so the gateway refuses them at once rather than letting gripi
-// wait for nothing.
+// A desktop app from before gripi pc run drops its commands, and one from before --root runs them as the user, so the
+// gateway refuses them at once rather than letting gripi wait for nothing or the command run as the wrong user.
 func TestPCRunNeedsADesktopAppThatRunsCommands(t *testing.T) {
-	alpha, address := pcGateway(t)
-	gateway.PCLinkStale = time.Minute
-	if status, _ := pcLinkSend(t, address, "/pc/link", map[string]any{"link": "app", "open": true, "name": "laptop"}); status != http.StatusOK {
-		t.Fatalf("open poll = %d", status)
-	}
-	pcPresence(t, pcBrowserToken, alpha, true)
+	for _, old := range []struct {
+		run     bool
+		command []string
+		refusal string
+	}{
+		{false, []string{"pc", "run", "--", "true"}, "can't run commands"},
+		{true, []string{"pc", "run", "--root", "--", "true"}, "can't run commands as root"},
+	} {
+		t.Run(old.refusal, func(t *testing.T) {
+			alpha, address := pcGateway(t)
+			gateway.PCLinkStale = time.Minute
+			if status, _ := pcLinkSend(t, address, "/pc/link", map[string]any{"link": "app", "open": true, "name": "laptop", "run": old.run}); status != http.StatusOK {
+				t.Fatalf("open poll = %d", status)
+			}
+			pcPresence(t, pcBrowserToken, alpha, true)
 
-	if code, _, stderr := runCLI("pc", "run", "--", "true"); code != 1 || stderr != "gripi pc: the gateway answered 503: the Gripi desktop app on laptop can't run commands; ask the user to update it\n" {
-		t.Fatalf("gripi pc run = %d, stderr %q", code, stderr)
+			if code, _, stderr := runCLI(old.command...); code != 1 || stderr != "gripi pc: the gateway answered 503: the Gripi desktop app on laptop "+old.refusal+"; ask the user to update it\n" {
+				t.Fatalf("gripi %q = %d, stderr %q", old.command, code, stderr)
+			}
+			if status, polled := pcPoll(t, address, "app", false); status != http.StatusOK || len(polled.Messages) != 0 {
+				t.Fatalf("the desktop app got %d %+v", status, polled)
+			}
+		})
 	}
 }
 
@@ -1348,6 +1370,33 @@ func TestCancelInGripiWinsOverARunOnlyUntilTheComputerStartsIt(t *testing.T) {
 	}
 	if answered := <-result; answered.code != 0 || answered.stdout != "ran\n" || answered.stderr != "" {
 		t.Fatalf("gripi pc run = %+v", answered)
+	}
+}
+
+// The computer can't stop a command once it may have started it as root, so Cancel in Gripi says that, and gripi pc run
+// doesn't take the end of the link for the end of the command.
+func TestARunAsRootIsNeverReportedAsStoppedOnceItMayHaveStarted(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, stop := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+
+	result := startCLI("pc", "run", "--root", "--", "true")
+	request := nextPCMessage(t, messages, "run")
+	pcAsking(t, address, pcBrowserToken, "app", request.ID, "run a command as root: /usr/bin/true")
+	if status := pcStarting(t, address, "app", request.ID); status != http.StatusOK {
+		t.Fatalf("starting = %d", status)
+	}
+	response := browserRequest(http.MethodPost, "/pc/cancel", url.Values{"id": {request.ID}}, "gripi_browser="+pcPhoneToken)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"The command may already run as root, which Gripi can't stop."`) {
+		t.Fatalf("cancel of a command that may run as root = %d %s", response.Code, response.Body)
+	}
+
+	stop()
+	if status, _ := pcLinkSend(t, address, "/pc/link/close", map[string]string{"link": "app"}); status != http.StatusOK {
+		t.Fatalf("close = %d", status)
+	}
+	if answered := <-result; answered.code != 1 || answered.stderr != "gripi pc: the gateway answered 503: the computer's link to Gripi ended before it replied; if the command started as root there, it keeps running\n" {
+		t.Fatalf("gripi pc run --root = %+v", answered)
 	}
 }
 

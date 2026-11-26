@@ -70,11 +70,14 @@ var (
 	errPCReopened = errors.New("this SSH agent connection is already open")
 	errPCPinned   = errors.New("too many SSH agent connections are open for PC access")
 	errPCClosed   = errors.New("the SSH agent connection closed")
+	// errPCRootLost is errPCLinkLost for a command that the computer may have started as root, which it can't stop.
+	errPCRootLost = errors.New("the computer's link to Gripi ended before it replied; if the command started as root there, it keeps running")
 )
 
 const (
-	pcRequestGone = "The request no longer waits for approval."
-	pcRunning     = "The command already runs."
+	pcRequestGone   = "The request no longer waits for approval."
+	pcRunning       = "The command already runs."
+	pcRunningAsRoot = "The command may already run as root, which Gripi can't stop."
 )
 
 // pcMessage is a message of the gateway to the desktop app.
@@ -87,18 +90,19 @@ type pcMessage struct {
 	Message     []byte   `json:"message,omitempty"`
 	Argv        []string `json:"argv,omitempty"`
 	CWD         string   `json:"cwd,omitempty"`
+	Root        bool     `json:"root,omitempty"`
 }
 
 // pcLinkBody is what the desktop app sends on its link: a poll or a close names the link, and a reply also a request
 // and its message, result or error. A link's first poll opens it, names the computer, and says whether the app runs
-// commands, which older ones don't. A status says whether the app
-// asks the user to approve a request, and while it does, what for, and for how many seconds more, or that it is about
-// to run a command that the user approved.
+// commands, and as root, which older ones don't. A status says whether the app asks the user to approve a request, and
+// while it does, what for, and for how many seconds more, or that it is about to run a command that the user approved.
 type pcLinkBody struct {
 	Link      string      `json:"link"`
 	Open      bool        `json:"open"`
 	Name      string      `json:"name"`
 	Run       bool        `json:"run"`
+	Root      bool        `json:"root"`
 	ID        string      `json:"id"`
 	Message   []byte      `json:"message"`
 	Result    *SudoResult `json:"result"`
@@ -114,9 +118,9 @@ type pcLink struct {
 	id string
 	// owner is the browser that opened the link, as pushOwner gives it.
 	owner string
-	// runs is whether the desktop app runs commands.
-	runs  bool
-	polls int
+	// runs is whether the desktop app runs commands, and root whether also as root.
+	runs, root bool
+	polls      int
 	// seen is when its last poll ended.
 	seen  time.Time
 	queue []pcMessage
@@ -149,8 +153,9 @@ type pcApproval struct {
 	Summary   string    `json:"summary"`
 	ExpiresAt time.Time `json:"expires_at"`
 	session   string
-	// kind is the type of the request's message.
+	// kind is the type of the request's message, and root whether it runs a command as root.
 	kind string
+	root bool
 }
 
 // pcLinks holds the links of the desktop apps, at most one for each approved browser, and what routes the requests of
@@ -222,7 +227,7 @@ func (links *pcLinks) poll(ctx context.Context, owner string, body pcLinkBody) (
 		links.mu.Unlock()
 		return nil, errPCTaken
 	case link == nil:
-		link = &pcLink{id: body.Link, owner: owner, runs: body.Run, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]*pcWaiter)}
+		link = &pcLink{id: body.Link, owner: owner, runs: body.Run, root: body.Root, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]*pcWaiter)}
 		if links.byID == nil {
 			links.byID, links.names = make(map[string]*pcLink), make(map[string]string)
 		}
@@ -413,8 +418,13 @@ func (links *pcLinks) ask(ctx context.Context, link *pcLink, session func() stri
 		links.mu.Unlock()
 		return pcLinkBody{}, errPCClosed
 	}
+	// A desktop app from before gripi pc run --root would run the command as the user.
+	if message.Root && !link.root {
+		links.mu.Unlock()
+		return pcLinkBody{}, fmt.Errorf("the Gripi desktop app on %s can't run commands as root; ask the user to update it", cmp.Or(links.names[link.owner], "the user's computer"))
+	}
 	replied := make(chan pcLinkBody, 1)
-	waiter := &pcWaiter{ctx: ctx, replied: replied, timeout: time.NewTimer(PCReplyTimeout), approval: pcApproval{ID: message.ID, session: session(), kind: message.Type}}
+	waiter := &pcWaiter{ctx: ctx, replied: replied, timeout: time.NewTimer(PCReplyTimeout), approval: pcApproval{ID: message.ID, session: session(), kind: message.Type, root: message.Root}}
 	defer waiter.timeout.Stop()
 	link.waiting[message.ID] = waiter
 	link.send(message)
@@ -436,7 +446,10 @@ func (links *pcLinks) ask(ctx context.Context, link *pcLink, session func() stri
 		return reply, nil
 	default:
 	}
-	if !links.live(link) {
+	switch {
+	case !links.live(link) && waiter.started && waiter.approval.root:
+		return pcLinkBody{}, errPCRootLost
+	case !links.live(link):
 		return pcLinkBody{}, errPCLinkLost
 	}
 	link.send(pcMessage{Type: "cancel", ID: message.ID})
@@ -538,6 +551,8 @@ func (links *pcLinks) cancel(id string, allowed func(session string) bool) (refu
 		switch {
 		case waiter == nil || !allowed(waiter.approval.session):
 			continue
+		case waiter.started && waiter.approval.root:
+			return pcRunningAsRoot
 		case waiter.started:
 			return pcRunning
 		case !waiter.asking:
@@ -730,7 +745,10 @@ func (app *application) notifyPCApproval(asker string, approval pcApproval) {
 	owners = slices.DeleteFunc(owners, func(owner string) bool { return owner == asker })
 	// A command may hold secrets, which a locked screen would show.
 	summary := approval.Summary
-	if approval.kind == "run" {
+	switch {
+	case approval.root:
+		summary = "run a command as root"
+	case approval.kind == "run":
 		summary = "run a command"
 	}
 	app.notifyAtOnce(owners, approval.session, approval.ID, "pc", "Approve on "+cmp.Or(approval.Computer, "your computer")+": "+summary)
@@ -807,8 +825,8 @@ func (app *application) pcSSHAgent(response http.ResponseWriter, request *http.R
 	}
 }
 
-// pcRun asks the computer where the user last used the session to run a command of gripi pc run, and returns how it
-// ended.
+// pcRun asks the computer where the user last used the session to run a command of gripi pc run, as the user or with
+// root=1 as root, and returns how it ended.
 func (app *application) pcRun(response http.ResponseWriter, request *http.Request) {
 	if refusal := app.pcAccessRefusal(); refusal != "" {
 		writeJSONStatus(response, http.StatusForbidden, map[string]string{"error": refusal})
@@ -831,7 +849,7 @@ func (app *application) pcRun(response http.ResponseWriter, request *http.Reques
 	if !ok {
 		return
 	}
-	reply, ok := app.askPC(response, request, session, false, pcMessage{Type: "run", Argv: argv, CWD: cwd})
+	reply, ok := app.askPC(response, request, session, false, pcMessage{Type: "run", Argv: argv, CWD: cwd, Root: request.PostFormValue("root") == "1"})
 	switch {
 	case !ok:
 	case reply.Result == nil:
