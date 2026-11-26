@@ -604,7 +604,7 @@ test("a poll without an answer keeps the link, its dialogs, grants and agent con
 });
 
 // Such as once the network is back after more than the 35 seconds for which the gateway keeps a link without polls.
-test("keeps the link through polls without an answer, backing off from 1 second to 30, until the gateway refuses to resume it", async (t) => {
+test("keeps the link through polls without an answer, backing off from 1 second to 30 until a poll has an answer, and loses it once the gateway refuses to resume it", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t);
   const link = h.link();
@@ -631,6 +631,9 @@ test("keeps the link through polls without an answer, backing off from 1 second 
   await h.deliver(ssh("4", sign()));
 
   assert.equal(h.prompts.length, 3);
+  assert.equal(h.polls.length, 1);
+  h.polls.shift().reject(new Error("offline"));
+  await expectPollAfter(t, h, 1000);
 });
 
 test("sends a reply or status that gets no answer again a second later, keeping the link", async (t) => {
@@ -686,20 +689,6 @@ test("stops sending a reply that gets no answer once the gateway refuses to resu
   await settle();
 
   assert.equal(h.replies().length, 1);
-});
-
-test("backs off on network errors from 1 second to 30, and polls at once after a success", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = setup(t);
-
-  for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
-    h.polls.shift().reject(new Error("offline"));
-    await expectPollAfter(t, h, delay);
-  }
-  await h.deliver();
-  assert.equal(h.polls.length, 1);
-  h.polls.shift().reject(new Error("offline"));
-  await expectPollAfter(t, h, 1000);
 });
 
 const failedPolls = [

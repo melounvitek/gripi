@@ -151,20 +151,25 @@ function gripi(args) {
 
 // Turns PC access on for the gateway in the desktop app of context, answering each approval dialog with answer, or what
 // answer returns for the dialog's signal, and returns what the user saw there and the requests that reached it. Its
-// dropNetwork, until restoreNetwork, cuts the requests on their way and fails new ones, as a network drop does.
+// dropNetwork, until restoreNetwork, cuts the requests on their way and fails new ones, which it keeps in lost, as a
+// network drop does.
 async function allowPcAccess(context, gateway, answer) {
   const cookie = (await context.cookies(gateway.url)).map(({ name, value }) => `${name}=${value}`).join("; ");
   let network = new AbortController();
   const desktop = {
     seen: [],
     requests: [],
+    lost: [],
     dropNetwork: () => network.abort(Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" })),
     restoreNetwork: () => { network = new AbortController(); }
   };
   const pcAccess = createPcAccess({
     // Like main.js, with the approved browser's cookies.
     request: async (target, pathname, body, signal) => {
-      network.signal.throwIfAborted();
+      if (network.signal.aborted) {
+        desktop.lost.push(body);
+        throw network.signal.reason;
+      }
       const signals = AbortSignal.any([network.signal, ...(signal ? [signal] : [])]);
       const response = await linkRequest(new URL(pathname, target.url), body, { cookie, signal: signals });
       if (pathname === "/pc/link") desktop.requests.push(...(response.body?.messages || []).filter((message) => message.type === "ssh"));
@@ -391,7 +396,7 @@ test("a short network drop keeps the computer's dialog, and the command allowed 
   await expect.poll(() => desktop.seen.length, { timeout: 10_000 }).toBe(1);
   desktop.dropNetwork();
   approve("run");
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await expect.poll(() => desktop.lost.some((body) => body.starting)).toBe(true);
   desktop.restoreNetwork();
 
   expect(await ran).toEqual({ code: 0, stdout: "ran\n", stderr: "" });
