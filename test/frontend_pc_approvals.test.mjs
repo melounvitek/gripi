@@ -17,7 +17,6 @@ function reply(status, body = {}) {
 function fixture(replies = []) {
   const document = new FakeDocument();
   const element = new FakeElement("div");
-  element.hidden = true;
   const window = new FakeEventTarget();
   const sent = [];
   window.fetch = async (url, options) => {
@@ -31,7 +30,8 @@ function fixture(replies = []) {
   const text = (node) => node.children?.length ? node.children.map(text).join("") : node.textContent;
   const lines = () => element.children.map((row) => ({
     text: text(row.querySelector(".pc-approval-text")),
-    time: row.querySelector(".pc-approval-time").textContent
+    time: text(row.querySelector(".pc-approval-time")),
+    cancel: row.querySelector("button").getAttribute("aria-label")
   }));
   const cancel = async (index) => {
     element.children[index].querySelector("button").listeners.get("click").forEach((listener) => listener({}));
@@ -40,15 +40,14 @@ function fixture(replies = []) {
   return { controller, element, sent, lines, cancel };
 }
 
-test("shows a line for each request that a computer asks to approve, with the time left, until it ends or expires", (t) => {
+test("shows a line for each request that a computer asks to approve, with the time left, while the gateway lists it", (t) => {
   t.mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
   const { controller, element, lines } = fixture();
 
   controller.update([approval("one", 107), approval("two", 30, "")]);
-  assert.equal(element.hidden, false);
   assert.deepEqual(lines(), [
-    { text: "Waiting for you on laptop: SSH login to one.example as git", time: "expires in 1:47" },
-    { text: "Waiting for you on your computer: SSH login to two.example as git", time: "expires in 0:30" }
+    { text: "Waiting for you on laptop: SSH login to one.example as git", time: "expires in 1:47", cancel: "cancel SSH login to one.example as git" },
+    { text: "Waiting for you on your computer: SSH login to two.example as git", time: "expires in 0:30", cancel: "cancel SSH login to two.example as git" }
   ]);
   t.mock.timers.tick(1000);
   assert.deepEqual(lines().map((line) => line.time), ["expires in 1:46", "expires in 0:29"]);
@@ -58,8 +57,10 @@ test("shows a line for each request that a computer asks to approve, with the ti
   assert.equal(element.children.length, 1);
   assert.equal(element.children[0], first);
 
-  t.mock.timers.tick(106_000);
-  assert.equal(element.hidden, true);
+  // The device's clock may be off, so only the gateway ends a line.
+  t.mock.timers.tick(200_000);
+  assert.deepEqual(lines().map((line) => line.time), ["expires in 0:00"]);
+  controller.update([]);
   assert.equal(element.children.length, 0);
 });
 
@@ -91,7 +92,7 @@ test("a cancel that comes too late hides the line, and one that fails says so an
   t.mock.timers.tick(1000);
   assert.equal(lines()[0].time, "could not cancel");
   await cancel(0);
-  assert.equal(element.hidden, true);
+  assert.equal(element.children.length, 0);
   assert.deepEqual(sent.map((request) => request.body), ["id=one", "id=two", "id=two"]);
 });
 
@@ -102,10 +103,8 @@ test("another session's view starts without the lines of the one before", (t) =>
 
   controller.reset();
   const next = new FakeElement("div");
-  next.hidden = true;
   controller.bind(next);
   controller.update([]);
 
-  assert.equal(next.hidden, true);
   assert.equal(next.children.length, 0);
 });

@@ -20,7 +20,8 @@ export class PcApprovalsController {
     this.lines.clear();
   }
 
-  // Takes the session's requests that computers ask to approve, from its page or its live events.
+  // Takes the session's requests that computers ask to approve, from its page or its live events. Only the gateway
+  // ends them, as the device's clock may be off.
   update(approvals) {
     this.approvals = Array.isArray(approvals) ? approvals : [];
     this.render();
@@ -36,8 +37,7 @@ export class PcApprovalsController {
 
   render() {
     if (!this.element) return;
-    const now = Date.now();
-    const shown = this.approvals.filter((approval) => !this.finished.has(approval.id) && Date.parse(approval.expires_at) > now);
+    const shown = this.approvals.filter((approval) => !this.finished.has(approval.id));
     for (const [id, line] of this.lines) {
       if (shown.some((approval) => approval.id === id)) continue;
       line.element.remove();
@@ -45,10 +45,10 @@ export class PcApprovalsController {
     }
     for (const approval of shown) {
       const line = this.lines.get(approval.id) || this.add(approval);
-      const left = Math.ceil((Date.parse(approval.expires_at) - now) / 1000);
-      line.time.textContent = line.error || `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+      const left = Math.max(0, Math.ceil((Date.parse(approval.expires_at) - Date.now()) / 1000));
+      line.countdown.textContent = line.failed ? "" : `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+      line.error.textContent = line.failed ? "could not cancel" : "";
     }
-    this.element.hidden = shown.length === 0;
     if (shown.length && !this.ticker) this.ticker = setInterval(() => this.render(), 1000);
     if (!shown.length) {
       clearInterval(this.ticker);
@@ -69,14 +69,19 @@ export class PcApprovalsController {
     text.append("Waiting for you on ", computer, `: ${approval.summary}`);
     const time = this.document.createElement("span");
     time.className = "pc-approval-time";
-    // The countdown would be read out every second.
-    time.setAttribute("aria-live", "off");
+    // The countdown would be read out every second, unlike the error, which the line's live region announces.
+    const countdown = this.document.createElement("span");
+    countdown.setAttribute("aria-live", "off");
+    const error = this.document.createElement("span");
+    error.className = "pc-approval-error";
+    time.append(countdown, error);
     const cancel = this.document.createElement("button");
     cancel.type = "button";
     cancel.className = "pc-approval-cancel";
     cancel.textContent = "cancel";
+    cancel.setAttribute("aria-label", `cancel ${approval.summary}`);
     element.append(icon, text, time, cancel);
-    const line = { element, time, cancel, error: "" };
+    const line = { element, countdown, error, cancel, failed: false };
     cancel.addEventListener("click", () => this.cancel(approval.id, line));
     this.element.append(element);
     this.lines.set(approval.id, line);
@@ -86,7 +91,7 @@ export class PcApprovalsController {
   async cancel(id, line) {
     if (line.cancel.disabled) return;
     line.cancel.disabled = true;
-    line.error = "";
+    line.failed = false;
     let response = null;
     try {
       response = await this.window.fetch("/pc/cancel", { method: "POST", body: new URLSearchParams({ id }), headers: { Accept: "application/json" } });
@@ -95,7 +100,7 @@ export class PcApprovalsController {
     line.cancel.disabled = false;
     // Too late, the request no longer waits for approval, such as once the user approved it on the computer.
     if (response?.ok || response?.status === 409) this.finished.add(id);
-    else line.error = "could not cancel";
+    else line.failed = true;
     this.render();
   }
 }
