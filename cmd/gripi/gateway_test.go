@@ -685,7 +685,15 @@ func TestDeleteExplainsWhatItCannotDelete(t *testing.T) {
 // descends from no gateway. It ends with the test.
 func piCLI(t *testing.T, arguments ...string) int {
 	t.Helper()
-	output, err := exec.Command("sh", append([]string{"-c", `sh -c 'while :; do sleep 1; done' pi "$@" </dev/null >/dev/null 2>&1 & echo $!`, "sh"}, arguments...)...).Output()
+	fifo := filepath.Join(t.TempDir(), "wait")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The shell waits in its own read, as a loop that started sleep would fork processes that show its arguments
+	// until they exec. It outlives the shell that starts it, as processes of the gateway's own don't count.
+	command := exec.Command("sh", append([]string{"-c", `sh -c 'read -r line <>"$GRIPI_TEST_FIFO"' pi "$@" </dev/null >/dev/null 2>&1 & echo $!`, "sh"}, arguments...)...)
+	command.Env = append(os.Environ(), "GRIPI_TEST_FIFO="+fifo)
+	output, err := command.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
