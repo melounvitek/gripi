@@ -83,7 +83,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
       if (path !== "/pc/link") {
         harness.posts.push({ path, body });
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
-        if (body.starting) return Promise.resolve({ status: starting, body: {} });
+        if (body.starting) return starting ? Promise.resolve({ status: starting, body: {} }) : Promise.reject(new Error("the server did not answer in time"));
         if (lostResults && body.result || lostReplies && path === "/pc/link/reply") return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
       }
@@ -125,7 +125,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
     hostname: () => hostname,
     spawn(command, args, options) {
       const child = spawn(command, args, options);
-      harness.spawned.push({ command, args, options, child, printed: once(child.stdout, "data"), closed: once(child, "close") });
+      harness.spawned.push({ command, args, options, child, printed: once(child.stdout, "data"), closed: new Promise((resolve) => child.once("close", resolve)) });
       return child;
     },
     sshAgentGuard: fakeGuard
@@ -141,11 +141,18 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
     harness.prompts.at(-1).answer(answer);
     await settle();
   };
-  // Waits for what the PC does with a command, which looks at files first, and sends its result only once it ends.
-  harness.until = async (done) => {
-    while (!done()) await new Promise(setImmediate);
+  // Waits, for up to ms, for what the PC does with a command, which looks at files first, and sends its result only once
+  // it ends.
+  harness.until = async (done, ms = 10 * 1000) => {
+    const deadline = Date.now() + ms;
+    while (!done()) {
+      if (Date.now() > deadline) throw new Error(`waited ${ms} ms for ${done}`);
+      await new Promise(setImmediate);
+    }
   };
   harness.prompted = (count) => harness.until(() => harness.prompts.length >= count);
+  // Waits for a process to end, sooner than a sleep 30 that nothing kills.
+  harness.ended = (pid) => harness.until(() => ended(pid), 5000);
   harness.replied = async (count) => {
     await harness.until(() => harness.replies().length >= count);
     return harness.replies();
@@ -736,11 +743,10 @@ test("a cancel ends the command's process group, with SIGKILL 5 seconds after SI
   const sleeps = await Promise.all(h.spawned.map(async ({ printed }) => Number(String((await printed)[0]))));
   await h.deliver({ type: "cancel", id: "1" }, { type: "cancel", id: "2" });
 
-  await h.spawned[0].closed;
-  assert.equal(h.spawned[1].child.exitCode, null);
+  await h.ended(sleeps[0]);
+  assert.equal(ended(sleeps[1]), false);
   t.mock.timers.tick(5000);
-  await h.spawned[1].closed;
-  for (const sleep of sleeps) assert.equal(ended(sleep), true);
+  await h.ended(sleeps[1]);
   await settle();
   assert.deepEqual(h.replies(), []);
 });
@@ -749,8 +755,9 @@ test("stopping all, as the app quits, kills the process groups of commands that 
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t);
 
-  // The shell ends on SIGTERM, but not a process that it started in the background, which keeps its group.
-  await h.deliver(run("1", ["sh", "-c", "sh -c \"trap '' TERM; exec sleep 30\" >/dev/null 2>&1 & echo $!; wait"]));
+  // The shell ends on SIGTERM, but not a process that it started in the background, which ignores it from the start
+  // and keeps the group.
+  await h.deliver(run("1", ["sh", "-c", "trap '' TERM; sleep 30 >/dev/null 2>&1 & trap - TERM; echo $!; wait"]));
   await h.prompted(1);
   await h.answer("run");
   await h.until(() => h.spawned.length === 1);
@@ -758,9 +765,10 @@ test("stopping all, as the app quits, kills the process groups of commands that 
 
   const stopping = h.pc.stopAll();
   await h.spawned[0].closed;
+  assert.equal(ended(sleep), false);
   t.mock.timers.tick(1000);
   await stopping;
-  await h.until(() => ended(sleep));
+  await h.ended(sleep);
 });
 
 test("a result that can't reach the server becomes an error, as gripi pc run would wait for it for good", async (t) => {
@@ -773,16 +781,43 @@ test("a result that can't reach the server becomes an error, as gripi pc run wou
   assert.deepEqual((await h.replied(2)).at(-1), { link: h.link(), id: "1", error: "the command ran on the PC, but its result could not reach Gripi" });
 });
 
-test("a link that takes neither the result nor an error ends, which ends gripi pc run's wait", async (t) => {
+// Once the server may have let the command start, gripi pc run waits for an answer however long it takes.
+const unanswered = [
+  ["a command's result", {}, false],
+  ["a command that can't start", {}, true],
+  ["a command whose start the server didn't answer", { starting: null }, false]
+];
+for (const [what, options, unrunnable] of unanswered) {
+  test(`a link that takes no answer to ${what}, not even an error, ends, which ends gripi pc run's wait`, async (t) => {
+    const h = setup(t, { lostReplies: true, ...options });
+    const link = h.link();
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
+    t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+
+    await h.deliver(run("1", ["true"], { cwd: folder }));
+    await h.prompted(1);
+    // A folder that goes while the PC asks fails the spawn.
+    if (unrunnable) fs.rmSync(folder, { recursive: true });
+    await h.answer("run");
+    await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
+
+    assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  });
+}
+
+test("a link keeps refusals that don't reach Gripi before the server may have let the command start", async (t) => {
   const h = setup(t, { lostReplies: true });
-  const link = h.link();
+  const replied = (count) => h.until(() => h.replies().length === count).then(settle);
 
-  await h.deliver(run("1", ["true"]));
+  await h.deliver(run("1", ["no-such-command"]));
+  await replied(1);
+  await h.deliver(run("2", ["true"]));
   await h.prompted(1);
-  await h.answer("run");
-  await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
+  await h.answer("deny");
+  await replied(2);
 
-  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.equal(h.posts.some(({ path }) => path === "/pc/link/close"), false);
+  assert.deepEqual(h.polls.map((poll) => poll.body.link), [h.link()]);
 });
 
 test("a cancelled password check ends only once pkexec has exited", async () => {

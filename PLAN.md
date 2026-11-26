@@ -424,7 +424,7 @@ When the user is on the phone and a computer asks for approval, the phone must s
   - It keeps 16 MiB of each output and drops the rest, with `truncated`.
   - The exit code is the command's, or 128 plus the signal that killed it.
   - A cancel, a lost link or turning access off sends SIGTERM to the process group, and SIGKILL 5 s later, so that Git can remove its lock files first. Quitting, which waits at most 2 s, sends SIGKILL to the commands still running a second after SIGTERM.
-  - When the result's reply fails, such as a large one on a slow uplink, it sends an error instead, as gripi pc run would otherwise wait for good. When that fails too, it drops the link, which ends the wait.
+  - When the result's reply fails, such as a large one on a slow uplink, it sends an error instead, as gripi pc run would otherwise wait for good. Once the app asked to start the command, an error that doesn't reach the gateway either, such as for a command that can't start, drops the link, which ends the wait.
   - Quitting and turning access off track the process groups that got SIGTERM until their SIGKILL, also once the command's first process ended, as a process that it started in the background may still run.
 
 **Workers:** both socket routes go into `workerRoutes`. `validOwnedSessionPath` checks the requesting session's placement with `reachesSession`, and routing then walks main's session keys, so a sub-session on a worker follows its parent on main.

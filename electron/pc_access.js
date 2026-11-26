@@ -281,7 +281,17 @@ function createPcAccess({
   }
 
   async function handleRun(entry, link, message, signal) {
-    const answerWith = (fields) => reply(entry, link, message.id, fields, signal);
+    const send = async (fields) => {
+      if (signal.aborted) return null;
+      return request(entry.gateway, "/pc/link/reply", { link: link.id, id: message.id, ...fields }, signal).then(({ status }) => status, () => null);
+    };
+    // Once the server may have let the command start, gripi pc run waits for an answer however long it takes, so an
+    // answer that doesn't reach Gripi then ends the link, which ends the wait.
+    let starting = false;
+    const answerWith = async (fields) => {
+      const status = await send(fields);
+      if (starting && !signal.aborted && ![200, 404, 409].includes(status)) link.controller.abort();
+    };
     try {
       const folder = message.cwd ?? os.homedir();
       if (!path.isAbsolute(folder) || !(await fs.promises.stat(folder).catch(() => null))?.isDirectory()) {
@@ -300,6 +310,7 @@ function createPcAccess({
         // Right before the command runs, the server confirms that gripi pc run still waits for it, so Cancel in Gripi
         // either stopped it or no longer can.
         approved: async (_answer, approval) => {
+          starting = true;
           const started = await request(entry.gateway, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval).catch(() => null);
           return started?.status === 200 ? null : "not run on the PC: Gripi no longer waits for it";
         }
@@ -308,12 +319,8 @@ function createPcAccess({
       if (signal.aborted) return;
 
       const result = await runCommand(executable, args, folder, signal);
-      // gripi pc run waits for the result however long the command ran, so it needs an answer: an error when the
-      // result can't reach Gripi, and the link's end when neither can.
-      const send = (fields) => request(entry.gateway, "/pc/link/reply", { link: link.id, id: message.id, ...fields }, signal).then(({ status }) => status, () => null);
       if (signal.aborted || await send({ result }) === 200) return;
-      const status = await send({ error: "the command ran on the PC, but its result could not reach Gripi" });
-      if (!signal.aborted && ![200, 404, 409].includes(status)) link.controller.abort();
+      await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
     } catch (error) {
       await answerWith({ error: error.message });
     }
