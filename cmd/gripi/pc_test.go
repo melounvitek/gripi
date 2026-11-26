@@ -1152,3 +1152,55 @@ func TestARequestShowsAsAskingOnlyWhileItWaits(t *testing.T) {
 		})
 	}
 }
+
+// Cancel in Gripi refuses a request that a computer asks the user to approve at once, rather than when the computer
+// answers, and closes the computer's dialog. As it may only refuse, it acts only while the computer asks: not before,
+// nor once the user approved it there.
+func TestCancelInGripiRefusesARequestThatAComputerAsksToApprove(t *testing.T) {
+	alpha, address := pcGateway(t)
+	messages, _ := pcDesktop(t, address, "app", nil)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	request, answered, _ := pcAsk(t, alpha, "connection", messages)
+	approved, approvedAnswered, _ := pcAsk(t, alpha, "approved", messages)
+	cancel := func(id string) int {
+		return browserRequest(http.MethodPost, "/pc/cancel", url.Values{"id": {id}}, "gripi_browser="+pcPhoneToken).Code
+	}
+
+	pcAsking(t, address, pcBrowserToken, "app", approved.ID, "SSH login")
+	pcAsking(t, address, pcBrowserToken, "app", approved.ID, "")
+	for _, id := range []string{request.ID, approved.ID, "unknown"} {
+		if code := cancel(id); code != http.StatusConflict {
+			t.Fatalf("cancel of %s while the computer doesn't ask = %d", id, code)
+		}
+	}
+
+	pcAsking(t, address, pcBrowserToken, "app", request.ID, "SSH login")
+	if code := cancel(request.ID); code != http.StatusOK {
+		t.Fatalf("cancel = %d", code)
+	}
+	select {
+	case err := <-answered:
+		if err == nil || err.Error() != "cancelled in Gripi" {
+			t.Fatalf("the cancelled request got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled request still waits")
+	}
+	if cancelled := nextPCMessage(t, messages, "cancel"); cancelled.ID != request.ID {
+		t.Fatalf("the desktop app got %+v", cancelled)
+	}
+	if approvals := pcApprovals(t, alpha); len(approvals) != 0 {
+		t.Fatalf("approvals after the cancel = %+v", approvals)
+	}
+	if code := cancel(request.ID); code != http.StatusConflict {
+		t.Fatalf("a second cancel = %d", code)
+	}
+	if status, _ := pcLinkSend(t, address, "/pc/link/reply", map[string]any{"link": "app", "id": request.ID, "message": []byte{12}}); status != http.StatusNotFound {
+		t.Fatalf("the reply to the cancelled request = %d", status)
+	}
+	select {
+	case err := <-approvedAnswered:
+		t.Fatalf("the approved request got %v", err)
+	default:
+	}
+}

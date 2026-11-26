@@ -44,19 +44,20 @@ const pcPollBytes = 2 << 20
 const pcSummaryLimit = 200
 
 var (
-	errNoPCLink   = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
-	errPCLinkLost = errors.New("the computer's link to Gripi ended before it replied")
-	errPCTimeout  = errors.New("the computer did not reply in time")
-	errPCTaken    = errors.New("another link of this browser is open, such as one of a desktop app that just restarted")
-	errPCUnknown  = errors.New("the link is not open, such as after the gateway restarted")
-	errPCEnded    = errors.New("the link ended")
-	errPCUnused   = errors.New("nobody has used this session in a Gripi desktop app with PC access since the gateway started; ask the user to open it in the desktop app on the computer that should do this, and click in it")
-	errPCNoAccess = errors.New("this session was last used in a Gripi window without PC access, such as a phone or a browser; ask the user to open it in the desktop app on the computer that should do this, and click in it")
-	errPCMoved    = errors.New("the session was used on another computer during this SSH agent connection; run the command again")
-	errPCNotOpen  = errors.New("this SSH agent connection didn't start on the computer that the session uses; run the command again")
-	errPCReopened = errors.New("this SSH agent connection is already open")
-	errPCPinned   = errors.New("too many SSH agent connections are open for PC access")
-	errPCClosed   = errors.New("the SSH agent connection closed")
+	errNoPCLink    = errors.New("no computer is connected; open the Gripi desktop app there and turn on File → Allow PC Access for This Server")
+	errPCLinkLost  = errors.New("the computer's link to Gripi ended before it replied")
+	errPCTimeout   = errors.New("the computer did not reply in time")
+	errPCTaken     = errors.New("another link of this browser is open, such as one of a desktop app that just restarted")
+	errPCUnknown   = errors.New("the link is not open, such as after the gateway restarted")
+	errPCEnded     = errors.New("the link ended")
+	errPCUnused    = errors.New("nobody has used this session in a Gripi desktop app with PC access since the gateway started; ask the user to open it in the desktop app on the computer that should do this, and click in it")
+	errPCNoAccess  = errors.New("this session was last used in a Gripi window without PC access, such as a phone or a browser; ask the user to open it in the desktop app on the computer that should do this, and click in it")
+	errPCMoved     = errors.New("the session was used on another computer during this SSH agent connection; run the command again")
+	errPCNotOpen   = errors.New("this SSH agent connection didn't start on the computer that the session uses; run the command again")
+	errPCReopened  = errors.New("this SSH agent connection is already open")
+	errPCPinned    = errors.New("too many SSH agent connections are open for PC access")
+	errPCClosed    = errors.New("the SSH agent connection closed")
+	errPCCancelled = errors.New("cancelled in Gripi")
 )
 
 // pcMessage is a message of the gateway to the desktop app.
@@ -465,6 +466,22 @@ func (links *pcLinks) approvals(session string) []pcApproval {
 	return approvals
 }
 
+// cancel refuses a request that a computer asks the user to approve, if allowed accepts its session, and closes the
+// computer's dialog. It reports whether the computer was asking, as once it stopped, the user may have approved it.
+func (links *pcLinks) cancel(id string, allowed func(session string) bool) bool {
+	links.mu.Lock()
+	defer links.mu.Unlock()
+	for _, link := range links.byID {
+		if waiter := link.waiting[id]; waiter != nil && waiter.asking && allowed(waiter.approval.session) {
+			delete(link.waiting, id)
+			waiter.replied <- pcLinkBody{Error: errPCCancelled.Error()}
+			link.send(pcMessage{Type: "cancel", ID: id})
+			return true
+		}
+	}
+	return false
+}
+
 // closeConnection tells the link of an agent connection that it closed, and forgets the connection.
 func (links *pcLinks) closeConnection(connection string) {
 	links.mu.Lock()
@@ -513,6 +530,7 @@ func (app *application) registerPCRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /pc/link/reply", app.replyOverPCLink)
 	mux.HandleFunc("POST /pc/link/close", app.closePCLink)
 	mux.HandleFunc("POST /pc/link/status", app.pcLinkStatus)
+	mux.HandleFunc("POST /pc/cancel", app.cancelPCApproval)
 }
 
 // pcAccessRefusal says why the gateway refuses PC access, or is empty when it allows it.
@@ -621,6 +639,20 @@ func (app *application) pcLinkStatus(response http.ResponseWriter, request *http
 	default:
 		writeJSON(response, struct{}{})
 	}
+}
+
+// cancelPCApproval refuses, from any Gripi client of its session, a request that a computer asks the user to approve,
+// so that gripi pc needn't wait for the computer.
+func (app *application) cancelPCApproval(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	owned := func(session string) bool { return app.validOwnedSessionPath(request, session) }
+	if !app.pcLinks.cancel(request.PostFormValue("id"), owned) {
+		writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "The request no longer waits for approval."})
+		return
+	}
+	writeJSON(response, map[string]bool{"ok": true})
 }
 
 func (app *application) closePCLink(response http.ResponseWriter, request *http.Request) {
