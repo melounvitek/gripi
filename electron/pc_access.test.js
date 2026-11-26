@@ -1111,6 +1111,29 @@ test("pkexec's refusals come back as errors with its words, unlike the command's
   ]);
 });
 
+// gripi pc run waits for good once the command may have started, so a refusal that never reached Gripi would end the link.
+test("polkit's refusal of a command as root that gets no answer at first reaches Gripi a second later, keeping the link", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+  const pkexec = fakePkexec(t);
+  const link = h.link();
+
+  await h.deliver(run("1", ["true"], { root: true }));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => pkexec.asked());
+  h.offline = true;
+  pkexec.answer("dismiss");
+  await h.replied(1);
+  h.offline = false;
+  await h.ticked(() => h.replies().length === 2);
+
+  const refusal = { link, id: "1", error: "not run as root on the PC: pkexec: Error executing command as another user: Request dismissed" };
+  assert.deepEqual(h.replies(), [refusal, refusal]);
+  assert.equal(h.posts.some(({ path }) => path === "/pc/link/close"), false);
+  assert.deepEqual(h.warnings(), []);
+});
+
 test("refuses a command as root at once on a PC without pkexec", async (t) => {
   const h = setup(t);
   const PATH = process.env.PATH;
