@@ -231,15 +231,19 @@ func (links *pcLinks) linked(owner string) bool {
 	return links.linkOf(owner) != nil
 }
 
-// use records that owner used a session now. resolve gives the session's key while remapUse waits, so that a use doesn't
-// stay behind on a key that moved.
-func (links *pcLinks) use(owner string, resolve func() string) {
+// use records that owner used a session at the time at, unless a later use is on record. resolve gives the session's
+// key while remapUse waits, so that a use doesn't stay behind on a key that moved.
+func (links *pcLinks) use(owner string, at time.Time, resolve func() string) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
+	session := resolve()
+	if links.uses[session].at.After(at) {
+		return
+	}
 	if links.uses == nil {
 		links.uses = make(map[string]pcUse)
 	}
-	links.uses[resolve()] = pcUse{owner: owner, at: time.Now()}
+	links.uses[session] = pcUse{owner: owner, at: at}
 }
 
 // remapUse moves the use of a new session to the key that it has once Pi saved it, in the same step as remap, which
@@ -300,7 +304,7 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 	// that ended first.
 	for key, pin := range links.pins {
 		if len(links.pins) >= PCPins && !links.live(pin.link) {
-			delete(links.pins, key)
+			links.unpin(key)
 		}
 	}
 	for len(links.pins) >= PCPins {
@@ -310,7 +314,7 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 				oldest = key
 			}
 		}
-		delete(links.pins, oldest)
+		links.unpin(oldest)
 	}
 	if links.pins == nil {
 		links.pins = make(map[string]pcPin)
@@ -380,10 +384,15 @@ func (links *pcLinks) reply(owner string, reply pcLinkBody) int {
 func (links *pcLinks) closeConnection(connection string) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
-	pin, pinned := links.pins[connection]
-	if !pinned {
-		return
+	if _, pinned := links.pins[connection]; pinned {
+		links.unpin(connection)
 	}
+}
+
+// unpin forgets a pinned agent connection, and closes it on its link, if that hasn't ended, which counts it until then.
+// Callers hold mu.
+func (links *pcLinks) unpin(connection string) {
+	pin := links.pins[connection]
 	delete(links.pins, connection)
 	if links.live(pin.link) {
 		pin.link.send(pcMessage{Type: "ssh_close", Session: pin.session, Connection: connection})
@@ -522,14 +531,18 @@ func (app *application) closePCLink(response http.ResponseWriter, request *http.
 	writeJSON(response, struct{}{})
 }
 
-// usedPC records that the browser of a request used a session now, so that the requests of gripi pc in it go to that
-// browser's computer.
-func (app *application) usedPC(request *http.Request, path string) {
-	owner, ok := app.pushOwner(request)
-	if !ok || app.pcAccessRefusal() != "" || app.scratch.contains(path) {
+// usedPC records that the browser of a request used a session, as the page names it, when the gateway received the
+// request, so that the requests of gripi pc in the session go to that browser's computer.
+func (app *application) usedPC(request *http.Request, session string, received time.Time) {
+	if app.pcAccessRefusal() != "" {
 		return
 	}
-	app.pcLinks.use(owner, func() string {
+	owner, ok := app.pushOwner(request)
+	path, valid := app.sessionStore.Canonical(session)
+	if !ok || !valid || app.scratch.contains(path) || !app.validOwnedSessionPath(request, path) || !app.knownOrPendingSession(request, path) {
+		return
+	}
+	app.pcLinks.use(owner, received, func() string {
 		resolved, _, _ := app.resolveOwnedPendingPath(request, path)
 		return resolved
 	})

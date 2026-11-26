@@ -831,24 +831,65 @@ func TestAnAgentConnectionOfAnEndedLinkNeverMovesToAnother(t *testing.T) {
 			t.Fatalf("the second link got %+v", request)
 		}
 	}
+	// Without connections of ended links to drop, the oldest goes, and its link, which counts it, closes it.
+	if _, err := relay.post(context.Background(), pcAgentMessage(alpha, "last", true)); err == nil || err.Error() != "second" {
+		t.Fatalf("the first message of last = %v", err)
+	}
+	if closed := nextPCMessage(t, messages, "ssh_close"); closed.Connection != "later" {
+		t.Fatalf("the second link got %+v", closed)
+	}
 }
 
-// A shell command from the page is a use too. The page retries a message that the gateway couldn't take yet, after its
-// first attempt recorded it, so a retry that comes late doesn't take the session back from a newer use elsewhere.
-func TestAShellCommandIsAUseAndARetryIsNone(t *testing.T) {
+// A message counts from when the gateway began to receive it, before anything can refuse it, and a shell command too. The
+// page retries a message that the gateway couldn't take yet, which the first attempt counted, so a retry that comes late
+// doesn't take the session back from a newer use elsewhere.
+func TestAMessageCountsFromWhenTheGatewayGetsItAndARetryDoesNot(t *testing.T) {
 	requireTools(t, "ssh-add")
 	alpha, address := pcGateway(t)
 	pcDesktop(t, address, "laptop", answeredBy("laptop"))
-	pcPresence(t, pcBrowserToken, alpha, true)
+	const phone = "this session was last used in a Gripi window without PC access"
 
 	pcPrompt(t, pcPhoneToken, alpha, "!true")
-	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, "this session was last used in a Gripi window without PC access") {
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, phone) {
 		t.Fatalf("after a shell command from the phone, gripi pc ssh = %q", answerer)
 	}
 	pcPresence(t, pcBrowserToken, alpha, true)
 	pcPrompt(t, pcPhoneToken, alpha, pcMessageText, func(form url.Values) { form.Set("retry", "1") })
 	if answerer := pcAnswerer(t); answerer != "laptop" {
 		t.Fatalf("after a retry from the phone, gripi pc ssh reached %q", answerer)
+	}
+	refused := url.Values{"session": {alpha}, "message": {pcMessageText}, "streaming_behavior": {"later"}}
+	if response := browserRequest(http.MethodPost, "/prompt", refused, "gripi_browser="+pcPhoneToken); response.Code != http.StatusBadRequest {
+		t.Fatalf("a message that the gateway refuses = %d %s", response.Code, response.Body)
+	}
+	if answerer := pcAnswerer(t); !strings.HasPrefix(answerer, phone) {
+		t.Fatalf("after a message from the phone that the gateway refused, gripi pc ssh = %q", answerer)
+	}
+
+	// A click on the laptop while the phone's message still uploads is the later use.
+	uploaded := url.Values{"session": {alpha}, "message": {pcMessageText}}.Encode()
+	body, upload := io.Pipe()
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:4567/prompt", body)
+	request.ContentLength = int64(len(uploaded))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	asBrowser(pcPhoneToken)(request)
+	sent := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		browser.ServeHTTP(response, request)
+		sent <- response
+	}()
+	time.Sleep(100 * time.Millisecond)
+	pcPresence(t, pcBrowserToken, alpha, true)
+	upload.Write([]byte(uploaded))
+	upload.Close()
+	if response := <-sent; response.Code != http.StatusOK {
+		t.Fatalf("the uploaded message = %d %s", response.Code, response.Body)
+	}
+	eventually(t, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" })
+	if answerer := pcAnswerer(t); answerer != "laptop" {
+		t.Fatalf("after a click on the laptop during the phone's upload, gripi pc ssh reached %q", answerer)
 	}
 }
 

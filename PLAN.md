@@ -283,8 +283,8 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
 - The open poll may carry `"name"`, the computer's short hostname (`os.hostname()` up to the first dot, at most 64 characters, cleaned to one line). Refusals name the computer with it now, and phase 3's waiting line and Push will too. A link that sent no name is "the user's computer" in refusals.
 - Stale timers, replies, closes and cancels work per link. `EndPCLink` ends all of them.
 
-**Use record.** In memory: session key → (owner, time of receipt). It is recorded only when PC access isn't refused (single-user mode, access approval on), and never for scratch sessions.
-- `app.prompt` records the sender for a browser request (`!commandRequest(request)`), from any client, at its start: after the session checks, and before a `!` command runs (`runBash`, which returns early) or Pi gets the prompt (`withSynchronizedClient`). So `gripi send`, sub-session reports and workers never count, and a message from a phone records the phone.
+**Use record.** In memory: session key → (owner, time of receipt). It is recorded only when PC access isn't refused (single-user mode, access approval on), for a session the gateway knows (`knownOrPendingSession`) and the browser owns, and never for scratch sessions. The time is when the gateway began to receive the request, and a use is recorded only if it is newer than the current record, so a click elsewhere during a slow upload of a message wins.
+- `app.prompt` records the sender for a browser request (`!commandRequest(request)`), from any client, at its start, before anything can refuse it: also before `actionSessionPath`, whose canonicalization can answer a retryable 409 when it contends with a remap, and before a `!` command runs (`runBash`, which returns early) or Pi gets the prompt (`withSynchronizedClient`). So `gripi send`, sub-session reports and workers never count, and a message from a phone records the phone.
   - Automatic retries of a submission (`sendPromptRequest` in `app.js`) follow only a 409 `session_operation_pending`, which the first attempt gets from `app.prompt` after it recorded. So retries carry `retry=1` and never record, and a late retry can't take routing back from a newer use elsewhere.
 - `PUT /web-push/presence` with `"used": true` and `focused` records the session for an owner that has a live link. So reading on a phone or in an app without PC access never moves it.
   - The route checks the session like the PC routes do (`knownOrPendingSession`), and resolves a pending key before recording, since `sessionStore.Canonical` doesn't. Every record resolves its key under the lock that the remap's commit holds, so none stays behind on a key that moved.
@@ -300,7 +300,7 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
    - The CLI marks a connection's first message (`open=1`). A message without a pin and without the mark is refused, so a connection whose pin was dropped can't start again on another link. So is `open=1` for a connection ID that has a pin, live or ended.
    - Each later message is routed again. If the route changed, such as after a message from the phone between the bind and the sign, the message is refused. Messages already queued finish.
    - A pin to a link that ended stays, so its messages fail rather than starting again on another link.
-   - `ssh_close` goes only to the pinned link, with the pinned session key, and drops the pin. Pins are capped, dropping those of ended links first.
+   - `ssh_close` goes only to the pinned link, with the pinned session key, and drops the pin. Pins are capped, dropping those of ended links first, then the oldest, whose link gets an `ssh_close` so that it doesn't count the connection against its limit.
 2. Otherwise, use the session's own record.
 3. Without one, walk up `gatewayState.SessionParents()`, bounded and cycle-safe, to the nearest ancestor with a record. A sub-session's own record wins.
 4. An owner with a live link gets the request. Anything else is refused with 503, never sent to another link:
@@ -325,8 +325,8 @@ Each phase works on its own and is documented. TDD rounds are committed one by o
   - a sub-session follows its parent until its own use, and a phone prompt in the sub-session blocks the parent's computer;
   - a presence `used` report under a pending key routes by the real path, also when it comes after Pi saved the session (an internal test, as the fake Pi names its file at once);
   - a phone prompt between two messages of one agent connection refuses the later one, and `ssh_close` reaches only the first link;
-  - a connection pinned to an ended link fails, and doesn't move to a new link, also after its pin was dropped at the cap, and `open=1` again on a pinned connection is refused;
-  - a `!` command from a browser records, and a retry (`retry=1`) doesn't;
+  - a connection pinned to an ended link fails, and doesn't move to a new link, also after its pin was dropped at the cap, `open=1` again on a pinned connection is refused, and a live connection dropped at the cap is closed on its link;
+  - a `!` command from a browser records, a retry (`retry=1`) doesn't, a message counts also when the gateway refuses it, even with a retryable 409 from finding the session (an internal test), and a click elsewhere during a message's upload wins;
   - the same owner's second link gets 409, a reconnect with a new ID takes over, and a rotated cookie can't use the old link;
   - `adminLogin` ends the browser's old link at once, failing its waiting requests;
   - `used` from a browser without a link, or for a session the gateway doesn't know, records nothing, and neither does a scratch session (an internal test, as nothing else shows it);

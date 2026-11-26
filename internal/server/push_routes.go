@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/push"
 )
@@ -96,6 +97,7 @@ func (app *application) removePushSubscription(response http.ResponseWriter, req
 }
 
 func (app *application) updateNotificationPresence(response http.ResponseWriter, request *http.Request) {
+	received := time.Now()
 	var input struct {
 		ClientID string `json:"client_id"`
 		Session  string `json:"session"`
@@ -132,8 +134,8 @@ func (app *application) updateNotificationPresence(response http.ResponseWriter,
 	app.notificationPresence.Update(owner, input.ClientID, path, true, input.Sequence)
 	// A click or key in a desktop app with PC access sends the session's PC requests to its computer. Elsewhere, such
 	// as on a phone, reading moves nothing.
-	if browser, ok := app.pushOwner(request); ok && input.Used && app.pcLinks.linked(browser) && app.validOwnedSessionPath(request, path) && app.knownOrPendingSession(request, path) {
-		app.usedPC(request, path)
+	if browser, ok := app.pushOwner(request); ok && input.Used && app.pcLinks.linked(browser) {
+		app.usedPC(request, path, received)
 	}
 	response.WriteHeader(http.StatusNoContent)
 }

@@ -8,9 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/config"
 )
 
 // The desktop app drops a link whose poll carries more than 64 messages, and reads a poll's JSON only up to 8 MiB, so
@@ -44,15 +41,15 @@ func TestPCLinkPollCarriesAtMost64MessagesAnd2MiBOfAgentMessages(t *testing.T) {
 
 // Gripi keeps nothing of a scratch session, so not where it was used either.
 func TestAUseOfAScratchSessionIsNeverRecorded(t *testing.T) {
-	app := &application{
-		config:          config.Config{AdminPassword: "secret"},
-		pendingSessions: agent.NewPendingSessionRegistry(time.Now),
-		scratch:         scratchSessions{byOwner: map[string]*scratchSession{"": {key: "scratch"}}, ended: map[string]bool{}},
-	}
-	request := httptest.NewRequest("PUT", "/web-push/presence", nil)
+	root := t.TempDir()
+	app := notificationTestApplication(t, root, false, false, nil)
+	scratch := filepath.Join(root, "scratch.jsonl")
+	app.scratch = scratchSessions{byOwner: map[string]*scratchSession{"": {key: scratch}}, ended: map[string]bool{}}
+	app.pendingSessions.Remember(scratch, root, "")
+	request := httptest.NewRequest(http.MethodPut, "http://example.com/web-push/presence", nil)
 	request.Header.Set("Cookie", "gripi_browser=token")
 
-	app.usedPC(request, "scratch")
+	app.usedPC(request, scratch, time.Now())
 	if len(app.pcLinks.uses) != 0 {
 		t.Fatalf("uses = %v", app.pcLinks.uses)
 	}
@@ -108,5 +105,47 @@ func TestAUseOfANewSessionFollowsItWhenPiSavesIt(t *testing.T) {
 	}
 	if link := routesTo(used("desk", pending), "second"); link != "desk" {
 		t.Fatalf("after a use under the pending key, the saved session routes to %s", link)
+	}
+}
+
+// The page retries a message that the gateway asks it to, such as while a new session's Pi stops for being idle, and its
+// retries don't count, so the first attempt counts before the gateway finds the session.
+func TestAMessageThatThePageRetriesCountsAtOnce(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	root := t.TempDir()
+	app := notificationTestApplication(t, root, false, false, nil)
+	pending, saved := filepath.Join(root, "pending.jsonl"), writeNotificationSession(t, root, "New session")
+	if err := app.rpcClients.Register(pending, &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": saved}}}); err != nil {
+		t.Fatal(err)
+	}
+	app.pendingSessions.Remember(pending, root, "")
+	release, retiring := app.promptAdmissions.retireIdle(pending)
+	if !retiring {
+		t.Fatal("the new session's Pi is not stopping")
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "http://example.com/prompt", strings.NewReader("session="+pending+"&message=hello"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Cookie", "gripi_browser=laptop")
+	response := httptest.NewRecorder()
+	app.prompt(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "session_operation_pending") {
+		t.Fatalf("prompt = %d %s", response.Code, response.Body)
+	}
+	release()
+
+	owner, _ := app.pushOwner(request)
+	if _, err := app.pcLinks.poll(context.Background(), owner, pcLinkBody{Link: "laptop", Open: true}); err != nil {
+		t.Fatal(err)
+	}
+	session, err := app.canonicalRPCSessionPath(request, saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link, _, err := app.pcLinks.route(nil, session, "connection", true); err != nil || link.id != "laptop" {
+		t.Fatalf("the session routes to %v (%v)", link, err)
 	}
 }
