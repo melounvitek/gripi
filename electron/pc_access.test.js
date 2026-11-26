@@ -744,6 +744,23 @@ test("a cancel ends the command's process group, with SIGKILL 5 seconds after SI
   assert.deepEqual(h.replies(), []);
 });
 
+test("stopping all, as the app quits, kills at once the commands that outlive SIGTERM for a second", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = setup(t);
+
+  await h.deliver(run("1", ["sh", "-c", "trap '' TERM; sleep 30 & echo $!; wait"]));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => h.spawned.length === 1);
+  const sleep = Number(String((await h.spawned[0].printed)[0]));
+
+  const stopping = h.pc.stopAll();
+  t.mock.timers.tick(1000);
+  await stopping;
+  await h.spawned[0].closed;
+  assert.equal(ended(sleep), true);
+});
+
 test("a result that can't reach the server becomes an error, as gripi pc run would wait for it for good", async (t) => {
   const h = setup(t, { lostResults: true });
 

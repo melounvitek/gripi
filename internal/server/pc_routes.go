@@ -39,8 +39,9 @@ const pcMessageLimit = 256 << 10
 // pcPollMessages is the most messages that a poll carries, as the desktop app drops a link that sends more.
 const pcPollMessages = 64
 
-// pcPollBytes bounds the agent messages of a poll, whose JSON the desktop app reads only up to 8 MiB.
-const pcPollBytes = 2 << 20
+// pcPollBytes bounds the JSON of a poll's messages, which the desktop app reads only up to 8 MiB. A poll with one
+// message may have more, up to about 6 MiB for a command whose words JSON escapes.
+const pcPollBytes = 4 << 20
 
 // pcSummaryLimit is the most characters of a request's summary that Gripi shows while a computer asks to approve it.
 const pcSummaryLimit = 200
@@ -125,6 +126,8 @@ type pcLink struct {
 // pcWaiter is a request that waits for the desktop app's reply, and the approval that the app may ask the user for
 // meanwhile, which every Gripi client of the request's session shows.
 type pcWaiter struct {
+	// ctx is gripi's request, which no longer waits once it ends.
+	ctx     context.Context
 	replied chan pcLinkBody
 	// timeout fires when the app didn't reply in time, but not once a command that it was about to run started.
 	timeout  *time.Timer
@@ -255,7 +258,8 @@ func (links *pcLinks) poll(ctx context.Context, owner string, body pcLinkBody) (
 	}
 	count, size := 0, 0
 	for count < min(len(link.queue), pcPollMessages) {
-		if size += len(link.queue[count].Message); count > 0 && size > pcPollBytes {
+		encoded, _ := json.Marshal(link.queue[count])
+		if size += len(encoded); count > 0 && size > pcPollBytes {
 			break
 		}
 		count++
@@ -322,11 +326,11 @@ func (links *pcLinks) remapUse(from, to string, remap func()) {
 	}
 }
 
-// route finds the link for a message of an agent connection in session, whose parents are by session key, and returns
-// it with the session key to send. The link is that of the browser where session was last used, or else the nearest
-// of its parents. A connection stays on the link of its first message, which opens it, so that the desktop app sees
-// all its messages, and with that message's session, which resolve finds where a new one moved. A request never goes
-// to another link.
+// route finds the link for a command, or a message of an agent connection, in session, whose parents are by session
+// key, and returns it with the session key to send. The link is that of the browser where session was last used, or
+// else the nearest of its parents. A connection stays on the link of its first message, which opens it, so that the
+// desktop app sees all its messages, and with that message's session, which resolve finds where a new one moved. A
+// request never goes to another link.
 func (links *pcLinks) route(parents map[string]string, session, connection string, open bool, resolve func(string) string) (*pcLink, string, error) {
 	links.mu.Lock()
 	defer links.mu.Unlock()
@@ -334,9 +338,29 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 	if pinned {
 		session = resolve(pin.session)
 	}
-	link, err := links.linkFor(parents, session)
-	if err != nil {
-		return nil, "", err
+	use, used := links.uses[session]
+	for key, step := session, 0; !used && step < 8; step++ {
+		if key = parents[key]; key == "" {
+			break
+		}
+		use, used = links.uses[key]
+	}
+	link := links.linkOf(use.owner)
+	if !used || link == nil {
+		name, linked := links.names[use.owner]
+		switch {
+		case !used && len(links.byID) == 0:
+			return nil, "", errNoPCLink
+		case !used:
+			return nil, "", errPCUnused
+		case !linked:
+			return nil, "", errPCNoAccess
+		}
+		return nil, "", fmt.Errorf("this session was last used on %s, where the Gripi desktop app isn't connected for PC access; ask the user to open the app there, or to open the session in the desktop app on the computer that should do this, and click in it", cmp.Or(name, "the user's computer"))
+	}
+	// A command has no connection to keep on the link.
+	if connection == "" {
+		return link, session, nil
 	}
 	switch {
 	case pinned && open:
@@ -367,39 +391,6 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 	return link, session, nil
 }
 
-// routeSession finds the link for a request in session, whose parents are by session key, as route does for an agent
-// connection's first message.
-func (links *pcLinks) routeSession(parents map[string]string, session string) (*pcLink, error) {
-	links.mu.Lock()
-	defer links.mu.Unlock()
-	return links.linkFor(parents, session)
-}
-
-// linkFor returns the link of the browser where session was last used, or else the nearest of its parents, or why
-// there is none. Callers hold mu.
-func (links *pcLinks) linkFor(parents map[string]string, session string) (*pcLink, error) {
-	use, used := links.uses[session]
-	for key, step := session, 0; !used && step < 8; step++ {
-		if key = parents[key]; key == "" {
-			break
-		}
-		use, used = links.uses[key]
-	}
-	if link := links.linkOf(use.owner); used && link != nil {
-		return link, nil
-	}
-	name, linked := links.names[use.owner]
-	switch {
-	case !used && len(links.byID) == 0:
-		return nil, errNoPCLink
-	case !used:
-		return nil, errPCUnused
-	case !linked:
-		return nil, errPCNoAccess
-	}
-	return nil, fmt.Errorf("this session was last used on %s, where the Gripi desktop app isn't connected for PC access; ask the user to open the app there, or to open the session in the desktop app on the computer that should do this, and click in it", cmp.Or(name, "the user's computer"))
-}
-
 // ask queues a request of an agent connection, or a command, in a session for link and waits for its reply. When the
 // reply doesn't come in time, or ctx ends first, the link gets a cancel of the request. session gives the session's key
 // while remapUse waits, so that Gripi shows the request by the key that the session has, also when Pi saved a new one
@@ -416,7 +407,7 @@ func (links *pcLinks) ask(ctx context.Context, link *pcLink, session func() stri
 		return pcLinkBody{}, errPCClosed
 	}
 	replied := make(chan pcLinkBody, 1)
-	waiter := &pcWaiter{replied: replied, timeout: time.NewTimer(PCReplyTimeout), approval: pcApproval{ID: message.ID, session: session(), kind: message.Type}}
+	waiter := &pcWaiter{ctx: ctx, replied: replied, timeout: time.NewTimer(PCReplyTimeout), approval: pcApproval{ID: message.ID, session: session(), kind: message.Type}}
 	defer waiter.timeout.Stop()
 	link.waiting[message.ID] = waiter
 	link.send(message)
@@ -478,9 +469,12 @@ func (links *pcLinks) status(owner string, status pcLinkBody) (int, *pcApproval)
 	case !waiting:
 		return http.StatusNotFound, nil
 	case status.Starting:
-		// The app runs the command only on this answer, so a command that runs no longer has a timeout or a Cancel.
+		// The app runs the command only on this answer, so it is no once gripi stopped waiting, also before ask took the
+		// request away. A command that runs has no timeout or Cancel.
+		if waiter.approval.kind != "run" || waiter.ctx.Err() != nil || !waiter.timeout.Stop() {
+			return http.StatusNotFound, nil
+		}
 		waiter.asking, waiter.asked, waiter.started = false, true, true
-		waiter.timeout.Stop()
 		return http.StatusOK, nil
 	case !status.Asking:
 		waiter.asking, waiter.asked = false, true
@@ -800,12 +794,7 @@ func (app *application) pcSSHAgent(response http.ResponseWriter, request *http.R
 		writeJSON(response, struct{}{})
 		return
 	}
-	reply, ok := app.askPC(response, request, session, pcMessage{Type: "ssh", Connection: connection, Message: message}, func(parents map[string]string) (*pcLink, string, error) {
-		return app.pcLinks.route(parents, session, connection, open, func(pinned string) string {
-			resolved, _, _ := app.resolveOwnedPendingPath(request, pinned)
-			return resolved
-		})
-	})
+	reply, ok := app.askPC(response, request, session, open, pcMessage{Type: "ssh", Connection: connection, Message: message})
 	if ok {
 		writeJSON(response, map[string][]byte{"message": reply.Message})
 	}
@@ -835,10 +824,7 @@ func (app *application) pcRun(response http.ResponseWriter, request *http.Reques
 	if !ok {
 		return
 	}
-	reply, ok := app.askPC(response, request, session, pcMessage{Type: "run", Argv: argv, CWD: cwd}, func(parents map[string]string) (*pcLink, string, error) {
-		link, err := app.pcLinks.routeSession(parents, session)
-		return link, session, err
-	})
+	reply, ok := app.askPC(response, request, session, false, pcMessage{Type: "run", Argv: argv, CWD: cwd})
 	switch {
 	case !ok:
 	case reply.Result == nil:
@@ -864,15 +850,19 @@ func (app *application) pcSession(response http.ResponseWriter, request *http.Re
 	return session, true
 }
 
-// askPC sends a request of gripi pc in session over the link that route finds by the sessions' parents, with the
-// session key that route gives, and returns the desktop app's reply, or writes why there is none.
-func (app *application) askPC(response http.ResponseWriter, request *http.Request, session string, message pcMessage, route func(parents map[string]string) (*pcLink, string, error)) (pcLinkBody, bool) {
+// askPC sends a request of gripi pc in session, which open marks as an agent connection's first message, to the
+// computer that route finds, and returns the desktop app's reply, or writes why there is none.
+func (app *application) askPC(response http.ResponseWriter, request *http.Request, session string, open bool, message pcMessage) (pcLinkBody, bool) {
 	parents, err := app.gatewayState.SessionParents()
 	if err != nil {
 		writeInternalError(response, "read session parents", err)
 		return pcLinkBody{}, false
 	}
-	link, key, err := route(parents)
+	resolve := func(key string) string {
+		resolved, _, _ := app.resolveOwnedPendingPath(request, key)
+		return resolved
+	}
+	link, key, err := app.pcLinks.route(parents, session, message.Connection, open, resolve)
 	if err != nil {
 		writeJSONStatus(response, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return pcLinkBody{}, false
@@ -885,11 +875,7 @@ func (app *application) askPC(response http.ResponseWriter, request *http.Reques
 	if found, ok := app.sessionStore.Session(session); ok {
 		message.SessionName = agent.NotificationPreview(found.DisplayName)
 	}
-	displayed := func() string {
-		resolved, _, _ := app.resolveOwnedPendingPath(request, session)
-		return resolved
-	}
-	reply, err := app.pcLinks.ask(request.Context(), link, displayed, message)
+	reply, err := app.pcLinks.ask(request.Context(), link, func() string { return resolve(session) }, message)
 	switch {
 	case request.Context().Err() != nil:
 	case errors.Is(err, errPCTimeout):

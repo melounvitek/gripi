@@ -24,8 +24,9 @@ const MAX_COMMAND_WORDS = 256;
 // As the dialog shows a command, which must stay readable there.
 const MAX_COMMAND_LENGTH = 4096;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
-// After SIGTERM, which lets a command such as Git remove its lock files, before SIGKILL.
+// After SIGTERM, which lets a command such as Git remove its lock files, before SIGKILL, and sooner as the app quits.
 const KILL_DELAY_MS = 5 * 1000;
+const QUIT_KILL_DELAY_MS = 1000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // Longer than the gateway's 25-second link poll.
 const REQUEST_TIMEOUT_MS = 40 * 1000;
@@ -47,6 +48,8 @@ function createPcAccess({
 }) {
   const { createConnectionGuard, findKnownHost, fingerprint, keyType } = sshAgentGuard;
   const gateways = new Map();
+  // The commands that run, by the promise of their end, with what signals their process groups.
+  const commands = new Map();
   let approvalTurn = Promise.resolve();
   let waitingApprovals = 0;
 
@@ -71,8 +74,12 @@ function createPcAccess({
     await dropLink(entry, entry.link);
   }
 
+  // The app quits before SIGKILL's 5 seconds, so commands that outlive SIGTERM for a second get it at once.
   async function stopAll() {
-    await Promise.all([...gateways.keys()].map(stop));
+    const stopped = Promise.all([...gateways.keys()].map(stop));
+    await Promise.race([Promise.all(commands.keys()), sleep(QUIT_KILL_DELAY_MS)]);
+    for (const kill of commands.values()) kill("SIGKILL");
+    await stopped;
   }
 
   async function runLink(entry) {
@@ -328,10 +335,13 @@ function createPcAccess({
       };
       let failure;
       signal.addEventListener("abort", end, { once: true });
+      const closed = new Promise((close) => child.on("close", close));
+      commands.set(closed, kill);
       child.on("error", (error) => {
         failure ??= error;
       });
       child.on("close", (code, name) => {
+        commands.delete(closed);
         signal.removeEventListener("abort", end);
         if (failure) return reject(new Error(`could not run the command on the PC: ${failure.message}`));
         const [stdout, stderr] = outputs.map((output) => Buffer.concat(output.chunks).toString("base64"));
@@ -486,7 +496,8 @@ function capture(stream) {
     const kept = chunk.subarray(0, MAX_OUTPUT_BYTES - output.size);
     output.truncated ||= kept.length < chunk.length;
     output.size += kept.length;
-    output.chunks.push(kept);
+    // An empty view would still keep the chunk.
+    if (kept.length) output.chunks.push(kept);
   });
   return output;
 }

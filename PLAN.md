@@ -133,7 +133,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - HTTPS, or loopback without a trusted forwarded scheme.
 
   Without them, or in multi-user mode, or with access approval disabled, the answer is 403 `{"error"}`.
-- `POST /pc/link`, body `{"link": "<id>", "open": true}` for a link's first poll and `{"link": "<id>"}` after, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). A poll carries at most 64 messages and 2 MiB of agent messages, and the rest wait for the next one. Another link polling within 35 s (`PCLinkStale`) gets 409, and so does a poll without `open` of a link that the gateway never had or already ended (a restart, going stale, a close or `EndPCLink`). When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
+- `POST /pc/link`, body `{"link": "<id>", "open": true}` for a link's first poll and `{"link": "<id>"}` after, answers `200 {"messages": [...]}` as soon as messages are queued, or empty after 25 s (`PCLinkPoll`). A poll carries at most 64 messages and 2 MiB of agent messages, and the rest wait for the next one. (Phase 4: at most 4 MiB of the messages' JSON, but a single message may have more.) Another link polling within 35 s (`PCLinkStale`) gets 409, and so does a poll without `open` of a link that the gateway never had or already ended (a restart, going stale, a close or `EndPCLink`). When the link ends (closed, or `EndPCLink` before the gateway drains on shutdown), an open poll gets 503, and so do new polls after shutdown began.
 - `POST /pc/link/reply`, body `{"link", "id", "message": "<base64>"}` or `{"link", "id", "error": "<text>"}`, answers `200 {}`, 409 when the link isn't the current one, or 404 for an unknown request (already cancelled or timed out).
 - `POST /pc/link/close`, body `{"link"}`, releases the link if it is the current one, and fails its waiting requests with 503.
 
@@ -391,7 +391,7 @@ When the user is on the phone and a computer asks for approval, the phone must s
 
 **The race with Cancel.** The user decided that the desktop confirms with the gateway right before it spawns.
 - After the dialog and polkit, still in the approval turn, the app posts `POST /pc/link/status` with `{link, id, starting: true}`, and spawns only on 200.
-- The gateway answers 200 only while the request's waiter is live: not cancelled, timed out, or ended by gripi or the link's end. From then on:
+- The gateway answers 200 only for a command whose waiter is live: not cancelled, timed out, or ended by gripi or the link's end, also when gripi's request ended or the timeout fired a moment before the gateway removed the waiter. From then on:
   - the waiter no longer asks, as after `asking: false`, so the line and Cancel go;
   - a browser Cancel gets 409 "The command already runs.", never a cancel;
   - the waiter waits for the reply without `PCReplyTimeout`, as a command may run long. gripi's end or the link's still end it, and the app then kills the command.
@@ -409,6 +409,7 @@ When the user is on the phone and a computer asks for approval, the phone must s
 - Desktop → gateway:
   - `POST /pc/link/reply` with `{"link", "id", "result": {"exit_code", "stdout", "stderr", "truncated"}}` or `{"link", "id", "error"}`. A reply's body may be up to 48 MiB, for 16 MiB per output in base64.
   - `POST /pc/link/status` may carry `"starting": true`, as above.
+- A poll carries at most 4 MiB of its messages' JSON, but a single message may have more: a command's words, which JSON may escape to 6 times their size, take up to about 6 MiB, and the desktop reads 8 MiB.
 - The Push says "Approve on laptop: run a command", while the line shows the command.
 
 **Desktop:**
@@ -421,7 +422,7 @@ When the user is on the phone and a computer asks for approval, the phone must s
 - **The runner** spawns the resolved path with the other words, in the folder, with no shell, `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true` and the app's own environment.
   - It keeps 16 MiB of each output and drops the rest, with `truncated`.
   - The exit code is the command's, or 128 plus the signal that killed it.
-  - A cancel, a lost link or turning access off sends SIGTERM to the process group, and SIGKILL 5 s later, so that Git can remove its lock files first.
+  - A cancel, a lost link or turning access off sends SIGTERM to the process group, and SIGKILL 5 s later, so that Git can remove its lock files first. Quitting, which waits at most 2 s, sends SIGKILL to the commands still running a second after SIGTERM.
   - When the result's reply fails, such as a large one on a slow uplink, it sends an error instead, as gripi pc run would otherwise wait for good.
 
 **Workers:** both socket routes go into `workerRoutes`. `validOwnedSessionPath` checks the requesting session's placement with `reachesSession`, and routing then walks main's session keys, so a sub-session on a worker follows its parent on main.

@@ -14,30 +14,78 @@ import (
 )
 
 // The desktop app drops a link whose poll carries more than 64 messages, and reads a poll's JSON only up to 8 MiB, so
-// a poll carries at most 64 messages and 2 MiB of agent messages, and the others wait for the next one.
-func TestPCLinkPollCarriesAtMost64MessagesAnd2MiBOfAgentMessages(t *testing.T) {
+// a poll carries at most 64 messages and 4 MiB of their JSON, but for a single message, and the others wait for the
+// next one.
+func TestPCLinkPollCarriesAtMost64MessagesAnd4MiBOfTheirJSON(t *testing.T) {
 	poll := PCLinkPoll
 	PCLinkPoll = 10 * time.Millisecond
 	t.Cleanup(func() { PCLinkPoll = poll })
+	// The longest command that the gateway takes, of words that JSON escapes most.
+	argv := make([]string, pcRunWords)
+	for index := range argv {
+		argv[index] = strings.Repeat("<", pcRunWordBytes)
+	}
 	for _, queued := range []struct {
-		count, size int
-		polls       []int
-	}{{65, 1, []int{64, 1}}, {9, pcMessageLimit, []int{8, 1}}} {
+		name    string
+		count   int
+		message pcMessage
+		polls   []int
+	}{
+		{"small messages", 65, pcMessage{Type: "ssh", Message: make([]byte, 1)}, []int{64, 1}},
+		{"agent messages of 256 KiB", 13, pcMessage{Type: "ssh", Message: make([]byte, pcMessageLimit)}, []int{11, 2}},
+		{"the longest commands", 2, pcMessage{Type: "run", Argv: argv, CWD: "/" + strings.Repeat("<", pcRunWordBytes-1)}, []int{1, 1}},
+	} {
 		links := &pcLinks{}
 		if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
 			t.Fatal(err)
 		}
 		links.mu.Lock()
 		for range queued.count {
-			links.byID["app"].send(pcMessage{Type: "ssh", Message: make([]byte, queued.size)})
+			links.byID["app"].send(queued.message)
 		}
 		links.mu.Unlock()
 
 		for _, want := range queued.polls {
 			messages, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app"})
-			if err != nil || len(messages) != want {
-				t.Fatalf("poll of %d messages of %d bytes = %d messages (%v), want %d", queued.count, queued.size, len(messages), err, want)
+			encoded, _ := json.Marshal(map[string][]pcMessage{"messages": messages})
+			if err != nil || len(messages) != want || len(encoded) > 8<<20 {
+				t.Fatalf("poll of %d %s = %d messages in %d bytes (%v), want %d", queued.count, queued.name, len(messages), len(encoded), err, want)
 			}
+		}
+	}
+}
+
+// The desktop app runs a command only once the gateway says that gripi pc run still waits for it, so the gateway says
+// no once gripi's request ended or timed out, also before the gateway took the request away, and for other requests.
+func TestACommandStartsOnlyWhileGripiWaitsForIt(t *testing.T) {
+	poll := PCLinkPoll
+	PCLinkPoll = 10 * time.Millisecond
+	t.Cleanup(func() { PCLinkPoll = poll })
+	links := &pcLinks{}
+	if _, err := links.poll(context.Background(), "owner", pcLinkBody{Link: "app", Open: true}); err != nil {
+		t.Fatal(err)
+	}
+	ended, end := context.WithCancel(context.Background())
+	end()
+	timedOut := time.NewTimer(0)
+	<-timedOut.C
+	for _, waiter := range []struct {
+		name   string
+		ctx    context.Context
+		kind   string
+		timer  *time.Timer
+		status int
+	}{
+		{"a command", context.Background(), "run", time.NewTimer(time.Minute), http.StatusOK},
+		{"an SSH request", context.Background(), "ssh", time.NewTimer(time.Minute), http.StatusNotFound},
+		{"a command whose gripi ended", ended, "run", time.NewTimer(time.Minute), http.StatusNotFound},
+		{"a command that timed out", context.Background(), "run", timedOut, http.StatusNotFound},
+	} {
+		links.mu.Lock()
+		links.byID["app"].waiting["request"] = &pcWaiter{ctx: waiter.ctx, timeout: waiter.timer, approval: pcApproval{kind: waiter.kind}}
+		links.mu.Unlock()
+		if status, _ := links.status("owner", pcLinkBody{Link: "app", ID: "request", Starting: true}); status != waiter.status {
+			t.Fatalf("starting %s = %d, want %d", waiter.name, status, waiter.status)
 		}
 	}
 }
