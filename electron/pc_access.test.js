@@ -85,6 +85,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
       if (path !== "/pc/link") {
         harness.posts.push({ path, body });
         if (harness.offline) return Promise.reject(Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" }));
+        if (harness.respond?.(path)) return Promise.resolve(harness.respond(path));
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
         if (body.starting && starting === "late") return new Promise((resolve) => { harness.started = () => resolve({ status: 200, body: {} }); });
         if (body.starting && starting === "held") return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
@@ -691,6 +692,19 @@ test("stops sending a reply that gets no answer once the gateway refuses to resu
   assert.equal(h.replies().length, 1);
 });
 
+test("a reply or status that the gateway refuses, as it no longer knows the link, loses the link at once", async (t) => {
+  const h = setup(t);
+  const link = h.link();
+  await h.deliver(ssh("1", sign()));
+
+  h.respond = (path) => path === "/pc/link/reply" && { status: 409, body: { error: "the link is not open" } };
+  await h.deliver(ssh("2", LIST, { connection: "c2" }));
+
+  assert.equal(h.prompts[0].signal.aborted, true);
+  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: /pc/link/reply got HTTP 409: the link is not open"]);
+});
+
 const failedPolls = [
   ["a refusal", 60 * 1000, (poll) => poll.resolve({ status: 403, body: { error: "refused\u001b[2J" } }), "the poll got HTTP 403: refused\\u001b[2J"],
   [
@@ -699,7 +713,7 @@ const failedPolls = [
     (poll) => poll.resolve({ status: 409, body: { error: "the link is not open" } }),
     "the poll got HTTP 409: the link is not open"
   ],
-  ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null }), "the poll got HTTP 502"],
+  ["a server error", 1000, (poll) => poll.resolve({ status: 502, body: null }), "the poll got HTTP 502 without a JSON object"],
   ["a malformed answer", 1000, (poll) => poll.resolve({ status: 200, body: { messages: {} } }), "the poll's answer is malformed"],
   ["a poll of more than 64 messages", 1000, (poll) => poll.resolve({
     status: 200,
@@ -970,6 +984,22 @@ for (const [what, options, unrunnable] of unanswered) {
     assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the reply to a command that may have started got no answer: the server did not answer in time"]);
   });
 }
+
+// Unlike the gateway's own, which say that the request no longer waits, or that the link is gone.
+test("a link whose answer to a command that may have started gets a 404 page from something else on the way ends", async (t) => {
+  const h = setup(t);
+  const link = h.link();
+
+  h.respond = (path) => path === "/pc/link/reply" && { status: 404, body: null };
+  await h.deliver(run("1", ["true"]));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
+
+  assert.deepEqual(h.replies().map((reply) => Object.keys(reply).at(-1)), ["result", "error"]);
+  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
+  assert.deepEqual(h.warnings(), ["PC access: lost the link to home-server: the reply to a command that may have started got HTTP 404 without a JSON object"]);
+});
 
 test("a link keeps refusals that don't reach Gripi before the server may have let the command start", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -1257,6 +1287,18 @@ async function listen(t, handler) {
   });
   return `http://127.0.0.1:${server.address().port}`;
 }
+
+// The messages of a cut 200 are lost, as in a network drop, but a refusal stays one.
+test("linkRequest takes a status other than 200 whose body is cut short as an answer, unlike a cut 200", async (t) => {
+  const origin = await listen(t, (request, response) => {
+    request.resume();
+    response.writeHead(request.url === "/refused" ? 409 : 200, { "Content-Type": "application/json", "Content-Length": 100 });
+    response.write("{\"error\":", () => response.socket.destroy());
+  });
+
+  assert.deepEqual(await linkRequest(new URL("/refused", origin), {}), { status: 409, body: null });
+  await assert.rejects(linkRequest(new URL("/messages", origin), {}));
+});
 
 test("linkRequest posts JSON with the link header and cookies, and doesn't follow redirects", async (t) => {
   const received = [];

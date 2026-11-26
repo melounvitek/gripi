@@ -201,15 +201,17 @@ function createPcAccess({
 
   // A request aborted by a cancel, a closed connection or a stopped or lost link gets no reply, as nobody waits for it.
   function reply(entry, link, id, fields, signal) {
-    return post(entry, "/pc/link/reply", { link: link.id, id, ...fields }, signal);
+    return post(entry, link, "/pc/link/reply", { id, ...fields }, signal);
   }
 
-  // Sends a request of a link, and again after each of RETRY_DELAYS_MS while it gets no answer, unless signal ends it.
-  // Returns the server's answer, or the error of the last try.
-  async function post(entry, path, body, signal) {
+  // Sends a request of a link, and again after each of RETRY_DELAYS_MS while it gets no answer, unless signal ends it. A
+  // refusal of the gateway, which no longer knows the link, loses it, so that nothing more is sent on it. Returns the
+  // server's answer, or the error of the last try.
+  async function post(entry, link, path, fields, signal) {
     for (let attempt = 0; ; attempt++) {
       if (signal.aborted) return { error: signal.reason };
-      const answer = await request(entry.gateway, path, body, signal).catch((error) => ({ error }));
+      const answer = await request(entry.gateway, path, { link: link.id, ...fields }, signal).catch((error) => ({ error }));
+      if (answer.status === 409) loseLink(entry, link, `${path} got ${answered(answer)}`);
       if (!answer.error || attempt === RETRY_DELAYS_MS.length) return answer;
       await sleep(RETRY_DELAYS_MS[attempt], signal);
     }
@@ -329,7 +331,7 @@ function createPcAccess({
     let starting = false;
     const answerWith = async (fields) => {
       const answer = await send(fields);
-      if (starting && !signal.aborted && !acknowledged(answer) && ![404, 409].includes(answer.status)) {
+      if (starting && !signal.aborted && !answeredWith(answer, 200, 404, 409)) {
         loseLink(entry, link, `the reply to a command that may have started got ${answered(answer)}`);
       }
     };
@@ -357,8 +359,8 @@ function createPcAccess({
         // it, so the server hears it before that dialog shows.
         approved: async (_answer, approval) => {
           starting = true;
-          const started = await post(entry, "/pc/link/status", { link: link.id, id: message.id, starting: true }, approval);
-          if (!acknowledged(started)) return "not run on the PC: Gripi didn't confirm that it may start";
+          const started = await post(entry, link, "/pc/link/status", { id: message.id, starting: true }, approval);
+          if (!answeredWith(started, 200)) return "not run on the PC: Gripi didn't confirm that it may start";
           if (!root) return null;
           if (approval.aborted) return "denied on the PC";
           running = runCommand(executable, args, folder, approval, pkexec);
@@ -374,7 +376,7 @@ function createPcAccess({
       if (signal.aborted) return;
       const failure = root && pkexecFailure(result, executable, run.stopped);
       if (failure) return await answerWith({ error: failure });
-      if (acknowledged(await send({ result }))) return;
+      if (answeredWith(await send({ result }), 200)) return;
       await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
     } catch (error) {
       await answerWith({ error: error.message });
@@ -437,7 +439,7 @@ function createPcAccess({
   // Tells the server whether the PC asks the user to approve a request. The dialog doesn't wait for it, and the server
   // keeps a start that comes after the stop from showing.
   function status(entry, link, id, fields, signal) {
-    post(entry, "/pc/link/status", { link: link.id, id, ...fields }, signal);
+    post(entry, link, "/pc/link/status", { id, ...fields }, signal);
   }
 
   // Runs one approval at a time, from its dialog to the end of polkit's, if any, so that one never covers the other.
@@ -521,16 +523,17 @@ function validAgentMessage(text) {
   return body.length > 0 && body.length <= MAX_AGENT_MESSAGE_BYTES && body.toString("base64") === text;
 }
 
-// Whether the gateway took a request of a link, which it says in JSON, unlike an answer too large to read or from
-// something else on the way.
-function acknowledged({ status, body }) {
-  return status === 200 && typeof body === "object" && body !== null;
+// Whether the gateway answered a request of a link with one of statuses. It answers with a JSON object, unlike something
+// else on the way, while an answer too large to read or cut short has none.
+function answeredWith({ status, body }, ...statuses) {
+  return statuses.includes(status) && typeof body === "object" && body !== null;
 }
 
 // Says what a request of a link got, for the log: the gateway's status and error, or the request's error.
 function answered({ status, body, error }) {
   if (error) return `no answer: ${error.code || error.message}`;
-  return `HTTP ${status}${typeof body?.error === "string" ? `: ${escapeForDisplay(body.error.slice(0, 200))}` : ""}`;
+  if (typeof body !== "object" || body === null) return `HTTP ${status} without a JSON object`;
+  return `HTTP ${status}${typeof body.error === "string" ? `: ${escapeForDisplay(body.error.slice(0, 200))}` : ""}`;
 }
 
 function connectionKey(message) {
@@ -551,7 +554,11 @@ function linkRequest(url, body, { cookie, signal } = {}) {
   let timer;
   return new Promise((resolve, reject) => {
     const client = url.protocol === "https:" ? https : http;
+    let status;
+    // A status other than 200 is an answer also when its body is cut short, unlike a 200, whose messages are lost.
+    const fail = (error) => (status && status !== 200 ? resolve({ status, body: null }) : reject(error));
     const request = client.request(url, { method: "POST", headers, signal }, (response) => {
+      status = response.statusCode;
       const chunks = [];
       let size = 0;
       response.on("data", (chunk) => {
@@ -564,7 +571,7 @@ function linkRequest(url, body, { cookie, signal } = {}) {
           request.destroy();
         }
       });
-      response.on("error", reject);
+      response.on("error", fail);
       response.on("end", () => {
         try {
           resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
@@ -575,7 +582,7 @@ function linkRequest(url, body, { cookie, signal } = {}) {
     });
     // A deadline for the whole request, as an idle timeout wouldn't stop an answer that keeps trickling in.
     timer = setTimeout(() => request.destroy(new Error("the server did not answer in time")), REQUEST_TIMEOUT_MS);
-    request.on("error", reject);
+    request.on("error", fail);
     request.end(payload);
   }).finally(() => clearTimeout(timer));
 }
