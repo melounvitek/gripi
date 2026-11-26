@@ -48,8 +48,8 @@ function createPcAccess({
 }) {
   const { createConnectionGuard, findKnownHost, fingerprint, keyType } = sshAgentGuard;
   const gateways = new Map();
-  // The commands that run, by the promise of their end, with what signals their process groups.
-  const commands = new Map();
+  // What signals the process groups of the commands that were stopped, until they get SIGKILL.
+  const stopping = new Set();
   let approvalTurn = Promise.resolve();
   let waitingApprovals = 0;
 
@@ -74,11 +74,12 @@ function createPcAccess({
     await dropLink(entry, entry.link);
   }
 
-  // The app quits before SIGKILL's 5 seconds, so commands that outlive SIGTERM for a second get it at once.
+  // The app quits before SIGKILL's 5 seconds, so the process groups of stopped commands get it after a second.
   async function stopAll() {
     const stopped = Promise.all([...gateways.keys()].map(stop));
-    await Promise.race([Promise.all(commands.keys()), sleep(QUIT_KILL_DELAY_MS)]);
-    for (const kill of commands.values()) kill("SIGKILL");
+    if (stopping.size) await sleep(QUIT_KILL_DELAY_MS);
+    for (const kill of stopping) kill("SIGKILL");
+    stopping.clear();
     await stopped;
   }
 
@@ -88,7 +89,7 @@ function createPcAccess({
     while (!signal.aborted) {
       const link = entry.link;
       // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart.
-      const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()) };
+      const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()), run: true };
       link.opened = true;
       let response;
       try {
@@ -307,10 +308,12 @@ function createPcAccess({
       if (signal.aborted) return;
 
       const result = await runCommand(executable, args, folder, signal);
-      if (signal.aborted) return;
-      // gripi pc run waits for the result however long the command ran, so it needs an answer, if only an error.
-      const sent = await request(entry.gateway, "/pc/link/reply", { link: link.id, id: message.id, result }, signal).catch(() => null);
-      if (sent?.status !== 200) await answerWith({ error: "the command ran on the PC, but its result could not reach Gripi" });
+      // gripi pc run waits for the result however long the command ran, so it needs an answer: an error when the
+      // result can't reach Gripi, and the link's end when neither can.
+      const send = (fields) => request(entry.gateway, "/pc/link/reply", { link: link.id, id: message.id, ...fields }, signal).then(({ status }) => status, () => null);
+      if (signal.aborted || await send({ result }) === 200) return;
+      const status = await send({ error: "the command ran on the PC, but its result could not reach Gripi" });
+      if (!signal.aborted && ![200, 404, 409].includes(status)) link.controller.abort();
     } catch (error) {
       await answerWith({ error: error.message });
     }
@@ -329,19 +332,21 @@ function createPcAccess({
           // The group has ended, or never started.
         }
       };
+      // The group may outlive the command's first process, such as a process that it started in the background.
       const end = () => {
         kill("SIGTERM");
-        setTimeout(() => kill("SIGKILL"), KILL_DELAY_MS).unref();
+        stopping.add(kill);
+        setTimeout(() => {
+          kill("SIGKILL");
+          stopping.delete(kill);
+        }, KILL_DELAY_MS).unref();
       };
       let failure;
       signal.addEventListener("abort", end, { once: true });
-      const closed = new Promise((close) => child.on("close", close));
-      commands.set(closed, kill);
       child.on("error", (error) => {
         failure ??= error;
       });
       child.on("close", (code, name) => {
-        commands.delete(closed);
         signal.removeEventListener("abort", end);
         if (failure) return reject(new Error(`could not run the command on the PC: ${failure.message}`));
         const [stdout, stderr] = outputs.map((output) => Buffer.concat(output.chunks).toString("base64"));

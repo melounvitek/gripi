@@ -136,7 +136,7 @@ func pcDesktopOn(t *testing.T, address, token, name, link string, answer func(pc
 	poll := func(open bool) bool {
 		body := map[string]any{"link": link}
 		if open {
-			body["open"], body["name"] = true, name
+			body["open"], body["name"], body["run"] = true, name, true
 		}
 		status, polled := pcLinkSend(t, address, "/pc/link", body, asBrowser(token))
 		if status != http.StatusOK {
@@ -1283,6 +1283,21 @@ func TestPCRunRefusesACommandThatTheComputerCouldNotRunAsGiven(t *testing.T) {
 	}
 	if request := nextPCMessage(t, messages, "run"); len(request.Argv) != 2 {
 		t.Fatalf("the desktop app got %+v", request)
+	}
+}
+
+// A desktop app from before gripi pc run drops its commands, so the gateway refuses them at once rather than letting gripi
+// wait for nothing.
+func TestPCRunNeedsADesktopAppThatRunsCommands(t *testing.T) {
+	alpha, address := pcGateway(t)
+	gateway.PCLinkStale = time.Minute
+	if status, _ := pcLinkSend(t, address, "/pc/link", map[string]any{"link": "app", "open": true, "name": "laptop"}); status != http.StatusOK {
+		t.Fatalf("open poll = %d", status)
+	}
+	pcPresence(t, pcBrowserToken, alpha, true)
+
+	if code, _, stderr := runCLI("pc", "run", "--", "true"); code != 1 || stderr != "gripi pc: the gateway answered 503: the Gripi desktop app on laptop can't run commands; ask the user to update it\n" {
+		t.Fatalf("gripi pc run = %d, stderr %q", code, stderr)
 	}
 }
 

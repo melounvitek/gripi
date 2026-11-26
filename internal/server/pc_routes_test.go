@@ -265,7 +265,7 @@ func notifiesOnce(t *testing.T, route, form, summary, body string) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop"}); err != nil {
+	if _, err := app.pcLinks.poll(context.Background(), owners["laptop"], pcLinkBody{Link: "app", Open: true, Name: "laptop", Run: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range []string{"laptop", "phone"} {

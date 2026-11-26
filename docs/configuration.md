@@ -268,14 +268,14 @@ The command runs in the folder that `--cwd` names on your computer, which must e
 
 While your computer asks, every Gripi client that shows the session says so in the line above the editor, with the command and **cancel**, as for a login. Your other devices with [Web Push notifications](#web-push-notifications) on get "Approve on laptop: run a command", without the command, which a locked screen would show. Right before your computer runs an approved command, it checks with the gateway that the command wasn't cancelled meanwhile. So **cancel** refuses a command until then, and afterwards answers that it already runs: Gripi never reports a command that runs as cancelled.
 
-The commands go to the computer where you last used the session, as logins do. They need only the first step of the logins’ setup, PC access on in the desktop app, and the same gateway.
+The commands go to the computer where you last used the session, as logins do. They need only the first step of the logins’ setup, PC access on in the desktop app, and the same gateway, and a desktop app that knows `gripi pc run`: an older one gets refused at once, with a hint to update it.
 
 Limits:
 
 - An approved command can do whatever you can on your computer, and its output reaches the gateway and the agent. Read the command, and the file that runs, before you run it.
 - A process that the command starts in a process group of its own, such as with `setsid`, keeps running after the app ends the command.
 - A command has at most 256 words of up to 4096 bytes each, and the app refuses one that takes more than 4096 characters to show.
-- The app gives its output 40 seconds to reach the gateway once the command ends, which a slow upload of much output may take longer for. `gripi pc run` then fails, though the command ran, and says so.
+- The app gives its output 40 seconds to reach the gateway once the command ends, which a slow upload of much output may take longer for. `gripi pc run` then fails, though the command ran, and says so; when even that can't reach the gateway, the app's link to it ends, and `gripi pc run` fails with that.
 - Hermes stops a terminal command after 180 seconds unless its model sets a longer timeout, and the wait for your answer counts.
 
 ## Pinned session directories

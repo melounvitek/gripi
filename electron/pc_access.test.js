@@ -76,7 +76,7 @@ async function settle() {
   for (let round = 0; round < 5; round++) await new Promise(setImmediate);
 }
 
-function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan", starting = 200, lostResults = false } = {}) {
+function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan", starting = 200, lostResults = false, lostReplies = false } = {}) {
   const harness = { polls: [], posts: [], prompts: [], agents: [], spawned: [], auths: 0, time: 0 };
   harness.pc = createPcAccess({
     request(_gateway, path, body, signal) {
@@ -84,7 +84,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
         harness.posts.push({ path, body });
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
         if (body.starting) return Promise.resolve({ status: starting, body: {} });
-        if (lostResults && body.result) return Promise.reject(new Error("the server did not answer in time"));
+        if (lostResults && body.result || lostReplies && path === "/pc/link/reply") return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
       }
       return new Promise((resolve, reject) => {
@@ -180,7 +180,7 @@ test("opens each link with its first poll, which names the computer, and resumes
   const h = setup(t);
   const link = h.link();
 
-  assert.deepEqual(h.polls[0].body, { link, open: true, name: "laptop" });
+  assert.deepEqual(h.polls[0].body, { link, open: true, name: "laptop", run: true });
   await h.deliver();
   assert.deepEqual(h.polls[0].body, { link });
 
@@ -188,7 +188,7 @@ test("opens each link with its first poll, which names the computer, and resumes
   await expectPollAfter(t, h, 10 * 1000);
 
   assert.notEqual(h.link(), link);
-  assert.deepEqual(h.polls[0].body, { link: h.link(), open: true, name: "laptop" });
+  assert.deepEqual(h.polls[0].body, { link: h.link(), open: true, name: "laptop", run: true });
 });
 
 test("names the computer on one line of at most 64 characters", (t) => {
@@ -726,12 +726,13 @@ test("a cancel ends the command's process group, with SIGKILL 5 seconds after SI
   const h = setup(t);
   const script = (trap) => `${trap} sleep 30 & echo $!; wait`;
 
-  await h.deliver(run("1", ["sh", "-c", script("")]), run("2", ["sh", "-c", script("trap '' TERM;")]));
-  for (const count of [1, 2]) {
+  // One at a time, as the PC may ask in either order for requests that came together.
+  for (const [count, trap] of [[1, ""], [2, "trap '' TERM;"]]) {
+    await h.deliver(run(String(count), ["sh", "-c", script(trap)]));
     await h.prompted(count);
     await h.answer("run");
+    await h.until(() => h.spawned.length === count);
   }
-  await h.until(() => h.spawned.length === 2);
   const sleeps = await Promise.all(h.spawned.map(async ({ printed }) => Number(String((await printed)[0]))));
   await h.deliver({ type: "cancel", id: "1" }, { type: "cancel", id: "2" });
 
@@ -744,21 +745,22 @@ test("a cancel ends the command's process group, with SIGKILL 5 seconds after SI
   assert.deepEqual(h.replies(), []);
 });
 
-test("stopping all, as the app quits, kills at once the commands that outlive SIGTERM for a second", async (t) => {
+test("stopping all, as the app quits, kills the process groups of commands that outlive SIGTERM for a second", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = setup(t);
 
-  await h.deliver(run("1", ["sh", "-c", "trap '' TERM; sleep 30 & echo $!; wait"]));
+  // The shell ends on SIGTERM, but not a process that it started in the background, which keeps its group.
+  await h.deliver(run("1", ["sh", "-c", "sh -c \"trap '' TERM; exec sleep 30\" >/dev/null 2>&1 & echo $!; wait"]));
   await h.prompted(1);
   await h.answer("run");
   await h.until(() => h.spawned.length === 1);
   const sleep = Number(String((await h.spawned[0].printed)[0]));
 
   const stopping = h.pc.stopAll();
+  await h.spawned[0].closed;
   t.mock.timers.tick(1000);
   await stopping;
-  await h.spawned[0].closed;
-  assert.equal(ended(sleep), true);
+  await h.until(() => ended(sleep));
 });
 
 test("a result that can't reach the server becomes an error, as gripi pc run would wait for it for good", async (t) => {
@@ -769,6 +771,18 @@ test("a result that can't reach the server becomes an error, as gripi pc run wou
   await h.answer("run");
 
   assert.deepEqual((await h.replied(2)).at(-1), { link: h.link(), id: "1", error: "the command ran on the PC, but its result could not reach Gripi" });
+});
+
+test("a link that takes neither the result nor an error ends, which ends gripi pc run's wait", async (t) => {
+  const h = setup(t, { lostReplies: true });
+  const link = h.link();
+
+  await h.deliver(run("1", ["true"]));
+  await h.prompted(1);
+  await h.answer("run");
+  await h.until(() => h.posts.some(({ path }) => path === "/pc/link/close"));
+
+  assert.deepEqual(h.posts.at(-1), { path: "/pc/link/close", body: { link } });
 });
 
 test("a cancelled password check ends only once pkexec has exited", async () => {

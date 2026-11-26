@@ -409,6 +409,7 @@ When the user is on the phone and a computer asks for approval, the phone must s
 - Desktop → gateway:
   - `POST /pc/link/reply` with `{"link", "id", "result": {"exit_code", "stdout", "stderr", "truncated"}}` or `{"link", "id", "error"}`. A reply's body may be up to 48 MiB, for 16 MiB per output in base64.
   - `POST /pc/link/status` may carry `"starting": true`, as above.
+  - The open poll carries `"run": true`. A desktop app from before phase 4 drops a `run` message as malformed, and the gateway updates itself while the app doesn't, so the gateway refuses a command at once (503, "can't run commands; ask the user to update it") for a link without it.
 - A poll carries at most 4 MiB of its messages' JSON, but a single message may have more: a command's words, which JSON may escape to 6 times their size, take up to about 6 MiB, and the desktop reads 8 MiB.
 - The Push says "Approve on laptop: run a command", while the line shows the command.
 
@@ -423,7 +424,8 @@ When the user is on the phone and a computer asks for approval, the phone must s
   - It keeps 16 MiB of each output and drops the rest, with `truncated`.
   - The exit code is the command's, or 128 plus the signal that killed it.
   - A cancel, a lost link or turning access off sends SIGTERM to the process group, and SIGKILL 5 s later, so that Git can remove its lock files first. Quitting, which waits at most 2 s, sends SIGKILL to the commands still running a second after SIGTERM.
-  - When the result's reply fails, such as a large one on a slow uplink, it sends an error instead, as gripi pc run would otherwise wait for good.
+  - When the result's reply fails, such as a large one on a slow uplink, it sends an error instead, as gripi pc run would otherwise wait for good. When that fails too, it drops the link, which ends the wait.
+  - Quitting and turning access off track the process groups that got SIGTERM until their SIGKILL, also once the command's first process ended, as a process that it started in the background may still run.
 
 **Workers:** both socket routes go into `workerRoutes`. `validOwnedSessionPath` checks the requesting session's placement with `reachesSession`, and routing then walks main's session keys, so a sub-session on a worker follows its parent on main.
 

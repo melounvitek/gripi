@@ -90,13 +90,15 @@ type pcMessage struct {
 }
 
 // pcLinkBody is what the desktop app sends on its link: a poll or a close names the link, and a reply also a request
-// and its message, result or error. A link's first poll opens it, and names the computer. A status says whether the app
+// and its message, result or error. A link's first poll opens it, names the computer, and says whether the app runs
+// commands, which older ones don't. A status says whether the app
 // asks the user to approve a request, and while it does, what for, and for how many seconds more, or that it is about
 // to run a command that the user approved.
 type pcLinkBody struct {
 	Link      string      `json:"link"`
 	Open      bool        `json:"open"`
 	Name      string      `json:"name"`
+	Run       bool        `json:"run"`
 	ID        string      `json:"id"`
 	Message   []byte      `json:"message"`
 	Result    *SudoResult `json:"result"`
@@ -112,6 +114,8 @@ type pcLink struct {
 	id string
 	// owner is the browser that opened the link, as pushOwner gives it.
 	owner string
+	// runs is whether the desktop app runs commands.
+	runs  bool
 	polls int
 	// seen is when its last poll ended.
 	seen  time.Time
@@ -218,7 +222,7 @@ func (links *pcLinks) poll(ctx context.Context, owner string, body pcLinkBody) (
 		links.mu.Unlock()
 		return nil, errPCTaken
 	case link == nil:
-		link = &pcLink{id: body.Link, owner: owner, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]*pcWaiter)}
+		link = &pcLink{id: body.Link, owner: owner, runs: body.Run, queued: make(chan struct{}), gone: make(chan struct{}), waiting: make(map[string]*pcWaiter)}
 		if links.byID == nil {
 			links.byID, links.names = make(map[string]*pcLink), make(map[string]string)
 		}
@@ -358,7 +362,10 @@ func (links *pcLinks) route(parents map[string]string, session, connection strin
 		}
 		return nil, "", fmt.Errorf("this session was last used on %s, where the Gripi desktop app isn't connected for PC access; ask the user to open the app there, or to open the session in the desktop app on the computer that should do this, and click in it", cmp.Or(name, "the user's computer"))
 	}
-	// A command has no connection to keep on the link.
+	// A command has no connection to keep on the link. A desktop app that doesn't run commands would drop it.
+	if connection == "" && !link.runs {
+		return nil, "", fmt.Errorf("the Gripi desktop app on %s can't run commands; ask the user to update it", cmp.Or(links.names[link.owner], "the user's computer"))
+	}
 	if connection == "" {
 		return link, session, nil
 	}
