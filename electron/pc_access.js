@@ -225,6 +225,7 @@ function createPcAccess({
       },
       summary: `SSH login to ${host.names[0] || "a known host"} as ${login}`,
       answers: ["once", "grant"],
+      password: true,
       covered: granted,
       approved: (answer) => {
         if (answer === "grant" && !signal.aborted) link.grants.set(grantKey, now() + GRANT_MS);
@@ -233,9 +234,10 @@ function createPcAccess({
     });
   }
 
-  // Asks the user to approve a request in the approval turn, unless covered says that it needs no approval, and returns
-  // a refusal, or null once they approved it. approved runs in the turn once they did, and may still refuse it.
-  async function approve(entry, link, message, signal, { prompt, summary, answers, covered = () => false, approved }) {
+  // Asks the user to approve a request in the approval turn, unless covered says that it needs no approval, and with
+  // password, to confirm it in polkit's password dialog, and returns a refusal, or null once they approved it. approved
+  // runs in the turn once they did, and may still refuse it.
+  async function approve(entry, link, message, signal, { prompt, summary, answers, password = false, covered = () => false, approved }) {
     if (waitingApprovals >= MAX_WAITING_APPROVALS) return "denied on the PC: too many requests are waiting for approval there";
 
     const name = [...escapeForDisplay(message.session_name || message.session)];
@@ -258,10 +260,12 @@ function createPcAccess({
         if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
         if (!answers.includes(answer) || approval.aborted) return "denied on the PC";
 
-        const auth = await authenticate(approval);
-        if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
-        if (!auth.ok) return `denied on the PC: ${auth.reason}`;
-        if (approval.aborted) return "denied on the PC";
+        if (password) {
+          const auth = await authenticate(approval);
+          if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
+          if (!auth.ok) return `denied on the PC: ${auth.reason}`;
+          if (approval.aborted) return "denied on the PC";
+        }
         return await approved(answer, approval);
       } finally {
         clearTimeout(timer);
@@ -366,7 +370,7 @@ function createPcAccess({
     if (!signal.aborted) request(entry.gateway, "/pc/link/status", { link: link.id, id, ...fields }, signal).catch(() => {});
   }
 
-  // Runs one approval at a time, from its dialog to the end of polkit's, so that one never covers the other.
+  // Runs one approval at a time, from its dialog to the end of polkit's, if any, so that one never covers the other.
   async function inTurn(approve) {
     waitingApprovals += 1;
     const approval = approvalTurn.then(approve);

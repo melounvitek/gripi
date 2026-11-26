@@ -340,7 +340,8 @@ test("a command allowed on the computer runs there, and gives back its output an
   approve("run");
 
   expect(await ran).toEqual({ code: 3, stdout: `${folder}\n`, stderr: "err\n" });
-  expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command: `${which("sh")} -c "${script}"`, folder }, "password"]);
+  // Without polkit's password dialog, which only logins ask for.
+  expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command: `${which("sh")} -c "${script}"`, folder }]);
   await expect(line).toBeHidden();
 });
 

@@ -33,7 +33,7 @@ const pcHelp = `Usage:
 
 These use the user's computer, where the Gripi desktop app runs with
 File → Allow PC Access for This Server on. The user approves each use there,
-and enters their computer's password.
+and for an SSH login also enters their computer's password.
 
 gripi pc ssh runs a command on this machine, the gateway, with SSH_AUTH_SOCK
 pointing at the SSH agent of the user's computer. So ssh, and Git through it,

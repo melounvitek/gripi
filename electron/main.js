@@ -296,7 +296,7 @@ async function confirmPcAccessOptIn(gateway) {
     type: "warning",
     message: `Allow ${gateway.name} to use this computer?`,
     detail: [
-      "Agents on this server can then ask to use this computer's SSH keys, and to run commands here as you. Each use needs your approval here and your password.",
+      "Agents on this server can then ask to use this computer's SSH keys, and to run commands here as you. Each use needs your approval here, and each SSH login also your password. Anyone at this computer while it is unlocked can approve a command.",
       "The server sees every public key in your SSH agent, with its comment, and the output of the commands that you run for it.",
       "It works only while Gripi is open."
     ].join("\n\n"),

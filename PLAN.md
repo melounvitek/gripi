@@ -19,7 +19,8 @@ Agents in Gripi sessions on a gateway, which may run on another machine, can use
   - with access approval disabled, because `enforceBrowserAccess` then lets any client through;
   - over plain HTTP from anywhere but loopback, even with `GRIPI_ALLOW_INSECURE_REMOTE_HTTP`, because an on-path attacker could slip a signing request into a poll during a grant. The user's gateway is behind Tailscale Serve's HTTPS, which passes.
 - **The app owns approvals.** Approvals are native dialogs (`dialog.showMessageBox`) of the main process. The gateway's page takes no part, and nothing is added to `gateway_preload.js`.
-- **The OS asks for the password.** After the user approves a dialog, polkit's dialog confirms it is them, through `pkexec --disable-internal-agent /usr/bin/true`. Gripi never asks for the PC's password itself, so a fake prompt drawn by a compromised gateway page has nothing to imitate. The user agreed to this instead of sudo's own password prompt.
+- **The OS asks for the password.** After the user allows an SSH login, polkit's dialog confirms it is them, through `pkexec --disable-internal-agent /usr/bin/true`. For a root command, polkit's dialog of `pkexec` itself is that step. Gripi never asks for the PC's password itself, so a fake prompt drawn by a compromised gateway page has nothing to imitate. The user agreed to this instead of sudo's own password prompt.
+  - **Commands as the user ask no password** (user decision during phase 5). They start once the user clicks Run in the native dialog, which is what a compromised gateway or page can't do. The password would only stop someone else at the unlocked PC, and the user prefers less friction for commands as their own user. The docs name that tradeoff. SSH logins keep the password for now.
   - It follows polkit's policy for running programs as root. By default that asks for an admin password every time, which on the user's PC is their own.
   - A local polkit rule that skips the password skips it here too. The docs say so.
   - A dedicated polkit action would show a clearer message than "Authorize running '/usr/bin/true'", but needs root to install. → `TODO.md`.
@@ -65,7 +66,7 @@ As:       you            (as root: "As: root")
                  [Deny]  [Run]
 ```
 
-- **After approval:** each Allow or Run is followed by the polkit password dialog. For root, that dialog is the one that runs the command.
+- **After approval:** each Allow is followed by the polkit password dialog. A command as the user runs on Run. For root, polkit's dialog is the one that runs the command.
 - **The 5-minute grant** covers this link, session, key, host key and login, for 5 minutes from approval. It is kept only in the app's memory.
   - The docs say plainly, next to the option, that during those 5 minutes anything on the gateway that claims this session can use the key on that host without asking. Session names can be faked, as with `gripi sudo`.
 - **Commands** are approved every time.
@@ -161,7 +162,7 @@ Each app process makes a fresh link ID per server, kept only in memory, so no wo
   - 64 messages per poll, and 256 requests in progress per link, counting refusals still being sent and the requests of closed connections until they end. A poll over either loses the link, checked for the whole batch before any of it starts, without replies;
   - session names cut to 200 characters for display, and logins over 256 bytes refused.
 - **The approval turn** lasts through polkit, until `pkexec` has exited, under one 2-minute deadline from when the dialog appears.
-- **Auth:** `pkexec --disable-internal-agent /usr/bin/true`. Exit 0 means polkit authorized it under local policy, and anything else, a cancel too, is a denial with its reason.
+- **Auth** (SSH logins only, since phase 5): `pkexec --disable-internal-agent /usr/bin/true`. Exit 0 means polkit authorized it under local policy, and anything else, a cancel too, is a denial with its reason.
 - **Runners:** `spawn` with no shell, `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true`, and the app's own environment, not the gateway's. With no terminal, `pkexec` fails closed without a polkit agent. A cancel kills the process group.
 - **Display:** control and bidirectional characters are escaped, as `shellWords` does.
 
@@ -391,7 +392,7 @@ When the user is on the phone and a computer asks for approval, the phone must s
 ## Running commands (phase 4)
 
 **The race with Cancel.** The user decided that the desktop confirms with the gateway right before it spawns.
-- After the dialog and polkit, still in the approval turn, the app posts `POST /pc/link/status` with `{link, id, starting: true}`, and spawns only on 200.
+- After the dialog, still in the approval turn, the app posts `POST /pc/link/status` with `{link, id, starting: true}`, and spawns only on 200. (Until phase 5, polkit's password dialog came between them.)
 - The gateway answers 200 only for a command whose waiter is live: not cancelled, timed out, or ended by gripi or the link's end, also when gripi's request ended or the timeout fired a moment before the gateway removed the waiter. From then on:
   - the waiter no longer asks, as after `asking: false`, so the line and Cancel go;
   - a browser Cancel gets 409 "The command already runs.", never a cancel;

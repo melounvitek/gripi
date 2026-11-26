@@ -83,6 +83,7 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
       if (path !== "/pc/link") {
         harness.posts.push({ path, body });
         if (holdReplies && path === "/pc/link/reply") return new Promise(() => {});
+        if (body.starting && starting === "held") return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
         if (body.starting) return starting ? Promise.resolve({ status: starting, body: {} }) : Promise.reject(new Error("the server did not answer in time"));
         if (lostResults && body.result || lostReplies && path === "/pc/link/reply") return Promise.reject(new Error("the server did not answer in time"));
         return Promise.resolve({ status: 200, body: {} });
@@ -623,7 +624,7 @@ test("asks to run a command with the file that runs, the folder and the session,
   assert.equal(h.spawned.length, 0);
 });
 
-test("runs an approved command without a shell or input in a process group of its own, once the server says that it still waits", async (t) => {
+test("runs an approved command without polkit's password dialog, a shell or input in a process group of its own, once the server says that it still waits", async (t) => {
   const h = setup(t);
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
   t.after(() => fs.rmSync(folder, { recursive: true }));
@@ -632,7 +633,7 @@ test("runs an approved command without a shell or input in a process group of it
   await h.prompted(1);
   await h.answer("run");
 
-  assert.equal(h.auths, 1);
+  assert.equal(h.auths, 0);
   assert.deepEqual(h.spawned.map(({ command, args, options }) => ({ command, args, options })), [{
     command: SH,
     args: ["-c", "pwd; read -r line || echo no input >&2; exit 3"],
@@ -699,18 +700,15 @@ test("runs nothing that the server no longer waits for once the user approved it
   assert.equal(h.spawned.length, 0);
 });
 
-test("a cancel during the password check runs nothing, nor asks the server to start", async (t) => {
-  let confirmed;
-  const h = setup(t, { authenticate: () => new Promise((resolve) => { confirmed = resolve; }) });
+test("a cancel while the server is asked whether the command may start runs nothing", async (t) => {
+  const h = setup(t, { starting: "held" });
 
   await h.deliver(run("1", ["true"]));
   await h.prompted(1);
   await h.answer("run");
+  await h.until(() => h.posts.some(({ body }) => body.starting));
   await h.deliver({ type: "cancel", id: "1" });
-  confirmed({ ok: true });
-  await settle();
 
-  assert.equal(h.posts.some(({ body }) => body.starting), false);
   assert.deepEqual(h.replies(), []);
   assert.equal(h.spawned.length, 0);
 });

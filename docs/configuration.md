@@ -262,7 +262,7 @@ gripi pc run -- systemctl --user restart pipewire
 gripi pc run --cwd /home/you/Work/app -- sh -c 'git status | head'
 ```
 
-Each command asks on your computer first, as a [login](#using-your-computers-ssh-keys) does. The app shows the session, the command with the file that your computer’s `PATH` finds for it, such as `/usr/bin/systemctl`, the folder and "As: you", with **Deny** and **Run**; then polkit’s password dialog confirms that it is you. Enter and Escape choose **Deny**. Every command asks: there is no approval for 5 minutes. A denial, 2 minutes without an answer, or a request while 5 others wait refuses it, and `gripi pc run` exits with 1 and says why after `gripi pc:`.
+Each command asks on your computer first, as a [login](#using-your-computers-ssh-keys) does. The app shows the session, the command with the file that your computer’s `PATH` finds for it, such as `/usr/bin/systemctl`, the folder and "As: you", with **Deny** and **Run**. **Run** runs it, without polkit’s password dialog that a login asks for. Enter and Escape choose **Deny**. Every command asks: there is no approval for 5 minutes. A denial, 2 minutes without an answer, or a request while 5 others wait refuses it, and `gripi pc run` exits with 1 and says why after `gripi pc:`.
 
 The command runs in the folder that `--cwd` names on your computer, which must exist, or else in your home folder there, with the desktop app’s environment, without a shell and without input. Gripi passes on the first 16 MiB of each output. When `gripi pc run` ends first, such as when you stop the agent, the app sends the command’s process group SIGTERM, and SIGKILL 5 seconds later. So it does when you turn PC access off, and when the app quits, with SIGKILL after a second.
 
@@ -273,6 +273,7 @@ The commands go to the computer where you last used the session, as logins do. T
 Limits:
 
 - An approved command can do whatever you can on your computer, and its output reaches the gateway and the agent. Read the command, and the file that runs, before you run it.
+- A command needs only a click on **Run**, not your password. The dialog stops a compromised gateway, which can't click it, but not someone else at your computer while it is unlocked. Lock it when you leave it.
 - A process that the command starts in a process group of its own, such as with `setsid`, keeps running after the app ends the command.
 - A command has at most 256 words of up to 4096 bytes each, and the app refuses one that takes more than 4096 characters to show.
 - The app gives its output 40 seconds to reach the gateway once the command ends, which a slow upload of much output may take longer for. `gripi pc run` then fails, though the command ran, and says so; when even that can't reach the gateway, the app's link to it ends, and `gripi pc run` fails with that.
