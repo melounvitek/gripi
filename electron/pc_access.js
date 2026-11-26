@@ -109,22 +109,24 @@ function createPcAccess({
     let backoff = 0;
     while (!signal.aborted) {
       const link = entry.link;
-      // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart.
+      // The gateway refuses a poll that doesn't open the link once it no longer has it, such as after a restart. Until a
+      // poll has an answer, the gateway may not have the link yet.
       const body = link.opened ? { link: link.id } : { link: link.id, open: true, name: computerName(hostname()), run: true, root: true };
-      link.opened = true;
       const response = await request(entry.gateway, "/pc/link", body, link.controller.signal).catch((error) => ({ error }));
       if (signal.aborted) return;
 
       const failure = pollFailure(link, response);
       if (!failure) {
+        link.opened = true;
         for (const message of response.body.messages) receive(entry, link, message);
         backoff = 0;
         continue;
       }
 
-      // Any failed poll may have lost the link, for example to another app or a restarted gateway, so what it was
-      // asked and allowed goes with it.
-      loseLink(entry, link, failure);
+      // A poll without an answer, such as in a short network drop, keeps the link, which the gateway keeps for 35 seconds
+      // without polls and refuses to resume after that. Any other failed poll may have lost the link, for example to
+      // another app or a restarted gateway, so what it was asked and allowed goes with it.
+      if (!response.error) loseLink(entry, link, failure);
       if (response.status === 409) {
         await sleep(LINK_TAKEN_RETRY_MS, signal);
       } else if (response.status === 403) {
@@ -536,8 +538,13 @@ function linkRequest(url, body, { cookie, signal } = {}) {
       let size = 0;
       response.on("data", (chunk) => {
         size += chunk.length;
-        if (size > MAX_RESPONSE_BYTES) request.destroy(new Error("the server's answer is too large"));
-        else chunks.push(chunk);
+        if (size <= MAX_RESPONSE_BYTES) {
+          chunks.push(chunk);
+        } else {
+          // Still an answer, unlike one that the network cuts, but one that nothing takes.
+          resolve({ status: response.statusCode, body: null });
+          request.destroy();
+        }
       });
       response.on("error", reject);
       response.on("end", () => {
