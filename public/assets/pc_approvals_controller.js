@@ -47,7 +47,9 @@ export class PcApprovalsController {
       const line = this.lines.get(approval.id) || this.add(approval);
       const left = Math.max(0, Math.ceil((Date.parse(approval.expires_at) - Date.now()) / 1000));
       line.countdown.textContent = line.failed ? "" : `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-      line.error.textContent = line.failed ? "could not cancel" : "";
+      // The line's live region announces each change of the error, so it changes only once.
+      const error = line.failed ? "could not cancel" : "";
+      if (line.error.textContent !== error) line.error.textContent = error;
     }
     if (shown.length && !this.ticker) this.ticker = setInterval(() => this.render(), 1000);
     if (!shown.length) {
@@ -64,9 +66,10 @@ export class PcApprovalsController {
     icon.innerHTML = COMPUTER_ICON;
     const text = this.document.createElement("span");
     text.className = "pc-approval-text";
-    const computer = this.document.createElement("strong");
-    computer.textContent = approval.computer || "your computer";
-    text.append("Waiting for you on ", computer, `: ${approval.summary}`);
+    const computer = approval.computer || "your computer";
+    const name = this.document.createElement("strong");
+    name.textContent = computer;
+    text.append("Waiting for you on ", name, `: ${approval.summary}`);
     const time = this.document.createElement("span");
     time.className = "pc-approval-time";
     // The countdown would be read out every second, unlike the error, which the line's live region announces.
@@ -79,7 +82,7 @@ export class PcApprovalsController {
     cancel.type = "button";
     cancel.className = "pc-approval-cancel";
     cancel.textContent = "cancel";
-    cancel.setAttribute("aria-label", `cancel ${approval.summary}`);
+    cancel.setAttribute("aria-label", `cancel ${approval.summary} on ${computer}`);
     element.append(icon, text, time, cancel);
     const line = { element, countdown, error, cancel, failed: false };
     cancel.addEventListener("click", () => this.cancel(approval.id, line));

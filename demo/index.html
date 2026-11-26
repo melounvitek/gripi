@@ -364,8 +364,9 @@
     .worker-prompt-actions .worker-prompt-go:disabled strong { color: var(--text); font-weight: 600; }
     /* While a computer asks the user to approve a request of gripi pc, a slim line above the editor, tinted like a running
        tool, says so on every device, also while the sudo prompt or a worker takes the editor's place. */
-    .pc-approvals { display: grid; gap: 0.15rem; }
-    .pc-approvals:not(:empty) { margin-bottom: 0.15rem; }
+    .pc-approvals { display: grid; gap: 0.15rem; margin-bottom: 0.15rem; }
+    /* Out of the editor's grid while empty, but not hidden, so that its live region announces the first line. */
+    .pc-approvals:empty { position: absolute; }
     .pc-approval { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 0 0.75rem; padding: 0.4rem var(--text-inset); background: var(--tool-pending); color: var(--text); font: 0.8rem/1.45 var(--mono); }
     .pc-approval-icon { display: inline-flex; color: var(--gold); }
     .pc-approval-icon svg { width: 0.85rem; height: 0.85rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

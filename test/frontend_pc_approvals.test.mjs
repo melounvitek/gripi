@@ -46,8 +46,8 @@ test("shows a line for each request that a computer asks to approve, with the ti
 
   controller.update([approval("one", 107), approval("two", 30, "")]);
   assert.deepEqual(lines(), [
-    { text: "Waiting for you on laptop: SSH login to one.example as git", time: "expires in 1:47", cancel: "cancel SSH login to one.example as git" },
-    { text: "Waiting for you on your computer: SSH login to two.example as git", time: "expires in 0:30", cancel: "cancel SSH login to two.example as git" }
+    { text: "Waiting for you on laptop: SSH login to one.example as git", time: "expires in 1:47", cancel: "cancel SSH login to one.example as git on laptop" },
+    { text: "Waiting for you on your computer: SSH login to two.example as git", time: "expires in 0:30", cancel: "cancel SSH login to two.example as git on your computer" }
   ]);
   t.mock.timers.tick(1000);
   assert.deepEqual(lines().map((line) => line.time), ["expires in 1:46", "expires in 0:29"]);
@@ -89,8 +89,12 @@ test("a cancel that comes too late hides the line, and one that fails says so an
 
   await cancel(0);
   assert.equal(lines()[0].time, "could not cancel");
-  t.mock.timers.tick(1000);
-  assert.equal(lines()[0].time, "could not cancel");
+  // The line's live region announces the error once, so it isn't written again.
+  const error = element.children[0].querySelector(".pc-approval-error");
+  let written = 0;
+  Object.defineProperty(error, "textContent", { get: () => "could not cancel", set: () => { written += 1; } });
+  t.mock.timers.tick(3000);
+  assert.equal(written, 0);
   await cancel(0);
   assert.equal(element.children.length, 0);
   assert.deepEqual(sent.map((request) => request.body), ["id=one", "id=two", "id=two"]);
