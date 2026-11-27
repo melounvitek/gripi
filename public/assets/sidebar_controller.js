@@ -447,6 +447,13 @@ export class SidebarController {
     this.syncPiSearch();
   }
 
+  // Pi's answer would take the sidebar back to the search and filters it was for.
+  stopPiSearchOutside(url) {
+    const params = new URL(url, this.window.location.href).searchParams;
+    const scope = { query: params.get("session_search")?.trim() || "", project: params.get("project") || "", tag: params.get("tag") || "" };
+    if (JSON.stringify(scope) !== JSON.stringify(this.piSearch?.scope)) this.stopPiSearch();
+  }
+
   stopPiSearch() {
     if (!this.piSearch) return;
     this.piSearch.controller.abort();
@@ -480,6 +487,7 @@ export class SidebarController {
 
   // A search-only change keeps the field being typed in and the scroll position, and skips the New session dialog, which follows only the project filter.
   async applyFilters(targetUrl, { searchOnly = false } = {}) {
+    this.stopPiSearchOutside(targetUrl);
     const refreshRequestVersion = this.refreshRequestVersion;
     this.setFiltering(true);
     this.filterOperationActive = true;

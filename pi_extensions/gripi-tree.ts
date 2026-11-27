@@ -350,7 +350,7 @@ function registerBridgeCommand(pi: ExtensionAPI, name: string, description: stri
 }
 
 // Gripi's sidebar asks a hidden Pi for the sessions about a search, with GRIPI_FIND_SESSIONS set to the gripi command.
-// That Pi has only these tools, which search and read the user's sessions within the sidebar's filters.
+// That Pi has only these tools, which search the user's sessions within the sidebar's filters and read any of them.
 function registerFindTools(pi: ExtensionAPI, gripi: string): void {
   const filters = [
     ...(process.env.GRIPI_FIND_CWD ? ["--cwd", process.env.GRIPI_FIND_CWD] : []),

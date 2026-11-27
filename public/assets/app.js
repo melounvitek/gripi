@@ -3044,6 +3044,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   const scrollSnapshot = preserveScroll ? conversationScrollSnapshot() : null;
   persistStoredComposerDraft();
   sidebarController.invalidate({ clearSessionsLimit: true });
+  sidebarController.stopPiSearchOutside(url);
   sessionSwitchAbortController?.abort();
   // A press that did not end in a click right away leaves a copy that may be out of date.
   const preload = sessionPreload?.url === url && performance.now() - sessionPreload.startedAt < SESSION_PRELOAD_MAX_AGE_MS ? sessionPreload : null;
