@@ -126,6 +126,7 @@ export const prompts = {
   imageHover: "Keep the attached image neutral on hover",
   imageRead: "Read a large image without refreshing the conversation",
   newSession: "Create the first deterministic response",
+  sessionLink: "Link to the history session",
   // Pi refuses this one, like a prompt without an API key for its model.
   refused: "Send this when the provider has no key",
   realPiPrefix: "Reply with exactly this token and nothing else:"

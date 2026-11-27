@@ -1,11 +1,12 @@
 // The scratch overlay shows the page of the user's scratch session, a Pi session that Gripi keeps nothing of, in a
 // frame over the page, which stays as it is. On that page, the controller passes on to the overlay what the page's
-// buttons and keys ask for.
+// buttons, keys and links to sessions ask for.
 export class ScratchController {
-  constructor(documentObject, windowObject, focusConversation) {
+  constructor(documentObject, windowObject, focusConversation, openSessionLink) {
     this.document = documentObject;
     this.window = windowObject;
     this.focusConversation = focusConversation;
+    this.openSessionLink = openSessionLink;
     this.page = documentObject.body.classList.contains("scratch-page");
     this.overlay = null;
     this.frame = null;
@@ -41,6 +42,11 @@ export class ScratchController {
       if (event.data === "gripi:scratch-working") this.markWorking(true);
       if (event.data === "gripi:scratch-idle") this.markWorking(false);
       if (event.data === "gripi:scratch-gone") this.clearActivity();
+      // The session opens in the page, and the scratch session waits behind it, as for its next question.
+      if (event.data?.openSession) {
+        this.hide();
+        this.openSessionLink(event.data.openSession);
+      }
     });
   }
 

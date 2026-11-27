@@ -103,6 +103,17 @@ test("a scratch session opens over the page, keeps its conversation and images, 
   await expect(message(scratch(page), "user", question)).toHaveCount(0);
 });
 
+test("a scratch reply's link to a session opens it in the page, and the scratch session waits behind it", async ({ page }) => {
+  await openScratch(page);
+  await sendPrompt(scratch(page), prompts.sessionLink);
+  await scratch(page).getByRole("link", { name: "the history session" }).click();
+  await expect(overlay(page)).toBeHidden();
+  await expect(page.locator(".session-header-name")).toHaveText(sessions.history);
+
+  await openScratch(page);
+  await expect(scratch(page).getByRole("link", { name: "the history session" })).toBeVisible();
+});
+
 test("a scratch session that works goes on while hidden, and Esc twice stops it, as in any session", async ({ page }) => {
   await openScratch(page);
   const frame = scratch(page);

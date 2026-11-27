@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { prompts } from "../support/contract.mjs";
+import { prompts, sessions } from "../support/contract.mjs";
 import { expectRunFinished, sendPrompt } from "../support/ui.mjs";
 
 test.beforeEach(async ({ page }) => {
@@ -52,6 +52,14 @@ test("on a phone, a scratch session opens in a sheet that one tap hides or disca
   await expect(overlay(page)).toBeHidden();
   await page.locator('label[aria-label="Open sessions"]').tap();
   await expect(page.getByRole("button", { name: "Scratch session, not saved" })).not.toHaveClass(/is-active/);
+});
+
+test("on a phone, one tap on a scratch reply's link to a session opens it in the page", async ({ page }) => {
+  await openScratch(page);
+  await sendPrompt(scratch(page), prompts.sessionLink);
+  await scratch(page).getByRole("link", { name: "the history session" }).tap();
+  await expect(overlay(page)).toBeHidden();
+  await expect(page.locator(".session-header-name")).toHaveText(sessions.history);
 });
 
 test("on a phone, one tap anywhere on the scratch window's stop button stops Pi", async ({ page }) => {
