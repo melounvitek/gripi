@@ -15,7 +15,7 @@ Page-lifetime listeners are registered once by `public/assets/app.js`. Replaceab
 - `LiveMessageRenderer` owns live message DOM state.
 - `ServerMarkdownRenderer` owns cancellable server Markdown requests.
 - `HermesPanelController` owns the Hermes panel and its tab on the page, and on the panel's own page the buttons that close it or open it in a window, and following the current conversation.
-- `ScratchController` owns the scratch overlay, which shows the scratch session's page in a frame over the page, and on that page the buttons and keys that hide, discard or start over the session.
+- `ScratchController` owns the scratch overlay, which shows the scratch session's page in a frame over the page and on its button whether Pi works there, and on that page the buttons and keys that hide, discard or start over the session.
 - `VoiceCallController` owns the Hermes panel's voice button, the call view in the conversation's place, the call line with its controls, and the `VoiceConversation` they run.
 - `SudoPromptController` owns the prompt that asks, in the editor's place, for the password of a `gripi sudo` request, or only for approval while the gateway remembers the password, from the page's and the live events' pending requests.
 - `PcApprovalsController` owns the line above the editor that says, from the page's and the live events' requests, that a computer asks the user to approve a request of `gripi pc`, with its time left and Cancel.
