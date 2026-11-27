@@ -278,14 +278,14 @@ test("tag filter combines across projects without switching conversation; pins b
     await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(null);
     const filter = page.getByRole("button", { name: "Filter sessions by tag", exact: true });
     await expect(filter).toHaveAttribute("title", "Filter by tags");
-    await expect(filter.locator("svg")).toBeVisible();
+    await expect(filter.locator(":scope > svg")).toBeVisible();
     expect(await filter.evaluate((button) => button.scrollWidth <= button.clientWidth)).toBe(true);
     await activate(filter);
     await expect(chooser).toBeVisible();
     await page.keyboard.press("Escape");
     await page.reload();
     if (isMobile) await activate(page.locator('label[aria-label="Open sessions"]'));
-    await expect(filter.locator("svg")).toBeVisible();
+    await expect(filter.locator(":scope > svg")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("tag-filter-icon.png"), animations: "disabled" });
     await activate(filter);
     await expect(chooser).toBeVisible();

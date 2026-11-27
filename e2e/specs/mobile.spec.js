@@ -68,6 +68,11 @@ test("the model picker applies on the first mobile tap without raising the keybo
   await dialog.getByRole("button", { name: "all" }).tap();
   await expect(dialog.getByRole("option")).toHaveCount(3);
   await expect(search).not.toBeFocused();
+  // The borderless search prompt still gives a full-height tap target.
+  const prompt = dialog.locator("label", { has: page.getByRole("combobox", { name: "Search models" }) });
+  expect((await prompt.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await prompt.tap({ position: { x: 4, y: 4 } });
+  await expect(search).toBeFocused();
   const model = dialog.getByRole("option", { name: /contract-model/ });
   expect((await model.boundingBox()).height).toBeGreaterThanOrEqual(44);
   await model.tap();

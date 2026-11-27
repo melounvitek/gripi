@@ -202,7 +202,7 @@ export class ProjectSelectController {
     const chevron = this.document.createElement("span");
     chevron.className = "project-select-chevron";
     chevron.setAttribute("aria-hidden", "true");
-    chevron.textContent = "▾";
+    chevron.innerHTML = '<svg class="ui-icon" viewBox="0 0 24 24" focusable="false"><path d="m6 9 6 6 6-6"/></svg>';
     container.append(chevron);
   }
 

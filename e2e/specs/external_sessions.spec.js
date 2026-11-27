@@ -96,7 +96,7 @@ for (const touch of [false, true]) {
       await openSidebar(page, touch);
       await expect(link).toHaveAttribute("aria-current", "page");
       await expectNormalRowShape(link, touch);
-      await expect(row).toHaveCSS("background-color", "rgb(58, 58, 74)");
+      await expect(row).toHaveCSS("background-color", "rgb(40, 40, 50)");
       await page.screenshot({ path: testInfo.outputPath("compact-selected-session.png") });
     });
 
