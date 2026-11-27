@@ -262,6 +262,7 @@ func (scratch *scratchSessions) image(owner, token string) (scratchImage, bool) 
 func (app *application) registerScratchRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /scratch/new", app.newScratchSession)
 	mux.HandleFunc("POST /scratch/discard", app.discardScratchSession)
+	mux.HandleFunc("POST /scratch/continue", app.continueScratchSession)
 	mux.HandleFunc("GET /scratch/images/{token}", app.scratchPromptImage)
 }
 
@@ -396,6 +397,59 @@ func (app *application) discardScratchSession(response http.ResponseWriter, requ
 		}
 	}
 	writeJSON(response, map[string]bool{"ok": true})
+}
+
+// continueScratchSession continues the user's scratch session fork_from in a folder, as Pi's fork of it there, which Pi
+// saves, and ends the scratch session. Pi CLI can't save a session that it keeps only in memory.
+func (app *application) continueScratchSession(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	cwd, message, valid := validatedCWD(request.FormValue("cwd"), app.config.Home)
+	if !valid {
+		writeJSONStatus(response, http.StatusUnprocessableEntity, map[string]any{"valid": false, "error": message})
+		return
+	}
+	app.scratch.changing.Lock()
+	defer app.scratch.changing.Unlock()
+	owner := currentWorkspaceID(request)
+	session := app.scratch.session(owner)
+	// A page of a scratch session that has ended, such as in another tab, doesn't continue the next one.
+	if session == nil || session.key != request.FormValue("fork_from") || !app.ownsScratch(request, session.key) {
+		app.writeRequestError(response, request, http.StatusNotFound, errScratchGone.Message)
+		return
+	}
+	// No prompt starts while Pi copies the session, which would leave the prompt out of the copy.
+	_, release, err := app.promptAdmissions.navigate(func() (string, error) { return session.key, nil })
+	if app.writeRPCError(response, err) {
+		return
+	}
+	defer release()
+	if app.sessionWorking(session.key) {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Session is busy"})
+		return
+	}
+	// The scratch session's folder, which only its user reads, goes with it.
+	saved := filepath.Join(session.dir, "session.jsonl")
+	defer os.Remove(saved)
+	err = app.scratchHistory(request.Context(), session.key, func(history agent.MemoryHistory) error {
+		return history.SaveMemorySession(request.Context(), saved)
+	})
+	if refused := refusal(err); refused != nil {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": refused.Message})
+		return
+	}
+	if app.writeActionRPCError(response, err) {
+		return
+	}
+	path, err := app.startNewSession(request, cwd, saved, "")
+	if app.writeActionRPCError(response, err) {
+		return
+	}
+	if err := app.endScratchSession(owner, session); err != nil {
+		logInternalError("end the scratch session that continued in a folder", err)
+	}
+	app.redirectToNewSession(response, request, path, "")
 }
 
 // endScratchSession stops the session's Pi, even while it works, and removes its folder. The caller holds

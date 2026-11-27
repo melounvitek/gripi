@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -113,6 +114,24 @@ func TestNewSessionProjectStorageFailureRollsBackCreation(t *testing.T) {
 				t.Error("failed creation did not release ownership")
 			}
 		})
+	}
+}
+
+// Pi has written its fork by the time Gripi claims it, so a fork that Gripi can't set up goes, rather than stay where
+// no workspace shows it.
+func TestAForkThatCantBeSetUpLeavesNoCopy(t *testing.T) {
+	app, _, _ := externalSessionTestApplication(t)
+	forked := filepath.Join(app.config.SessionsRoot, "forked.jsonl")
+	writeSessionRecords(t, forked, []map[string]any{{"type": "session", "version": 3, "id": "forked", "timestamp": "2026-01-01T00:00:00Z", "cwd": app.config.Home}})
+	app.newRPCClient = func(string, string, string, string) (agent.Client, error) {
+		return &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": forked}}}, nil
+	}
+	app.claimSession = func(*http.Request, string) (bool, error) { return false, errors.New("ownership storage failed") }
+	if _, err := app.startNewSession(tagLifecycleRequest("/scratch/continue"), app.config.Home, filepath.Join(t.TempDir(), "source.jsonl"), ""); err == nil {
+		t.Fatal("the fork was set up")
+	}
+	if _, err := os.Stat(forked); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the fork stayed: %v", err)
 	}
 }
 

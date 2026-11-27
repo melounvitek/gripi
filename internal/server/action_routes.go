@@ -1645,12 +1645,6 @@ func (app *application) startNewSession(request *http.Request, cwd, forkFrom, ag
 	return agent.StartNewSession(request.Context(), cwd, factory, app.sessionStore, app.rpcClients, app.pendingSessions, func(path string) (func() error, error) {
 		var err error
 		claimed := false
-		if app.claimSession != nil {
-			claimed, err = app.claimSession(request, path)
-			if err != nil {
-				return nil, err
-			}
-		}
 		var projectRollback, stateRollback func() error
 		rollback := func() error {
 			var rollbackErr error
@@ -1663,7 +1657,19 @@ func (app *application) startNewSession(request *http.Request, cwd, forkFrom, ag
 			if claimed && app.releaseSession != nil {
 				rollbackErr = errors.Join(rollbackErr, app.releaseSession(request, path))
 			}
+			// Pi has written its fork already, which no session would show.
+			if forkFrom != "" {
+				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					rollbackErr = errors.Join(rollbackErr, err)
+				}
+			}
 			return rollbackErr
+		}
+		if app.claimSession != nil {
+			claimed, err = app.claimSession(request, path)
+			if err != nil {
+				return nil, errors.Join(err, rollback())
+			}
 		}
 		if forkFrom != "" {
 			// The copy takes what Gripi keeps about the original, such as its pin and tags, as the original goes.

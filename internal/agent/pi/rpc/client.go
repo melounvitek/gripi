@@ -1884,7 +1884,7 @@ func internalBridgeStatusKey(response map[string]any) string {
 		return ""
 	}
 	key := stringValue(response["statusKey"])
-	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|scoped_models|history|history_image|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
+	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|scoped_models|history|history_image|save_session|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
 	if matched {
 		return key
 	}
@@ -2640,6 +2640,11 @@ func (client *Client) History(ctx context.Context) (map[string]any, error) {
 func (client *Client) HistoryImage(ctx context.Context, entryID string, index int) (map[string]any, error) {
 	payload := map[string]any{"entryId": entryID, "index": index}
 	return client.extensionRequest(ctx, "gripi_history_image", payload, client.treeBridgeTimeout, "Session history request timed out")
+}
+
+// SaveSession has Gripi's extension write a session that Pi keeps only in memory to a new file at path.
+func (client *Client) SaveSession(ctx context.Context, path string) (map[string]any, error) {
+	return client.extensionRequest(ctx, "gripi_save_session", map[string]any{"path": path}, client.requestTimeout, "Session save timed out")
 }
 func (client *Client) NavigateTree(ctx context.Context, entryID, summary, instructions string) (map[string]any, error) {
 	payload := map[string]any{"entryId": entryID, "summary": summary}

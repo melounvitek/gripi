@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const fakePiCommands = `{"name":"gripi_reload"},{"name":"gripi_tree_navigate"},{"name":"gripi_tree_snapshot"},{"name":"gripi_tree_leaf"},{"name":"gripi_tree_label"},{"name":"gripi_scoped_models"},{"name":"gripi_history"},{"name":"gripi_history_image"}`
+const fakePiCommands = `{"name":"gripi_reload"},{"name":"gripi_tree_navigate"},{"name":"gripi_tree_snapshot"},{"name":"gripi_tree_leaf"},{"name":"gripi_tree_label"},{"name":"gripi_scoped_models"},{"name":"gripi_history"},{"name":"gripi_history_image"},{"name":"gripi_save_session"}`
 
 // isolateSettings hides the settings of a gateway that runs these tests, as an update from an older version does.
 func isolateSettings(t *testing.T) {
