@@ -38,14 +38,17 @@ export class NewSessionFormController {
     });
   }
 
-  // fork is the { path, name } of a session whose folder is gone, which moves as Pi's copy of it into the folder picked here.
+  // fork is the { path, name } of a session whose folder is gone, which moves as Pi's copy of it into the folder picked
+  // here, or the { path, scratch: true } of the user's scratch session, which continues there as Pi's copy of it.
   open(form, fork) {
     if (!form?._newSessionFormState) return;
     Object.assign(form._newSessionFormState, { expanded: false, fork });
     form.querySelector("[data-new-session-fork-from]").value = fork?.path || "";
-    form.closest("[data-modal]").querySelector("#new-session-modal-title").textContent = fork ? "Move to another folder" : "New session";
+    form.setAttribute("action", fork?.scratch ? "/scratch/continue" : "/sessions/new_at_cwd");
+    form.closest("[data-modal]").querySelector("#new-session-modal-title").textContent = fork?.scratch ? "Continue in project" : fork ? "Move to another folder" : "New session";
     const note = form.querySelector("[data-new-session-fork-note]");
-    note.textContent = fork ? `Pi copies “${fork.name}” into the folder you pick, and Gripi deletes the original.` : "";
+    if (fork?.scratch) note.textContent = "Pi copies this scratch session into the folder you pick, and Gripi discards it. Files that Pi made in its scratch folder stay behind.";
+    else note.textContent = fork ? `Pi copies “${fork.name}” into the folder you pick, and Gripi deletes the original.` : "";
     note.hidden = !fork;
     if (this.projects(form).length) this.showProjects(form);
     else this.browse(form, form.dataset.home);
@@ -174,7 +177,7 @@ export class NewSessionFormController {
     projects.forEach((row) => { row.hidden = !visible.includes(row); });
     visible.forEach((row, index) => { row.querySelector(".new-session-key").textContent = index < 9 ? index + 1 : ""; });
     let selected = 0;
-    const start = state.fork ? "move" : "start";
+    const start = state.fork?.scratch ? "continue" : state.fork ? "move" : "start";
     if (browsing) {
       const where = this.displayPath(form, state.folder).replace(/(.)\/+$/, "$1");
       const name = (path) => path.slice(path.lastIndexOf("/") + 1);
@@ -199,7 +202,7 @@ export class NewSessionFormController {
       });
       // Only a folder row is ever preselected, so Enter never starts in the listed folder itself by accident.
       selected = folders.length ? Math.max(0, folders.findIndex((path) => name(path).toLowerCase() === query)) : -1;
-      if (state.listing && !state.listing.error) list.append(this.row("start", "·", `${state.fork ? "Move to" : "Start in"} ${where} itself`, state.folder));
+      if (state.listing && !state.listing.error) list.append(this.row("start", "·", `${{ start: "Start in", move: "Move to", continue: "Continue in" }[start]} ${where} itself`, state.folder));
       const up = this.parent(state.folder);
       if (up !== state.folder) list.append(this.row("up", "↑", `Up to ${this.displayPath(form, up)}`, up));
       if (projects.length) list.append(this.row("back", "←", "Back to projects"));
@@ -216,7 +219,7 @@ export class NewSessionFormController {
       if (more) list.append(this.row("more", "…", `${more} more project${more === 1 ? "" : "s"}`));
       list.append(this.row("path", "+", "Other folder…"));
 
-      label.textContent = state.fork ? "Folder:" : "Project or path:";
+      label.textContent = state.fork && !state.fork.scratch ? "Folder:" : "Project or path:";
       this.setStatus(form, query && !visible.length ? "No matching projects." : "");
     }
     list.querySelectorAll('[role="option"]').forEach((option, index) => { option.id = `new-session-option-${index}`; });

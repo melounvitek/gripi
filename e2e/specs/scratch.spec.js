@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import path from "node:path";
 import { prompts, replies, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
@@ -112,6 +113,49 @@ test("a scratch reply's link to a session opens it in the page, and the scratch 
 
   await openScratch(page);
   await expect(scratch(page).getByRole("link", { name: "the history session" })).toBeVisible();
+});
+
+test("a scratch session continues in a project as a saved session, and the scratch session ends", async ({ page }) => {
+  await openScratch(page);
+  const frame = scratch(page);
+  await sendPrompt(frame, question);
+  await expect(message(frame, "assistant", replies.standard)).toBeVisible();
+  await expectRunFinished(frame);
+
+  // The picker opens over the scratch window, and Esc goes back to it.
+  const continueButton = frame.getByRole("button", { name: "continue in project…" });
+  await continueButton.click();
+  const dialog = page.getByRole("dialog", { name: "Continue in project" });
+  await expect(dialog).toContainText("Pi copies this scratch session into the folder you pick, and Gripi discards it. Files that Pi made in its scratch folder stay behind.");
+  await expect(dialog.locator("[data-new-session-hint]")).toHaveText("↑↓ navigate · enter continue · ctrl+1…9 continue directly · esc cancel");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(overlay(page)).toBeVisible();
+  await expect(frame.getByLabel(/^Message to Pi$/)).toBeFocused();
+
+  await continueButton.click();
+  const project = dialog.locator("[data-new-session-project]").first();
+  const cwd = await project.getAttribute("data-new-session-project");
+  const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/scratch/continue");
+  await project.click();
+  const { session: continued } = await (await continuation).json();
+  try {
+    await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBe(continued);
+    await expect(overlay(page)).toBeHidden();
+    await expect(page.locator(".app-shell")).toHaveJSProperty("inert", false);
+    await expect(page.locator(".session-header-project-label")).toHaveText(path.basename(cwd));
+    await expect(message(page, "user", question)).toBeVisible();
+    await expect(message(page, "assistant", replies.standard)).toBeVisible();
+    await expect(page.locator(`.session-row[data-session-path="${continued}"]`)).toBeVisible();
+    await expect(scratchButton(page)).not.toHaveClass(/is-active/);
+
+    // The next scratch session starts empty.
+    await openScratch(page);
+    await expect(message(scratch(page), "user", question)).toHaveCount(0);
+  } finally {
+    // Leftover sessions push seeded ones off the first sidebar page for later tests.
+    expect((await page.request.post("/sessions/delete", { form: { session: continued } })).ok()).toBe(true);
+  }
 });
 
 test("a scratch session that works goes on while hidden, and Esc twice stops it, as in any session", async ({ page }) => {

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { prompts, sessions } from "../support/contract.mjs";
-import { expectRunFinished, sendPrompt } from "../support/ui.mjs";
+import { prompts, replies, sessions } from "../support/contract.mjs";
+import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
 test.beforeEach(async ({ page }) => {
   expect((await page.request.post("/scratch/discard", { headers: { Accept: "application/json" } })).ok()).toBe(true);
@@ -60,6 +60,27 @@ test("on a phone, one tap on a scratch reply's link to a session opens it in the
   await scratch(page).getByRole("link", { name: "the history session" }).tap();
   await expect(overlay(page)).toBeHidden();
   await expect(page.locator(".session-header-name")).toHaveText(sessions.history);
+});
+
+test("on a phone, one tap continues a scratch session in a project", async ({ page }) => {
+  await openScratch(page);
+  const frame = scratch(page);
+  await sendPrompt(frame, "Scratch question for a project");
+  await expectRunFinished(frame);
+
+  await frame.getByRole("button", { name: "continue in project…" }).tap();
+  const dialog = page.getByRole("dialog", { name: "Continue in project" });
+  await expect(dialog).toBeVisible();
+  const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/scratch/continue");
+  await dialog.locator("[data-new-session-project]").first().tap();
+  const { session: continued } = await (await continuation).json();
+  try {
+    await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBe(continued);
+    await expect(overlay(page)).toBeHidden();
+    await expect(message(page, "assistant", replies.standard)).toBeVisible();
+  } finally {
+    expect((await page.request.post("/sessions/delete", { form: { session: continued } })).ok()).toBe(true);
+  }
 });
 
 test("on a phone, one tap anywhere on the scratch window's stop button stops Pi", async ({ page }) => {

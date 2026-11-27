@@ -442,6 +442,8 @@ func (app *application) continueScratchSession(response http.ResponseWriter, req
 	if app.writeActionRPCError(response, err) {
 		return
 	}
+	// The page goes to the new session, which a sidebar filtered by another project wouldn't show.
+	request.Form.Del("project")
 	path, err := app.startNewSession(request, cwd, saved, "")
 	if app.writeActionRPCError(response, err) {
 		return
