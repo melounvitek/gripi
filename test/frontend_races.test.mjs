@@ -216,7 +216,7 @@ test("a filter change stops Pi's search, whose late answer would undo it", async
   controller.scheduleRefresh = () => {};
 
   const piAnswer = deferred();
-  const projectSidebar = deferred();
+  let sidebarAnswer = deferred();
   const requested = [];
   globalThis.window = window;
   globalThis.fetch = (url, { signal } = {}) => {
@@ -225,7 +225,7 @@ test("a filter change stops Pi's search, whose late answer would undo it", async
       signal.addEventListener("abort", () => piAnswer.reject(new DOMException("Aborted", "AbortError")));
       return piAnswer.promise;
     }
-    return projectSidebar.promise;
+    return sidebarAnswer.promise;
   };
 
   try {
@@ -234,11 +234,20 @@ test("a filter change stops Pi's search, whose late answer would undo it", async
     const filtering = controller.changeProjectFilter(select);
     piAnswer.resolve({ ok: true, json: async () => ({ sessions: ["readme-backup"] }) });
     await new Promise((resolve) => setTimeout(resolve));
-    projectSidebar.resolve({ ok: true, text: async () => "project sidebar" });
+    sidebarAnswer.resolve({ ok: true, text: async () => "project sidebar" });
     await Promise.all([searching, filtering]);
 
     assert.equal(requested.some((url) => url.includes("session_found")), false);
     assert.deepEqual(replaced, ["https://example.test/?session_search=backup+broke+again&project=%2Fhome%2Fme%2Fproject"]);
+
+    // Nor does a search start while the filters change.
+    sidebarAnswer = deferred();
+    select.value = "";
+    const unfiltering = controller.changeProjectFilter(select);
+    await controller.startPiSearch();
+    sidebarAnswer.resolve({ ok: true, text: async () => "sidebar" });
+    await unfiltering;
+    assert.equal(requested.filter((url) => url === "/sessions/find_with_pi").length, 1);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalWindow === undefined) delete globalThis.window;

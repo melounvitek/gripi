@@ -415,7 +415,8 @@ export class SidebarController {
   async startPiSearch() {
     const form = this.element?.querySelector(".sidebar-session-search");
     const scope = form && this.piSearchScope(form);
-    if (!scope?.query) return;
+    // While the filters change, the sidebar shows the new ones, but Pi's answer would go to the old ones.
+    if (!scope?.query || this.filterOperationActive) return;
     this.piSearch?.controller.abort();
     const search = { scope, controller: new AbortController() };
     this.piSearch = search;
