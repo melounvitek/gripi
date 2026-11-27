@@ -33,8 +33,8 @@ const pcHelp = `Usage:
 
 These use the user's computer, where the Gripi desktop app runs with
 File → Allow PC Access for This Server on. The user approves each use there,
-and for an SSH login or a command as root, polkit then checks that it is
-them, usually with their computer's password.
+and for a command as root, polkit then checks that it is them, usually with
+their computer's password.
 
 gripi pc ssh runs a command on this machine, the gateway, with SSH_AUTH_SOCK
 pointing at the SSH agent of the user's computer. So ssh, and Git through it,
