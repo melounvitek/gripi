@@ -14,15 +14,17 @@ async function search(page, query) {
   return field;
 }
 
-// The fake Pis that searched for sessions, by PID, with whether each of them stopped.
+// The states of the fake Pis that searched for sessions, in the order they started: "started", "prompted" once they
+// got the prompt, by when they stop on SIGTERM with a record of it, and "stopped".
 async function piSearchRuns() {
   const runs = new Map();
   const log = await readFile(process.env.GRIPI_E2E_FAKE_PI_LOG, "utf8").catch(() => "");
   for (const record of log.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))) {
-    if (record.event === "started" && record.args?.includes("search_sessions,show_session")) runs.set(record.pid, false);
-    else if (record.event === "stopped" && runs.has(record.pid)) runs.set(record.pid, true);
+    if (record.event === "started" && record.args?.includes("search_sessions,show_session")) runs.set(record.pid, "started");
+    else if (runs.has(record.pid) && record.event === "command" && record.command.type === "prompt") runs.set(record.pid, "prompted");
+    else if (runs.has(record.pid) && record.event === "stopped") runs.set(record.pid, "stopped");
   }
-  return runs;
+  return [...runs.values()];
 }
 
 test("Enter asks Pi when the search matches no session, and its finds stay after a reload and Back", async ({ page }) => {
@@ -58,34 +60,38 @@ test("Pi's search shows while it runs, and stopping it, changing the search or a
   await page.goto("/");
   const field = await search(page, piSearch.slow);
   const status = page.getByRole("status").filter({ hasText: "Pi is searching conversations…" });
-  const runs = (await piSearchRuns()).size;
+  const earlier = (await piSearchRuns()).length;
+  const runs = async () => (await piSearchRuns()).slice(earlier);
 
   await page.getByRole("button", { name: "ask Pi" }).click();
   await expect(status).toBeVisible();
   await expect(page.getByText("No sessions match. Enter asks Pi.")).toBeHidden();
+  await expect.poll(runs).toEqual(["prompted"]);
   await page.getByRole("button", { name: "Pi · stop" }).click();
 
   await expect(status).toBeHidden();
   await expect(page.getByRole("button", { name: "ask Pi" })).toBeVisible();
-  await expect.poll(async () => [...(await piSearchRuns()).values()].slice(runs)).toEqual([true]);
+  await expect.poll(runs).toEqual(["stopped"]);
 
   await page.getByRole("button", { name: "ask Pi" }).click();
   await expect(status).toBeVisible();
+  await expect.poll(runs).toEqual(["stopped", "prompted"]);
   await field.press("End");
   await field.pressSequentially(" more");
 
   await expect(status).toBeHidden();
   await expect(page.getByRole("button", { name: "Pi · stop" })).toBeHidden();
-  await expect.poll(async () => [...(await piSearchRuns()).values()].slice(runs)).toEqual([true, true]);
+  await expect.poll(runs).toEqual(["stopped", "stopped"]);
   await expect.poll(() => new URL(page.url()).searchParams.get("session_search")).toBe(`${piSearch.slow} more`);
 
   await page.getByRole("button", { name: "ask Pi" }).click();
   await expect(status).toBeVisible();
+  await expect.poll(runs).toEqual(["stopped", "stopped", "prompted"]);
   await page.getByRole("combobox", { name: "Filter sessions by project" }).click();
   await page.getByRole("option").nth(1).click();
 
   await expect(status).toBeHidden();
-  await expect.poll(async () => [...(await piSearchRuns()).values()].slice(runs)).toEqual([true, true, true]);
+  await expect.poll(runs).toEqual(["stopped", "stopped", "stopped"]);
 });
 
 test("the sidebar says when Pi found nothing more, and why it couldn't search", async ({ page }) => {

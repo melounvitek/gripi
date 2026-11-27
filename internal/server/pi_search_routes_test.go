@@ -41,12 +41,16 @@ func findWithPi(t *testing.T, handler http.Handler, fields map[string]string, co
 }
 
 type fakePiRecord struct {
-	PID   int      `json:"pid"`
-	Event string   `json:"event"`
-	Args  []string `json:"args"`
+	PID     int      `json:"pid"`
+	Event   string   `json:"event"`
+	Args    []string `json:"args"`
+	Command struct {
+		Type string `json:"type"`
+	} `json:"command"`
 }
 
-// piSearchRuns returns the fake Pis that searched for sessions, by PID, with whether each of them stopped.
+// piSearchRuns returns the fake Pis that searched for sessions, by PID, with whether each of them got the prompt and
+// stopped.
 func piSearchRuns(t *testing.T) map[int]*piSearchRun {
 	t.Helper()
 	contents, err := os.ReadFile(os.Getenv("GRIPI_E2E_FAKE_PI_LOG"))
@@ -61,7 +65,9 @@ func piSearchRuns(t *testing.T) map[int]*piSearchRun {
 		}
 		if record.Event == "started" && slices.Contains(record.Args, "search_sessions,show_session") {
 			runs[record.PID] = &piSearchRun{args: record.Args}
-		} else if run := runs[record.PID]; run != nil && record.Event == "stopped" {
+		} else if run := runs[record.PID]; run != nil && record.Event == "command" && record.Command.Type == "prompt" {
+			run.prompted = true
+		} else if run != nil && record.Event == "stopped" {
 			run.stopped = true
 		}
 	}
@@ -69,8 +75,9 @@ func piSearchRuns(t *testing.T) map[int]*piSearchRun {
 }
 
 type piSearchRun struct {
-	args    []string
-	stopped bool
+	args     []string
+	prompted bool
+	stopped  bool
 }
 
 func waitForPiSearchRuns(t *testing.T, done func(map[int]*piSearchRun) bool) map[int]*piSearchRun {
@@ -86,8 +93,16 @@ func waitForPiSearchRuns(t *testing.T, done func(map[int]*piSearchRun) bool) map
 	}
 }
 
-func started(count int) func(map[int]*piSearchRun) bool {
-	return func(runs map[int]*piSearchRun) bool { return len(runs) == count }
+// prompted waits for the fake Pis to get the prompt, by when they stop on SIGTERM with a record of it.
+func prompted(count int) func(map[int]*piSearchRun) bool {
+	return func(runs map[int]*piSearchRun) bool {
+		for _, run := range runs {
+			if !run.prompted {
+				return false
+			}
+		}
+		return len(runs) == count
+	}
 }
 
 func allStopped(count int) func(map[int]*piSearchRun) bool {
@@ -161,20 +176,20 @@ func TestAPiSearchEndsWithItsRequestANewerOneOrTheGateway(t *testing.T) {
 	// Also before Pi takes the prompt, which Gripi otherwise waits for.
 	ctx, cancel := context.WithCancel(context.Background())
 	unanswered := startSearch(ctx, piSearchUnanswered)
-	waitForPiSearchRuns(t, started(1))
+	waitForPiSearchRuns(t, prompted(1))
 	cancel()
 	ended(unanswered)
 	waitForPiSearchRuns(t, allStopped(1))
 
 	ctx, cancel = context.WithCancel(context.Background())
 	cancelled := start(ctx)
-	waitForPiSearchRuns(t, started(2))
+	waitForPiSearchRuns(t, prompted(2))
 	cancel()
 	ended(cancelled)
 	waitForPiSearchRuns(t, allStopped(2))
 
 	older := start(context.Background())
-	waitForPiSearchRuns(t, started(3))
+	waitForPiSearchRuns(t, prompted(3))
 	if code, payload := findWithPi(t, handler, map[string]string{"q": "alpha-0001"}, ""); code != http.StatusOK || !slices.Equal(payload.Sessions, []string{"alpha-0001"}) {
 		t.Fatalf("the newer search = %d %+v", code, payload)
 	}
@@ -184,7 +199,7 @@ func TestAPiSearchEndsWithItsRequestANewerOneOrTheGateway(t *testing.T) {
 	waitForPiSearchRuns(t, allStopped(4))
 
 	running := start(context.Background())
-	waitForPiSearchRuns(t, started(5))
+	waitForPiSearchRuns(t, prompted(5))
 	if err := handler.(interface{ Close(context.Context) error }).Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
