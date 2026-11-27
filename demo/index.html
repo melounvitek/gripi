@@ -101,10 +101,10 @@
     .session-header-actions { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 0.45rem; margin-left: 0.75rem; }
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
-    .session-header-window-action .ui-icon { width: 0.95rem; height: 0.95rem; }
+    :is(.session-header-window-action, [data-hermes-pop-out]) .ui-icon { width: 0.95rem; height: 0.95rem; }
     .session-header-window-action, .session-header-tag-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
     .session-header-tag-action { padding: 0; }
-    .session-header-tag-action svg, .tag-filter-toggle svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
+    .session-header-tag-action svg, .tag-filter-toggle > svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
     .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { color: var(--text); background: #ffffff08; }
     /* The Hermes tab on the window's edge opens and closes the panel, on whose edge it rides while the panel is open, beside
@@ -796,7 +796,7 @@
     .message-body--markdown code { padding: 0.1rem 0.3rem; border: 0; border-radius: 0.25rem; background: #ffffff0a; box-shadow: inset 0 0 0 1px #ffffff0f; color: var(--accent-soft); font-family: var(--mono); font-size: 0.88em; }
     .message-code-block { position: relative; }
     .message-body--markdown pre { padding: 0.85rem; border-radius: 0.3rem; background: var(--code); color: var(--success); overflow-x: auto; white-space: pre; border: 1px solid var(--border-strong); }
-    .message-body--markdown pre code { padding: 0; border: 0; background: transparent; color: inherit; }
+    .message-body--markdown pre code { padding: 0; border: 0; background: transparent; box-shadow: none; color: inherit; }
     .message-body--markdown code.highlight { color: var(--text); }
     .message-body--markdown code.highlight .syntax-comment { color: #6a9955; font-style: italic; }
     .message-body--markdown code.highlight .syntax-keyword { color: #569cd6; }
@@ -901,7 +901,7 @@
     .session-reconnect.is-visible { display: block; }
     .abort-form { display: none; }
     input, select, textarea { box-sizing: border-box; font-family: var(--mono); font-size: 0.9rem; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; color: var(--text); background: var(--bg); outline: none; }
-    input:focus, select:focus, textarea:focus { border-color: var(--accent-line-55); box-shadow: 0 0 0 1px var(--accent-line-55); }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent-line-55); outline: 1px solid var(--accent-line-55); }
     input::placeholder, textarea::placeholder { color: var(--muted-soft); }
     textarea { width: 100%; resize: none; min-height: 2.75rem; max-height: 12rem; line-height: 1.45; overflow-y: hidden; }
     .send-button, .composer-stop-button { display: none; }
@@ -1012,6 +1012,7 @@
       .picker-line { align-items: center; }
       .picker-line button { min-width: 2.75rem; padding: 0 0.3rem; }
       .picker-card .modal-close-button { width: 2.75rem; height: 2.75rem; }
+      .model-picker-card .modal-header .tree-session-input { min-height: 2.75rem; }
       .model-picker-thinking { gap: 0 0.3rem; padding-top: 0.4rem; }
       .model-picker-thinking .picker-separator, .tree-session-browser .picker-separator, .picker-hint { display: none; }
       /* Widens the tap target without moving the glyph out of the connector column. */
@@ -1236,7 +1237,7 @@
       .composer { padding: 0.4rem 0.75rem calc(0.6rem + env(safe-area-inset-bottom)); overflow: visible; }
       .composer-input-row { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) 2.75rem auto; }
       .attach-button, .send-button { min-width: 0; min-height: 2.75rem; padding: 0; }
-      .attach-button { width: 100%; font-size: 1.3rem; }
+      .attach-button { width: 100%; }
       .composer-input-row:has(.voice-button:not([hidden])) { grid-template-columns: minmax(0, 1fr) 2.75rem 2.75rem auto; }
       .voice-button svg { width: 22px; height: 22px; }
       .voice-call { padding-right: 0; font-size: 0.8rem; }
