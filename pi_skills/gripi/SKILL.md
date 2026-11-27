@@ -1,6 +1,6 @@
 ---
 name: gripi
-description: Works with Gripi sessions through the gripi command. Finds, reads, starts and messages them, runs parallel sub-sessions when the user asks for them, runs commands as root once the user agrees, logs in over SSH with the user's computer's keys, and runs commands on that computer, also as root. Use when the user asks for this, when a command needs sudo, when ssh lacks a key (Permission denied (publickey)), or for work on the user's own computer.
+description: Works with Gripi sessions through the gripi command. Finds, reads, links to, starts and messages them, runs parallel sub-sessions when the user asks for them, runs commands as root once the user agrees, logs in over SSH with the user's computer's keys, and runs commands on that computer, also as root. Use when the user asks for this, when a command needs sudo, when ssh lacks a key (Permission denied (publickey)), or for work on the user's own computer.
 ---
 
 You run in Gripi, which serves Pi sessions in the browser. The `gripi` command works with them. Check `gripi <command> --help` before using a command for the first time. `$PI_SESSION_FILE` is this session.
@@ -24,6 +24,7 @@ These go to the computer where the user last used this session. When `gripi pc` 
 ## Other sessions
 
 - `gripi list` and `gripi search` find sessions, `gripi show` reads them.
+- Link to a session as `[<name>](/sessions/<id>)`, with its full ID. A click on it opens the session in Gripi.
 - Tag, rename, pin or delete a session only when the user asks.
 
 ## Sub-sessions

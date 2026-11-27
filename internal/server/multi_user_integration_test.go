@@ -158,6 +158,17 @@ func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 	if palette.Code != http.StatusOK || !strings.Contains(palette.Body.String(), own) || strings.Contains(palette.Body.String(), other) {
 		t.Fatalf("filtered palette = %d %s", palette.Code, palette.Body.String())
 	}
+	// A link by ID finds only the user's own sessions, so its redirect never names another user's.
+	sessionID := func(path string) string { return "e2e-" + strings.TrimSuffix(filepath.Base(path), ".jsonl") }
+	// A prefix that other users' sessions share with the user's only one opens it.
+	for _, reference := range []string{sessionID(own), sessionID(own)[:5]} {
+		if link := getWorkspace(handler, "/sessions/"+reference, cookie); link.Header().Get("Location") != "/?session="+url.QueryEscape(own) {
+			t.Fatalf("own session link %s = %d to %q", reference, link.Code, link.Header().Get("Location"))
+		}
+	}
+	if link := getWorkspace(handler, "/sessions/"+sessionID(other), cookie); link.Code != http.StatusNotFound {
+		t.Fatalf("other session link = %d to %q", link.Code, link.Header().Get("Location"))
+	}
 	older := getWorkspace(handler, "/conversation_older?session="+url.QueryEscape(other), cookie)
 	if older.Code != http.StatusNotFound {
 		t.Fatalf("other history = %d", older.Code)

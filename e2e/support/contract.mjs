@@ -74,6 +74,7 @@ export const sessions = {
   liveCompaction: "E2E Live Compaction Desktop",
   liveThinking: "E2E Live Thinking Desktop",
   paletteCommands: "E2E Palette Commands Desktop",
+  sessionLink: "E2E Session Link Desktop",
   sudo: "E2E Sudo Desktop",
   sudoMobile: "E2E Sudo Mobile",
   worker: "E2E Worker Desktop",
@@ -125,6 +126,7 @@ export const prompts = {
   imageHover: "Keep the attached image neutral on hover",
   imageRead: "Read a large image without refreshing the conversation",
   newSession: "Create the first deterministic response",
+  sessionLink: "Link to the history session",
   // Pi refuses this one, like a prompt without an API key for its model.
   refused: "Send this when the provider has no key",
   realPiPrefix: "Reply with exactly this token and nothing else:"
@@ -245,7 +247,8 @@ export const replies = {
   aborted: "Run aborted by the browser.",
   extensionApproved: "Release approval was confirmed.",
   extensionRaceComplete: "Queued extension requests completed.",
-  newSession: "First session response complete."
+  newSession: "First session response complete.",
+  sessionLink: "It is [the history session](/sessions/e2e-history), next to [the prompt session](/sessions/e2e-prompt)."
 };
 
 // Live-rendering characterization scenarios. Each prompt starts a fake Pi run that pauses at confirmation

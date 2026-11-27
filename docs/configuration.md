@@ -355,7 +355,7 @@ The selected runtime must already work, authenticated and configured, for the ga
 
 ## Built-in skill
 
-Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root), to use [your computer’s SSH keys](#using-your-computers-ssh-keys) or [run commands on it](#running-commands-on-your-computer), or to start sub-sessions when you ask. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
+Gripi passes every Pi it starts a short skill named `gripi`, with `--skill`. It tells the model how to use the [`gripi` command](../README.md#command-line), such as to run [commands as root](#running-commands-as-root), to use [your computer’s SSH keys](#using-your-computers-ssh-keys) or [run commands on it](#running-commands-on-your-computer), to link to sessions as `/sessions/<id>`, or to start sub-sessions when you ask. A click on such a link opens the session in place, and in a [scratch session](#scratch-sessions) hides its window first, so the scratch session waits behind it; Ctrl+click opens it in a new tab. As with any skill, Pi puts only its name and description in the system prompt, and the model reads the rest when it needs it. Pi CLI in a terminal doesn’t get it.
 
 A skill of your own named `gripi`, such as `~/.pi/agent/skills/gripi/SKILL.md`, replaces it, because Pi keeps the first skill of a name and the skills it finds come before those passed with `--skill`. To leave the skill out:
 

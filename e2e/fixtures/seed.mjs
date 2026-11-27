@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { paginatedSubagent, sessions } from "../support/contract.mjs";
+import { paginatedSubagent, replies, sessions } from "../support/contract.mjs";
 
 const BASE_TIME = Date.parse("2026-07-20T12:00:00.000Z");
 
@@ -218,6 +218,7 @@ export async function seedFixtures(root) {
   await writeSession(root, projects["controls-project"], "live-compaction", sessions.liveCompaction, 0);
   await writeSession(root, projects["prompt-project"], "live-thinking", sessions.liveThinking, 0);
   await writeSession(root, projects["prompt-project"], "palette-commands", sessions.paletteCommands, 0);
+  await writeSession(root, projects["prompt-project"], "session-link", sessions.sessionLink, 0, { answer: replies.sessionLink });
   await writeSession(root, projects["prompt-project"], "sudo", sessions.sudo, 0);
   await writeSession(root, projects["mobile-project"], "sudo-mobile", sessions.sudoMobile, 0);
   await writeSession(root, projects["prompt-project"], "worker", sessions.worker, 0);
