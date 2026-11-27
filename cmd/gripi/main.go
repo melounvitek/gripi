@@ -97,6 +97,10 @@ func serve() error {
 		if pc, ok := handler.(interface{ EndPCLink() }); ok {
 			pc.EndPCLink()
 		}
+		// A search that Pi runs for the sidebar would hold the drain too.
+		if searches, ok := handler.(interface{ EndPiSearches() }); ok {
+			searches.EndPiSearches()
+		}
 		// Both listeners stop before either drains: a request accepted
 		// during a drain would lose its Pi process moments later.
 		if localServer != nil {

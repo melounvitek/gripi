@@ -16,6 +16,11 @@ const { createJiti } = await import(pathToFileURL(path.join(jitiRoot, "lib/jiti.
 const piIndex = path.join(piPackageRoot, "dist/index.js");
 const extensionPath = path.resolve("pi_extensions/gripi-tree.ts");
 const skillPath = path.resolve("pi_skills/gripi/SKILL.md");
+const providerPath = path.resolve("test/helpers/fake_provider.ts");
+// The scripted model provider needs Pi 0.99.0 or later.
+const piVersion = execFileSync(piExecutable, ["--version"], { encoding: "utf8", env: { ...process.env, PI_SKIP_VERSION_CHECK: "1" } }).trim();
+const [piMajor, piMinor] = (piVersion.match(/(\d+)\.(\d+)\.\d+/) || [0, 0, 0]).slice(1).map(Number);
+const scriptedModelSkip = piMajor === 0 && piMinor < 99 ? `Pi ${piVersion} is older than 0.99.0, which the scripted model needs` : false;
 
 async function resolvePiPackageRoot(executable) {
   const root = await packageRootAbove(executable) || await packageRootAbove(scriptBehindLauncher(executable));
@@ -146,6 +151,71 @@ test("Pi loads Gripi's skill unless the user has a skill of that name", { timeou
     await writeFile(path.join(own, "SKILL.md"), "---\nname: gripi\ndescription: My own notes on Gripi.\n---\n");
     assert.equal((await gripiSkill())?.description, "My own notes on Gripi.");
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// A gripi command that prints its arguments, or fails as gripi does when it can't reach the gateway.
+async function fakeGripi(directory) {
+  const command = path.join(directory, "gripi");
+  await writeFile(command, `#!/usr/bin/env node
+if (process.argv.includes("unreachable")) {
+  process.stderr.write("gripi search: the gateway cannot be reached\\n");
+  process.exit(1);
+}
+console.log(JSON.stringify({ args: process.argv.slice(2), token: process.env.GRIPI_USER_TOKEN }));
+`, { mode: 0o755 });
+  return command;
+}
+
+test("a Pi that finds sessions for Gripi searches and reads them with gripi, within the sidebar's filters", async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-find-tools-"));
+  const variables = { GRIPI_FIND_SESSIONS: await fakeGripi(directory), GRIPI_FIND_CWD: "/home/me/project", GRIPI_FIND_TAG: "bug", GRIPI_USER_TOKEN: "piu_alice" };
+  const previous = Object.fromEntries(Object.keys(variables).map((name) => [name, process.env[name]]));
+  t.after(async () => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  assert.deepEqual([...(await loadTreeExtension()).tools.keys()], []);
+  Object.assign(process.env, variables);
+  const { tools } = await loadTreeExtension();
+  assert.deepEqual([...tools.keys()], ["search_sessions", "show_session"]);
+  const text = async (name, params) => JSON.parse((await tools.get(name).execute("call", params, undefined)).content[0].text);
+
+  assert.deepEqual(await text("search_sessions", { text: "--all backup" }), { args: ["search", "--cwd", "/home/me/project", "--tag", "bug", "--", "--all backup"], token: "piu_alice" });
+  assert.deepEqual(await text("show_session", { id: "01a2-b3" }), { args: ["show", "--all", "--", "01a2-b3"], token: "piu_alice" });
+  await assert.rejects(tools.get("search_sessions").execute("call", { text: "unreachable" }, undefined), { message: "gripi search: the gateway cannot be reached" });
+});
+
+test("a Pi that finds sessions for Gripi has no other tools", { timeout: 30_000, skip: scriptedModelSkip }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-find-pi-"));
+  // The flags that Gripi starts such a Pi with (internal/agent/pi/adapter.go).
+  const child = spawn(piExecutable, [
+    "--mode", "rpc", "--no-session", "-ne", "--approve", "--extension", providerPath, "--extension", extensionPath, "--model", "fake/fake-1",
+    "--tools", "search_sessions,show_session", "--exclude-tools", "mcp__*", "--no-skills", "--no-context-files", "--thinking", "low",
+  ], {
+    cwd: directory,
+    env: { ...process.env, PI_CODING_AGENT_DIR: path.join(directory, "agent"), PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", GRIPI_FIND_SESSIONS: await fakeGripi(directory) },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const records = rpcRecords(child);
+  try {
+    const calls = [[{ name: "bash", arguments: { command: "touch escaped" } }, { name: "search_sessions", arguments: { text: "backup" } }]];
+    child.stdin.write(`${JSON.stringify({ id: "run", type: "prompt", message: `RUN ${JSON.stringify(calls)}` })}\n`);
+    const reply = await records.next((record) => record.type === "message_end" && record.message?.role === "assistant" && record.message.stopReason !== "toolUse");
+    const [bash, search] = JSON.parse(reply.message.content[0].text);
+
+    assert.equal(bash.isError, true);
+    assert.equal(existsSync(path.join(directory, "escaped")), false);
+    assert.equal(search.isError, false);
+    assert.deepEqual(JSON.parse(search.text).args, ["search", "--", "backup"]);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -380,8 +450,9 @@ async function loadTreeExtension() {
   const jiti = createJiti(import.meta.url, { interopDefault: true, alias: { "@earendil-works/pi-coding-agent": piIndex } });
   const loadExtension = await jiti.import(extensionPath, { default: true });
   const commands = new Map();
-  loadExtension({ registerCommand(name, command) { commands.set(name, command); }, on() {}, setLabel() {} });
-  return commands;
+  const tools = new Map();
+  loadExtension({ registerCommand(name, command) { commands.set(name, command); }, registerTool(tool) { tools.set(tool.name, tool); }, on() {}, setLabel() {} });
+  return Object.assign(commands, { tools });
 }
 
 // Runs a bridge command as Gripi sends it and returns the extension's reply.

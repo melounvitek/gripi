@@ -95,6 +95,8 @@ type application struct {
 	voice   *hermesdashboard.Client
 	hermes  hermesConversation
 	scratch scratchSessions
+	// piSearches are the hidden Pis that the sidebar's search asks for sessions.
+	piSearches piSearches
 	// commandRoutes serve gripi commands, as Local does, and the reports to parent sessions.
 	commandRoutes http.Handler
 }
@@ -157,6 +159,11 @@ func (handler *Handler) Close(ctx context.Context) error {
 			handler.app.rpcMaintenance.Stop()
 			close(handler.maintenanceDone)
 		}()
+	}
+	// Their Pis run in scratch session folders.
+	handler.app.piSearches.stop()
+	if err := handler.app.piSearches.wait(ctx); err != nil {
+		return err
 	}
 	if err := handler.app.rpcClients.Shutdown(ctx); err != nil {
 		return err
@@ -358,6 +365,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.registerEnvironmentRoutes(mux)
 	app.registerWorkerRoutes(mux)
 	app.registerScratchRoutes(mux)
+	app.registerPiSearchRoutes(mux)
 	app.registerPCRoutes(mux)
 	if cfg.HermesPath != "" {
 		app.registerHermesRoutes(mux)
