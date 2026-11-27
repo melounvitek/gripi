@@ -330,6 +330,12 @@ The session lives as long as its Pi process: changed environment variables and t
 
 In a browser tab, Ctrl+Shift+N opens the browser's own private window instead; it works in the desktop app.
 
+## Asking Pi to find sessions
+
+The sidebar's search matches only a session's name, folder and first message. To search the conversations too, click **ask Pi** next to the search field, or press Enter when the search matches no session. Pi searches the conversations, trying other words for the search, and the sidebar then lists the sessions it found with those that match the text. **found by Pi ×** marks the list; its **×** shows only the text matches again. The sessions that Pi found stay in the page's address, so a reload, Back and opening one of them keep the list. While Pi searches, **Pi · stop** stops it, and so does changing the search. When Pi finds nothing more or fails, the sidebar says so.
+
+Each search starts a hidden Pi on Pi's default model, with a low thinking level, in an empty temporary folder like a [scratch session](#scratch-sessions)'s, and ends it with the search. Gripi saves nothing of it. That Pi has only two tools, which run `gripi search` and `gripi show --all` for the user: no shell, no file tools, no MCP tools, and no skills or context files. A conversation that it reads could ask it to do anything, but it can only search and read sessions. It searches only the sessions of the sidebar's project and tag filters, in [multi-user mode](#multi-user-mode) only the user's own, and Gripi drops any session in its answer that the user's sidebar doesn't list. Each search is a model run, which costs as much as any other. A user runs one search at a time: a new one stops the older one. Pi gets 2 minutes; a [reverse proxy](#reverse-proxy) with a shorter limit for a request, such as nginx's 60 seconds, ends a longer search sooner.
+
 ## Project resource approval
 
 Gripi starts Pi with `--approve`, so project-local settings, extensions, skills, prompts, themes, system prompts, and packages load without asking. Pi CLI asks before trusting a project. Project extensions and package installation scripts can run any code as the gateway OS user, so only open projects you trust.
