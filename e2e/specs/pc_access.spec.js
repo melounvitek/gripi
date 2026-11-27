@@ -179,10 +179,6 @@ async function allowPcAccess(context, gateway, answer) {
       desktop.seen.push(prompt);
       return typeof answer === "function" ? answer(signal) : answer;
     },
-    authenticate: async () => {
-      desktop.seen.push("password");
-      return { ok: true };
-    },
     readKnownHosts: async () => [knownHosts]
   });
   pcAccesses.push(pcAccess);
@@ -219,7 +215,7 @@ async function reachedBy(desktop) {
   return listed.stdout.includes(fingerprintOf("client")) && desktop.requests.length > requests;
 }
 
-test("a login allowed for 5 minutes pushes, then fetches without asking again", async ({ context, page, baseURL, isMobile }) => {
+test("a login allowed for 5 minutes pushes without a password, then fetches without asking again", async ({ context, page, baseURL, isMobile }) => {
   test.skip(isMobile, "Desktop app flow");
   const gateway = { id: "e2e", name: "E2E gateway", url: baseURL };
   const desktop = await allowPcAccess(context, gateway, "grant");
@@ -237,11 +233,13 @@ test("a login allowed for 5 minutes pushes, then fetches without asking again", 
     server: { names: [knownHosts.split(" ")[0]], hostKeyFingerprint: fingerprintOf("host") },
     login: os.userInfo().username
   };
-  expect(seen).toEqual([prompt, "password"]);
+  expect(seen).toEqual([prompt]);
+  // Without polkit's password dialog, which only commands as root ask for.
+  expect(fs.existsSync(file("pkexec-call"))).toBe(false);
 
   const fetch = await gripiPc(["git", "fetch", "origin"]);
   expect(fetch.code, fetch.stderr).toBe(0);
-  expect(seen).toEqual([prompt, "password"]);
+  expect(seen).toEqual([prompt]);
 });
 
 test("a denied login fails the push with the PC's refusal", async ({ context, page, baseURL, isMobile }) => {
@@ -380,7 +378,6 @@ test("a command allowed on the computer runs there, and gives back its output an
   approve("run");
 
   expect(await ran).toEqual({ code: 3, stdout: `${folder}\n`, stderr: "err\n" });
-  // Without polkit's password dialog, which only logins ask for.
   expect(desktop.seen).toEqual([{ kind: "run", gateway, sessionName: sessions.history, command: `${which("sh")} -c "${script}"`, folder, root: false }]);
   await expect(line).toBeHidden();
 });

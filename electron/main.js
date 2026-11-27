@@ -296,7 +296,7 @@ async function confirmPcAccessOptIn(gateway) {
     type: "warning",
     message: `Allow ${gateway.name} to use this computer?`,
     detail: [
-      "Agents on this server can then ask to use this computer's SSH keys, and to run commands here as you or as root. You approve each use here, unless you allow a key for 5 minutes, and polkit then checks that it is you for SSH logins and commands as root, usually with your password. Anyone at this computer while it is unlocked can approve a command as you.",
+      "Agents on this server can then ask to use this computer's SSH keys, and to run commands here as you or as root. You approve each use here, unless you allow a key for 5 minutes, and for commands as root, polkit then checks that it is you, usually with your password. Anyone at this computer while it is unlocked can approve an SSH login or a command as you.",
       "The server sees every public key in your SSH agent, with its comment, and the output of the commands that you run for it.",
       "It works only while Gripi is open."
     ].join("\n\n"),

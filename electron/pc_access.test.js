@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
-const { authenticateWithPolkit, createPcAccess, linkRequest } = require("./pc_access");
+const { createPcAccess, linkRequest } = require("./pc_access");
 
 const GATEWAY = { id: "home", name: "home-server", url: "https://home.example.test/" };
 const SESSION = "/home/vitek/.pi/sessions/a.jsonl";
@@ -76,8 +76,8 @@ async function settle() {
   for (let round = 0; round < 5; round++) await new Promise(setImmediate);
 }
 
-function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = false, hostname = "laptop.home.lan", starting = 200, lostResults = false, lostReplies = false } = {}) {
-  const harness = { polls: [], posts: [], prompts: [], agents: [], spawned: [], auths: 0, time: 0 };
+function setup(t, { holdReplies = false, hostname = "laptop.home.lan", starting = 200, lostResults = false, lostReplies = false } = {}) {
+  const harness = { polls: [], posts: [], prompts: [], agents: [], spawned: [], time: 0 };
   const warn = t.mock.method(console, "warn", () => {});
   harness.warnings = () => warn.mock.calls.map((call) => call.arguments.join(" "));
   harness.pc = createPcAccess({
@@ -108,10 +108,6 @@ function setup(t, { authenticate = async () => ({ ok: true }), holdReplies = fal
       harness.prompts.push({ ...prompt, answer: resolve });
       prompt.signal.addEventListener("abort", () => resolve("deny"));
     }),
-    authenticate(signal) {
-      harness.auths += 1;
-      return authenticate(signal);
-    },
     async connectAgent() {
       const agent = {
         requests: [],
@@ -274,7 +270,6 @@ test("asks with the request's details, escaped, and signs nothing when denied", 
 
   assert.deepEqual(h.replies().at(-1), { link: h.link(), id: "2", error: "denied on the PC" });
   assert.equal(h.agents[0].requests.length, 1);
-  assert.equal(h.auths, 0);
 });
 
 test("shows at most 200 characters of a session name, escaped first", async (t) => {
@@ -376,13 +371,12 @@ test("a poll that would take the link over 256 requests in progress, refusals be
   assert.notEqual(h.link(), link);
 });
 
-test("allow once signs after the password check and asks again next time", async (t) => {
+test("allow once signs at once, without a password check, and asks again next time", async (t) => {
   const h = setup(t);
 
   await h.deliver(ssh("1", sign()));
   await h.answer("once");
 
-  assert.equal(h.auths, 1);
   assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", message: agentReply(sign()) }]);
 
   await h.deliver(ssh("2", sign()));
@@ -399,7 +393,6 @@ test("a 5-minute grant covers only its session, key, host and login, until it ex
   await h.deliver(ssh("2", sign(), { connection: "c2" }));
 
   assert.equal(h.prompts.length, 1);
-  assert.equal(h.auths, 1);
   assert.deepEqual(h.replies().at(-1), { link: h.link(), id: "2", message: agentReply(sign()) });
 
   const others = [
@@ -420,33 +413,15 @@ test("a 5-minute grant covers only its session, key, host and login, until it ex
   assert.equal(h.prompts.length, 6);
 });
 
-test("a failed password check denies and grants nothing", async (t) => {
-  const h = setup(t, { authenticate: async () => ({ ok: false, reason: "the password dialog was cancelled" }) });
-
-  await h.deliver(ssh("1", sign()));
-  await h.answer("grant");
-
-  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "denied on the PC: the password dialog was cancelled" }]);
-  assert.equal(h.agents.length, 0);
-
-  await h.deliver(ssh("2", sign(), { connection: "c2" }));
-
-  assert.equal(h.prompts.length, 2);
-});
-
-test("tells the server while it asks, from its dialog to the end of the password check, which Gripi shows elsewhere", async (t) => {
-  let authenticated;
-  const h = setup(t, { authenticate: () => new Promise((resolve) => { authenticated = resolve; }) });
+test("tells the server while it asks, until its dialog ends, which Gripi shows elsewhere", async (t) => {
+  const h = setup(t);
 
   await h.deliver(ssh("1", sign({ user: "git\u001b" })), ssh("2", sign({ host: "host-gl" }), { connection: "c2" }));
 
   const asking = { link: h.link(), id: "1", asking: true, summary: "SSH login to github.com as git\\u001b", expires_in: 120 };
   assert.deepEqual(h.statuses(), [asking]);
   await h.answer("once");
-  assert.deepEqual(h.statuses(), [asking]);
 
-  authenticated({ ok: true });
-  await settle();
   assert.deepEqual(h.posts.filter((post) => post.body.id === "1").map((post) => post.path), ["/pc/link/status", "/pc/link/status", "/pc/link/reply"]);
   assert.deepEqual(h.statuses(), [asking, { link: h.link(), id: "1", asking: false }, { ...asking, id: "2", summary: "SSH login to gitlab.com as git" }]);
 });
@@ -466,23 +441,6 @@ test("says nothing of a login that a grant covers, also one made while it waited
   assert.equal(h.prompts.length, 1);
   assert.deepEqual(h.statuses().map((status) => [status.id, status.asking]), [["1", true], ["1", false]]);
   assert.deepEqual(h.replies().map((reply) => reply.id).sort(), ["1", "2", "4"]);
-});
-
-test("shows the next dialog only once the password check of the one before has ended", async (t) => {
-  let authenticated;
-  const h = setup(t, { authenticate: () => new Promise((resolve) => { authenticated = resolve; }) });
-
-  await h.deliver(ssh("1", sign()), ssh("2", sign({ user: "deploy" }), { connection: "c2" }));
-  await h.answer("once");
-
-  assert.equal(h.auths, 1);
-  assert.equal(h.prompts.length, 1);
-
-  authenticated({ ok: true });
-  await settle();
-
-  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", message: agentReply(sign()) }]);
-  assert.equal(h.prompts.length, 2);
 });
 
 test("refuses at once when more than 5 requests wait for approval", async (t) => {
@@ -506,20 +464,6 @@ test("a cancel closes the request's dialog, or keeps it from showing, and signs 
 
   assert.equal(h.prompts[0].signal.aborted, true);
   assert.equal(h.prompts.length, 1);
-  assert.deepEqual(h.replies(), []);
-  assert.equal(h.agents.length, 0);
-});
-
-test("a cancel during the password check signs nothing", async (t) => {
-  let confirmed;
-  const h = setup(t, { authenticate: () => new Promise((resolve) => { confirmed = resolve; }) });
-
-  await h.deliver(ssh("1", sign()));
-  await h.answer("grant");
-  await h.deliver({ type: "cancel", id: "1" });
-  confirmed({ ok: true });
-  await settle();
-
   assert.deepEqual(h.replies(), []);
   assert.equal(h.agents.length, 0);
 });
@@ -557,26 +501,6 @@ test("a dialog nobody answers in 2 minutes is denied", async (t) => {
 
   assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "denied on the PC: nobody answered there in 2 minutes" }]);
   assert.equal(h.agents.length, 0);
-});
-
-test("the 2 minutes cover the password check, which is stopped when they end", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let authSignal;
-  const h = setup(t, {
-    authenticate: (signal) => new Promise((resolve) => {
-      authSignal = signal;
-      signal.addEventListener("abort", () => resolve({ ok: false, reason: "pkexec was stopped" }));
-    })
-  });
-
-  await h.deliver(ssh("1", sign()));
-  t.mock.timers.tick(60 * 1000);
-  await h.answer("once");
-  t.mock.timers.tick(60 * 1000);
-  await settle();
-
-  assert.equal(authSignal.aborted, true);
-  assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "denied on the PC: nobody answered there in 2 minutes" }]);
 });
 
 // A network drop that the gateway outlasts with the link, which it keeps for 35 seconds without polls.
@@ -766,11 +690,10 @@ test("asks to run a command with the file that runs, the folder and the session,
   await h.answer("deny");
 
   assert.deepEqual(h.replies(), [{ link: h.link(), id: "1", error: "denied on the PC" }]);
-  assert.equal(h.auths, 0);
   assert.equal(h.spawned.length, 0);
 });
 
-test("runs an approved command without polkit's password dialog, a shell or input in a process group of its own, once the server says that it still waits", async (t) => {
+test("runs an approved command without a shell or input in a process group of its own, once the server says that it still waits", async (t) => {
   const h = setup(t);
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), "pc-run-"));
   t.after(() => fs.rmSync(folder, { recursive: true }));
@@ -779,7 +702,6 @@ test("runs an approved command without polkit's password dialog, a shell or inpu
   await h.prompted(1);
   await h.answer("run");
 
-  assert.equal(h.auths, 0);
   assert.deepEqual(h.spawned.map(({ command, args, options }) => ({ command, args, options })), [{
     command: SH,
     args: ["-c", "pwd; read -r line || echo no input >&2; exit 3"],
@@ -1091,7 +1013,6 @@ test("asks to run a command as root, saying so, and runs it with pkexec in its f
     id: "1",
     result: { exit_code: 3, stdout: base64(`${folder}\n`), stderr: base64("no input\n"), truncated: false }
   }]);
-  assert.equal(h.auths, 0);
   assert.deepEqual(h.statuses().at(-1), { link: h.link(), id: "1", asking: false });
 });
 
@@ -1268,22 +1189,6 @@ test("a cancel that comes before the server's answer that a command as root may 
   assert.deepEqual(pkexec.calls(), []);
   assert.equal(h.spawned.length, 0);
   assert.deepEqual(h.replies(), []);
-});
-
-test("a cancelled password check ends only once pkexec has exited", async () => {
-  let pkexec;
-  // Like pkexec while polkit's dialog takes a moment to close.
-  const spawnShell = (_command, _args, options) => {
-    pkexec = spawn("sh", ["-c", "trap '' TERM; echo asking; sleep 0.2"], { ...options, stdio: ["ignore", "pipe", "ignore"] });
-    return pkexec;
-  };
-  const controller = new AbortController();
-  const checked = authenticateWithPolkit(controller.signal, spawnShell);
-  await once(pkexec.stdout, "data");
-  controller.abort();
-
-  assert.equal((await checked).ok, false);
-  assert.equal(pkexec.exitCode, 0);
 });
 
 async function listen(t, handler) {

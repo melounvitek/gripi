@@ -62,7 +62,6 @@ exit "$code"`;
 function createPcAccess({
   request,
   confirm,
-  authenticate = authenticateWithPolkit,
   connectAgent = connectLocalAgent,
   readKnownHosts = readLocalKnownHosts,
   now = Date.now,
@@ -264,7 +263,6 @@ function createPcAccess({
       },
       summary: `SSH login to ${host.names[0] || "a known host"} as ${login}`,
       answers: ["once", "grant"],
-      password: true,
       covered: granted,
       approved: (answer) => {
         if (answer === "grant" && !signal.aborted) link.grants.set(grantKey, now() + GRANT_MS);
@@ -273,10 +271,9 @@ function createPcAccess({
     });
   }
 
-  // Asks the user to approve a request in the approval turn, unless covered says that it needs no approval, and with
-  // password, to confirm it in polkit's password dialog, and returns a refusal, or null once they approved it. approved
-  // runs in the turn once they did, and may still refuse it.
-  async function approve(entry, link, message, signal, { prompt, summary, answers, password = false, covered = () => false, approved }) {
+  // Asks the user to approve a request in the approval turn, unless covered says that it needs no approval, and returns
+  // a refusal, or null once they approved it. approved runs in the turn once they did, and may still refuse it.
+  async function approve(entry, link, message, signal, { prompt, summary, answers, covered = () => false, approved }) {
     if (waitingApprovals >= MAX_WAITING_APPROVALS) return "denied on the PC: too many requests are waiting for approval there";
 
     const name = [...escapeForDisplay(message.session_name || message.session)];
@@ -289,7 +286,8 @@ function createPcAccess({
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(), DIALOG_TIMEOUT_MS);
       const approval = AbortSignal.any([signal, timeout.signal]);
-      // Gripi shows that the PC asks on the user's other devices, until the dialog and polkit's have ended.
+      // Gripi shows that the PC asks on the user's other devices, until the dialog, and polkit's for a command as root,
+      // have ended.
       status(entry, link, message.id, { asking: true, summary, expires_in: DIALOG_TIMEOUT_MS / 1000 }, signal);
       try {
         const answer = await confirm({ ...prompt, gateway: entry.gateway, sessionName, signal: approval }).catch((error) => {
@@ -298,13 +296,6 @@ function createPcAccess({
         });
         if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
         if (!answers.includes(answer) || approval.aborted) return "denied on the PC";
-
-        if (password) {
-          const auth = await authenticate(approval);
-          if (timeout.signal.aborted) return "denied on the PC: nobody answered there in 2 minutes";
-          if (!auth.ok) return `denied on the PC: ${auth.reason}`;
-          if (approval.aborted) return "denied on the PC";
-        }
         return await approved(answer, approval);
       } finally {
         clearTimeout(timer);
@@ -705,23 +696,6 @@ function agentClient(socket) {
   };
 }
 
-// polkit's own dialog confirms that it is the user, so Gripi never asks for the password itself. Node reports a cancel
-// as it signals pkexec, so the check ends only once pkexec has exited, and with it polkit's dialog.
-function authenticateWithPolkit(signal, spawn = childProcess.spawn) {
-  return new Promise((resolve) => {
-    const child = spawn("pkexec", ["--disable-internal-agent", "/usr/bin/true"], { stdio: "ignore", signal });
-    let failure;
-    child.on("error", (error) => {
-      failure ??= error;
-    });
-    child.on("close", (code) => {
-      if (failure) resolve({ ok: false, reason: failure.code === "ENOENT" ? "PC access needs polkit's pkexec" : failure.message });
-      else if (code === 0) resolve({ ok: true });
-      else resolve({ ok: false, reason: code === 126 ? "the password dialog was cancelled" : `pkexec failed with exit code ${code}` });
-    });
-  });
-}
-
 async function readLocalKnownHosts() {
   const files = [path.join(os.homedir(), ".ssh", "known_hosts"), "/etc/ssh/ssh_known_hosts"];
   const texts = await Promise.all(files.map((file) => fs.promises.readFile(file, "utf8").catch((error) => {
@@ -731,4 +705,4 @@ async function readLocalKnownHosts() {
   return texts.filter((text) => text !== null);
 }
 
-module.exports = { authenticateWithPolkit, createPcAccess, linkRequest };
+module.exports = { createPcAccess, linkRequest };

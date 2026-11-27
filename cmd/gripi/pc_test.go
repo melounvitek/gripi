@@ -1216,8 +1216,8 @@ func TestCancelInGripiRefusesARequestThatAComputerAsksToApprove(t *testing.T) {
 	}
 }
 
-// pcStarting tells the gateway, as the desktop app of the laptop does over link once the user approved the request id
-// and polkit confirmed it, that it is about to run the command, and returns whether it may.
+// pcStarting tells the gateway, as the desktop app of the laptop does over link once the user approved the request id,
+// that it is about to run the command, and returns whether it may.
 func pcStarting(t *testing.T, address, link, id string, change ...func(*http.Request)) int {
 	status, _ := pcLinkSend(t, address, "/pc/link/status", map[string]any{"link": link, "id": id, "starting": true}, change...)
 	return status
