@@ -291,6 +291,8 @@ function respondWithEntries(command) {
 }
 
 function setModel(command) {
+  // Pi ends while it chooses this model.
+  if (command.modelId === "fatal-model") process.exit(1);
   const selected = fakeModels().find((candidate) => candidate.provider === command.provider && candidate.id === command.modelId);
   if (!selected) {
     respond(command, false, { error: `Model not found: ${command.provider}/${command.modelId}` });

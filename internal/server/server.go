@@ -29,6 +29,7 @@ import (
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/resource"
 	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/state"
 	"github.com/melounvitek/gripi/internal/update"
 )
 
@@ -243,7 +244,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		unknownBodySpools:    make(chan struct{}, unknownBodySpoolLimit),
 		knownSessionHashes:   make(map[string]bool),
 		pendingSessions:      agent.NewPendingSessionRegistry(nil),
-		scratch:              scratchSessions{byOwner: make(map[string]*scratchSession), ended: make(map[string]bool)},
+		scratch:              scratchSessions{byOwner: make(map[string]*scratchSession), ended: make(map[string]bool), models: scratchModels{file: state.NewFile(cfg.ScratchModelPath)}},
 	}
 	if app.scratch.folders, err = openScratchFolders(os.TempDir()); err != nil {
 		logInternalError("open scratch session folders", err)

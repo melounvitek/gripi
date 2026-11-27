@@ -194,7 +194,7 @@ Gripi uses Pi’s own runtime, sessions, tools, models, and configuration. The c
 - **Sessions in use in Pi CLI are hidden from the sidebar** until you show them with the terminal button beside search. Each browser remembers the choice, and Ctrl+K still finds them. Pinned sessions always show, and a tag filter lists its Pi CLI sessions too. A sub-session, which `gripi link` puts under another session, shows under it either way, folded with the others into one line that opens on a click and counts those that run, have a reply you haven’t read, or are done. The one you have open stays listed.
 - **Saved environment variables stay in Gripi.** Pi CLI in a terminal does not get the [environment variables](docs/configuration.md#environment-variables) you save in Gripi, so a session continued there runs without them.
 - **[`gripi sudo`](docs/configuration.md#running-commands-as-root) asks only in Gripi.** Pi CLI in a terminal shows no prompt for it.
-- **A [scratch session](docs/configuration.md#scratch-sessions) does less than `pi --no-session`.** Pi keeps it only in memory, as with `--no-session`, but Gripi also runs it in an empty temporary folder and refuses `/name`, `/tree`, `/fork`, `/clone`, `/new` and `/export` there, which Pi would do in memory or to a file.
+- **A [scratch session](docs/configuration.md#scratch-sessions) does less than `pi --no-session`.** Pi keeps it only in memory, as with `--no-session`, but Gripi also runs it in an empty temporary folder and refuses `/name`, `/tree`, `/fork`, `/clone`, `/new` and `/export` there, which Pi would do in memory or to a file. It starts on the model and thinking level last chosen in a scratch session, when there are any, not on Pi's default model.
 
 ## Development
 

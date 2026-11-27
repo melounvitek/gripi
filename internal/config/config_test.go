@@ -25,6 +25,7 @@ func TestLoadReadsGatewayEnvWithoutOverridingProcessEnvironment(t *testing.T) {
 		"GRIPI_PINNED_SESSIONS_PATH=/isolated/pinned.json",
 		"GRIPI_SESSION_TAGS_PATH=/isolated/tags.json",
 		"GRIPI_ENVIRONMENT_PATH=/isolated/environment.json",
+		"GRIPI_SCRATCH_MODEL_PATH=/isolated/scratch-model.json",
 		"GRIPI_WORKERS_PATH=/isolated/workers.json",
 		"GRIPI_WORKER_PLACEMENTS_PATH=/isolated/worker-placements.json",
 		"GRIPI_HOST=localhost",
@@ -48,6 +49,9 @@ func TestLoadReadsGatewayEnvWithoutOverridingProcessEnvironment(t *testing.T) {
 	}
 	if cfg.EnvironmentPath != "/isolated/environment.json" {
 		t.Fatalf("EnvironmentPath = %q", cfg.EnvironmentPath)
+	}
+	if cfg.ScratchModelPath != "/isolated/scratch-model.json" {
+		t.Fatalf("ScratchModelPath = %q", cfg.ScratchModelPath)
 	}
 	if cfg.WorkersPath != "/isolated/workers.json" {
 		t.Fatalf("WorkersPath = %q", cfg.WorkersPath)
@@ -101,6 +105,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.EnvironmentPath != filepath.Join(home, ".pi", "gripi", "environment.json") {
 		t.Fatalf("EnvironmentPath = %q", cfg.EnvironmentPath)
+	}
+	if cfg.ScratchModelPath != filepath.Join(home, ".pi", "gripi", "scratch-model.json") {
+		t.Fatalf("ScratchModelPath = %q", cfg.ScratchModelPath)
 	}
 	if cfg.WorkersPath != filepath.Join(home, ".pi", "gripi", "workers.json") {
 		t.Fatalf("WorkersPath = %q", cfg.WorkersPath)

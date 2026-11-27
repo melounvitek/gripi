@@ -30,6 +30,7 @@ type Config struct {
 	PinnedSessionsPath        string
 	SessionTagsPath           string
 	EnvironmentPath           string
+	ScratchModelPath          string
 	BrowserAccessPath         string
 	WorkspaceSecretPath       string
 	WorkspaceAccessPath       string
@@ -198,6 +199,7 @@ func Load(environ []string) (Config, error) {
 		PinnedSessionsPath:        valueOr(values, "GRIPI_PINNED_SESSIONS_PATH", filepath.Join(home, ".pi", "gripi", "pinned-sessions.json")),
 		SessionTagsPath:           valueOr(values, "GRIPI_SESSION_TAGS_PATH", filepath.Join(home, ".pi", "gripi", "session-tags.json")),
 		EnvironmentPath:           valueOr(values, "GRIPI_ENVIRONMENT_PATH", filepath.Join(home, ".pi", "gripi", "environment.json")),
+		ScratchModelPath:          valueOr(values, "GRIPI_SCRATCH_MODEL_PATH", filepath.Join(home, ".pi", "gripi", "scratch-model.json")),
 		BrowserAccessPath:         valueOr(values, "GRIPI_BROWSER_ACCESS_PATH", filepath.Join(home, ".pi", "gripi", "browser-access.json")),
 		WorkspaceSecretPath:       valueOr(values, "GRIPI_WORKSPACE_SECRET_PATH", filepath.Join(home, ".pi", "gripi", "workspace-secret")),
 		WorkspaceAccessPath:       valueOr(values, "GRIPI_WORKSPACE_ACCESS_PATH", filepath.Join(home, ".pi", "gripi", "workspace-access.json")),
