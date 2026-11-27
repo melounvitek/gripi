@@ -32,6 +32,7 @@
       --muted-soft: #666666;
       --accent: #ff5a1f;
       --accent-bright: #ff7a45;
+      --accent-soft: #f4794c;
       --gold: #f0c674;
       --success: #b5bd68;
       --danger: #cc6666;
@@ -100,6 +101,7 @@
     .session-header-actions { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 0.45rem; margin-left: 0.75rem; }
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
+    .session-header-window-action .ui-icon { width: 0.95rem; height: 0.95rem; }
     .session-header-window-action, .session-header-tag-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
     .session-header-tag-action { padding: 0; }
     .session-header-tag-action svg, .tag-filter-toggle svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
@@ -297,6 +299,7 @@
     .image-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     .attach-button, .voice-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border: 0; border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
     .attach-button:hover { color: var(--text); background: #ffffff08; }
+    .attach-button .ui-icon { width: 1.15rem; height: 1.15rem; }
     .image-input:focus-visible + .attach-button { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
     .voice-button:hover, .voice-button:disabled:hover { background: transparent; }
     @media (hover: hover) and (pointer: fine) { .voice-button:not(:disabled):hover { color: var(--text); background: #ffffff08; } }
@@ -495,6 +498,8 @@
     .recent-sessions { margin-bottom: 0.75rem; }
     .recent-sessions-header { display: flex; align-items: center; gap: 0.4rem; margin: 0.75rem 0 0.5rem; padding-left: 0.5rem; }
     .recent-sessions-header h2, .sessions-day, .sidebar-filter-count, .sidebar-search-empty, .blocked-windows, .session-actions-heading { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    /* Section headers stand apart from the day labels between sessions. */
+    .recent-sessions-header h2 { color: var(--copy); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
     .sidebar-filter-count { margin-left: 0.3rem; white-space: nowrap; }
     .sidebar-search-empty { margin: 0.85rem 0.5rem; }
     .blocked-windows { margin: 0 0.5rem 0.6rem; line-height: 1.55; }
@@ -578,7 +583,7 @@
     .session-action-modal p { margin: 0; }
     .session-delete-explanation, .gateway-update-failure-note { color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
     .session-action-error { color: var(--danger); font-size: 0.85rem; }
-    .session-row:has(a.session.selected) { background: var(--panel-softer); }
+    .session-row:has(a.session.selected) { background: var(--panel-soft); box-shadow: inset 0 0 0 1px var(--border-strong); }
     .session-row.is-marked { background: var(--accent-tint-04); }
     .session-row.is-marked::before { content: ""; position: absolute; top: 0.3rem; bottom: 0.3rem; left: 0; width: 2px; border-radius: 1px; background: var(--accent); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
@@ -644,7 +649,7 @@
     @media (hover: hover) and (pointer: fine) { .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); } }
     .sidebar-new-session-button, .sidebar-open-pinned-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; letter-spacing: 0; text-transform: none; }
     .sidebar-new-session-button { color: var(--accent); }
-    .sidebar-new-session-button span, .sidebar-open-pinned-button span { font-size: 0.9rem; line-height: 1; }
+    .sidebar-new-session-button svg, .sidebar-open-pinned-button svg { width: 0.85rem; height: 0.85rem; }
     .sidebar-new-session-button:hover { color: var(--accent-bright); }
     .sidebar-new-session-button:focus-visible, .sidebar-open-pinned-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
     .session-running-indicator, .session-compacting-indicator { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--success); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; }
@@ -696,11 +701,11 @@
     .message-body--edit-preview .tool-diff-line--preview-ellipsis { font-style: italic; opacity: 0.78; }
     .tool-diff-line--context { color: var(--muted); }
     .tool-command { color: var(--text); font-weight: 600; }
-    .tool-path { color: var(--accent); font-weight: 500; }
+    .tool-path { color: var(--accent-soft); font-weight: 500; }
     .tool-range { color: var(--warning); font-weight: 600; }
     .message--error, .message--tool-error, .gateway-update-failure-output { background: var(--danger-soft); color: #e8a9a9; }
     /* Every block shares one padding. */
-    .message--user, .message--compact, .message--error, .message--tool-preparation, .message[data-role="custom"] { padding-block: 0.65rem; border-radius: 0.2rem; }
+    .message--user, .message--compact, .message--error, .message--tool-preparation, .message[data-role="custom"] { padding-block: 0.65rem; border-radius: 0.35rem; box-shadow: inset 0 0 0 1px #ffffff0d; }
     .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after,
     .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after,
     .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after,
@@ -788,7 +793,7 @@
     .message-body--markdown th, .message-body--markdown td { padding: 0.5rem 0.65rem; border: 1px solid var(--border); vertical-align: top; overflow-wrap: break-word; word-break: normal; }
     .message-body--markdown th:not([align]), .message-body--markdown td:not([align]) { text-align: left; }
     .message-body--markdown th { background: var(--accent-tint-04); color: var(--text); font-weight: 650; }
-    .message-body--markdown code { padding: 0.1rem 0.3rem; border: 0; border-radius: 0.2rem; background: var(--accent-tint-04); color: var(--accent); font-family: var(--mono); font-size: 0.88em; }
+    .message-body--markdown code { padding: 0.1rem 0.3rem; border: 0; border-radius: 0.25rem; background: #ffffff0a; box-shadow: inset 0 0 0 1px #ffffff0f; color: var(--accent-soft); font-family: var(--mono); font-size: 0.88em; }
     .message-code-block { position: relative; }
     .message-body--markdown pre { padding: 0.85rem; border-radius: 0.3rem; background: var(--code); color: var(--success); overflow-x: auto; white-space: pre; border: 1px solid var(--border-strong); }
     .message-body--markdown pre code { padding: 0; border: 0; background: transparent; color: inherit; }
@@ -896,8 +901,7 @@
     .session-reconnect.is-visible { display: block; }
     .abort-form { display: none; }
     input, select, textarea { box-sizing: border-box; font-family: var(--mono); font-size: 0.9rem; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; color: var(--text); background: var(--bg); outline: none; }
-    input:focus, select:focus, textarea:focus { border-color: var(--accent-line-55); box-shadow: 0 0 0 2px var(--accent-tint-14); }
-    input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent-line-55); box-shadow: 0 0 0 1px var(--accent-line-55); }
     input::placeholder, textarea::placeholder { color: var(--muted-soft); }
     textarea { width: 100%; resize: none; min-height: 2.75rem; max-height: 12rem; line-height: 1.45; overflow-y: hidden; }
     .send-button, .composer-stop-button { display: none; }
@@ -909,6 +913,7 @@
     button:disabled { opacity: 0.48; cursor: not-allowed; }
     button:disabled:hover { background: var(--accent); }
     [hidden] { display: none !important; }
+    .ui-icon { width: 1em; height: 1em; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
     button.secondary { background: transparent; border-color: var(--border-strong); color: var(--copy); }
     button.secondary:hover { background: var(--accent-tint-04); border-color: var(--accent-line-55); }
     button.danger { background: var(--danger); color: #18181e; }
@@ -944,6 +949,8 @@
     .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
     .modal-header h2 { color: var(--text); font-family: var(--mono); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
     .modal-close-button { flex: none; width: 2rem; height: 2rem; padding: 0; border-radius: 0.25rem; font-size: 1.2rem; line-height: 1; }
+    .picker-card .modal-close-button { border-color: transparent; color: var(--muted); }
+    .picker-card .modal-close-button:hover { background: transparent; color: var(--text); }
     .modal-field { display: grid; gap: 0.35rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
     .modal-field input, .modal-field select, .modal-field textarea { width: 100%; min-width: 0; letter-spacing: normal; text-transform: none; }
     .extension-ui-modal-card { width: min(40rem, 100%); overflow-wrap: anywhere; }
@@ -961,7 +968,8 @@
     .project-select-native-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
     .project-select-trigger { width: 100%; min-width: 0; justify-self: stretch; display: grid; align-items: center; gap: 0.5rem; color: var(--text); text-align: left; font-family: var(--mono); font-weight: 500; letter-spacing: normal; text-transform: none; }
     .project-select-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
+    .project-select-chevron { display: inline-flex; color: var(--muted); }
+    .project-select-chevron svg { width: 0.75rem; height: 0.75rem; }
     .project-select-listbox { position: fixed; z-index: 180; display: grid; overflow-y: auto; padding: 0.4rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; font: 0.8rem var(--mono); }
     .project-select-option { min-width: 0; display: flex; align-items: center; gap: 1ch; padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); cursor: pointer; }
     .project-select-option.is-active { background: var(--accent-tint-04); color: var(--accent); }
@@ -978,7 +986,7 @@
     .picker-line button[aria-pressed="true"] { color: var(--accent); }
     .picker-hint { margin: 0 0 0 auto; color: var(--muted-soft); font-size: 0.74rem; }
     .picker-keys { margin-left: 0; }
-    .model-picker-card input[type="search"] { width: 100%; padding: 0.55rem 0.65rem; }
+    .model-picker-card .modal-header .tree-session-input { flex: 1; }
     .model-picker-controls { min-width: 0; display: grid; gap: 0.75rem; margin: 0; padding: 0; border: 0; }
     .model-picker-list { max-height: 17rem; overflow-y: auto; display: grid; }
     .model-picker-list:empty { display: none; }
@@ -1021,7 +1029,8 @@
     .new-session-name, .new-session-path, .command-palette-name, .environment-name { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
     .new-session-path, .new-session-age, .command-palette-meta { color: var(--muted-soft); }
     .new-session-age, .command-palette-meta { font-size: 0.74rem; text-align: right; }
-    .new-session-key, .command-palette-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); font: 600 0.72rem/1 var(--mono); }
+    .new-session-key, .command-palette-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--border-strong); border-radius: 0.2rem; color: var(--muted); font: 600 0.72rem/1 var(--mono); }
+    :is(.new-session-row, .command-palette-row)[aria-selected="true"] :is(.new-session-key, .command-palette-key) { border-color: var(--accent-line-35); color: var(--accent); }
     .new-session-key:empty, .command-palette-key:empty { visibility: hidden; }
     /* Wraps rather than truncates, so the directory a session would start in stays readable. */
     .new-session-row[data-new-session-action] .new-session-name { grid-column: 3 / -1; white-space: normal; overflow-wrap: anywhere; }
@@ -1360,10 +1369,10 @@
       <div class="session-sidebar-content">
         <section class="recent-sessions">
           <section class="pinned-sessions-section">
-            <div class="recent-sessions-header"><h2>Pinned</h2><button type="button" class="sidebar-icon-button sidebar-open-pinned-button" title="Open all pinned sessions in new windows" data-demo-disabled hidden><span aria-hidden="true">↗</span> Open all</button></div>
+            <div class="recent-sessions-header"><h2>Pinned</h2><button type="button" class="sidebar-icon-button sidebar-open-pinned-button" title="Open all pinned sessions in new windows" data-demo-disabled hidden><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h6v6M20 4l-9 9M19 14v5H5V5h5"/></svg> Open all</button></div>
             <div class="pinned-sessions-list" id="pinned-sessions-list"></div>
           </section>
-          <div class="recent-sessions-header"><h2>Sessions</h2><span class="sidebar-filter-count" data-sidebar-filter-count hidden></span><a class="sidebar-filters-clear" href="#" aria-label="Clear filters" data-sidebar-filters-clear hidden>clear</a><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button></div>
+          <div class="recent-sessions-header"><h2>Sessions</h2><span class="sidebar-filter-count" data-sidebar-filter-count hidden></span><a class="sidebar-filters-clear" href="#" aria-label="Clear filters" data-sidebar-filters-clear hidden>clear</a><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> New session</button></div>
           <div class="sidebar-filters">
             <form class="sidebar-project-filter-form">
               <div class="sidebar-filter-row">
@@ -1374,7 +1383,7 @@
                     <option value="website">website</option>
                     <option value="storefront">storefront</option>
                   </select>
-                  <button type="button" class="project-select-trigger" id="project-select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="project-monogram" aria-hidden="true"></span><span class="project-select-trigger-label">All projects</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
+                  <button type="button" class="project-select-trigger" id="project-select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="project-monogram" aria-hidden="true"></span><span class="project-select-trigger-label">All projects</span><span class="project-select-chevron" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></span></button>
                   <div class="project-select-listbox" id="project-select-listbox" role="listbox" hidden>
                     <div class="project-select-option is-active" role="option" aria-selected="true" data-project-value=""><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-monogram" aria-hidden="true"></span><span class="project-select-option-label">All projects</span></div>
                     <div class="project-select-option" role="option" aria-selected="false" data-project-value="gripi"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#ff9b73">gr</span><span class="project-select-option-label">gripi</span></div>
@@ -1409,7 +1418,7 @@
           <div class="session-header-project" style="--project-identity-fg:#ff9b73"><span class="project-monogram" aria-hidden="true">gr</span><span class="session-header-project-label">gripi</span><span class="session-header-project-separator" aria-hidden="true">·</span><div class="session-header-view-toggle" role="group" aria-label="Agent activity" data-conversation-view-toggle><button type="button" class="session-header-view-option" data-conversation-view="brief" aria-pressed="false" title="Collapse tool calls, results, and thinking into summaries"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h9"/></svg><span class="session-header-view-option-label">Brief</span></span></button><button type="button" class="session-header-view-option" data-conversation-view="full" aria-pressed="true" title="Include tool calls, results, and thinking"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h14M5 20h9"/></svg><span class="session-header-view-option-label">Full</span></span></button></div></div>
         </div>
         <div class="session-header-actions">
-          <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-disabled>↗</a>
+          <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-disabled><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h6v6M20 4l-9 9M19 14v5H5V5h5"/></svg></a>
           <button type="button" class="danger abort-button session-abort-button composer-stop-button" id="stop-button" hidden disabled title="Abort running Pi"><span aria-hidden="true">⏹</span></button>
         </div>
       </header>
@@ -1435,7 +1444,7 @@
           <div class="session-sync-banner" role="status" data-demo-secondary-state hidden><div><strong>This session was updated in Pi CLI.</strong> <span>New messages still appear here, but sending is paused. Take over once you’re done in Pi CLI.</span></div><button type="button" class="secondary" data-demo-disabled>Take over</button></div>
           <span class="composer-state" data-state="idle" aria-live="polite"></span>
           <div class="attachment-tray" aria-live="polite"></div>
-          <div class="composer-input-row"><div class="composer-textarea-wrap"><textarea name="message" rows="1" placeholder="Ask Pi…"></textarea></div><input class="image-input" id="image-input" type="file" accept="image/*" multiple disabled><button type="button" class="attach-button is-disabled" title="Learn why image uploads are disabled in this demo" aria-label="Learn why image uploads are disabled in this demo" data-modal-open="demo-images-modal">＋</button><button type="submit" class="send-button">Send</button></div>
+          <div class="composer-input-row"><div class="composer-textarea-wrap"><textarea name="message" rows="1" placeholder="Ask Pi…"></textarea></div><input class="image-input" id="image-input" type="file" accept="image/*" multiple disabled><button type="button" class="attach-button is-disabled" title="Learn why image uploads are disabled in this demo" aria-label="Learn why image uploads are disabled in this demo" data-modal-open="demo-images-modal"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg></button><button type="submit" class="send-button">Send</button></div>
           <div class="composer-controls"><div class="session-status-bar" id="session-status-bar"><span class="session-status-item" data-status-key="ctx"><span class="session-status-label">CTX</span> <span class="session-status-value">18%</span></span><button type="button" class="session-status-item model-settings-chip" data-status-key="model" data-modal-open="model-settings-modal"><span class="session-status-label">Model</span> <span class="session-status-value">anthropic/claude-opus-5-5 (medium)</span></button></div></div>
         </form>
       </div></div>
@@ -1487,7 +1496,7 @@
   <div class="modal-overlay" data-modal="environment-modal" hidden><div class="modal-card picker-card environment-card" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title"><div class="modal-header"><h2 id="environment-modal-title">Environment</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button></div><p class="environment-note" data-environment-description>Pi and every command it runs get these variables in every Gripi session, on top of the gateway's own environment.</p><div class="picker-list environment-list" role="listbox" aria-labelledby="environment-modal-title" data-environment-list></div><form class="environment-form" data-environment-form hidden><label class="picker-line tree-session-input"><span>Name:</span><input type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-environment-name></label><label class="picker-line tree-session-input"><span>Value:</span><input type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-environment-value></label><p class="picker-line"><button type="submit">save</button><span class="picker-separator" aria-hidden="true">|</span><button type="button" data-environment-remove>remove</button><span class="picker-separator" aria-hidden="true">|</span><button type="button" data-environment-cancel>cancel</button><span class="picker-hint">enter save · esc cancel</span></p></form><form class="environment-block" data-environment-block hidden><p class="picker-title" data-environment-github>GitHub: act as yourself</p><p class="environment-note" data-environment-github>Fill in the empty values and save. Lines starting with # are ignored. Create the token at github.com/settings/tokens; a classic token needs the repo, read:org and gist scopes.</p><p class="environment-note" data-environment-pasted>One NAME=value per line. Lines starting with # are ignored.</p><textarea class="picker-editor environment-editor" aria-label="NAME=value lines" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-environment-text></textarea><p class="picker-line"><button type="submit">save</button><span class="picker-separator" aria-hidden="true">|</span><button type="button" data-environment-cancel>cancel</button><span class="picker-hint">ctrl+enter save · esc cancel</span></p></form><p class="environment-note environment-warning" data-environment-warning hidden>GH_TOKEN covers gh only. Commits and git push still use the gateway's identity.</p><p class="environment-note environment-status" role="status" data-environment-status></p><p class="picker-hint picker-keys" data-environment-keys>↑↓ navigate · enter open · esc close</p></div></div>
   <div class="modal-overlay" data-modal="fork-session-modal" hidden><div class="modal-card picker-card" role="dialog" aria-modal="true" aria-labelledby="fork-session-modal-title"><div class="modal-header"><h2 id="fork-session-modal-title">Fork session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><p class="picker-status">Select a user message to copy the active path up to that point into a new session</p><div class="fork-session-list" role="listbox"><button type="button" class="picker-row fork-session-option" role="option" aria-selected="true" data-demo-fork data-modal-default-focus><span class="picker-cursor" aria-hidden="true">›</span><span class="fork-session-text">What is Gripi, and how can I get started?</span><span class="fork-session-meta">Message 1 of 1</span></button></div><p class="picker-hint picker-keys">enter select · esc cancel</p></div></div>
   <div class="modal-overlay" data-modal="tree-session-modal" hidden><div class="modal-card picker-card" role="dialog" aria-modal="true" aria-labelledby="tree-session-modal-title"><div class="modal-header"><h2 id="tree-session-modal-title">Session tree</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><button type="button" class="picker-row tree-session-row" data-demo-tree data-demo-tree-target="new-to-pi"><span class="picker-cursor" aria-hidden="true">›</span><span class="tree-session-line"><span class="tree-session-dim">[related]: </span><span data-demo-tree-target-title>New to Pi? Start here</span></span></button><button type="button" class="picker-row tree-session-row is-active" data-demo-tree data-modal-default-focus><span class="picker-cursor" aria-hidden="true">›</span><span class="tree-session-line"><span class="tree-session-path">• </span><span class="tree-session-dim">[current]: </span><span data-demo-tree-current-title>Welcome to Gripi</span></span></button></div><p class="picker-hint picker-keys">enter select · esc cancel</p></div></div>
-  <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card picker-card model-picker-card" role="dialog" aria-modal="true" aria-labelledby="model-settings-title"><div class="modal-header"><h2 id="model-settings-title">Model &amp; thinking</h2><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><input type="search" aria-label="Search models" data-model-search data-modal-default-focus placeholder="Search models"><div class="model-picker-controls"><div class="model-picker-list" role="listbox" aria-label="Models"><button type="button" class="picker-row model-picker-row" role="option" aria-selected="true" aria-current="true" data-demo-model="anthropic/claude-opus-5-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>claude-opus-5-5 <span class="model-picker-provider">[anthropic]</span></span></button><button type="button" class="picker-row model-picker-row" role="option" aria-selected="false" data-demo-model="openai-codex/gpt-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5 <span class="model-picker-provider">[openai-codex]</span></span></button></div><p class="picker-line model-picker-thinking"><span>Thinking:</span><span class="picker-line"><button type="button" aria-pressed="false" data-demo-thinking="off">off</button><span class="picker-separator" aria-hidden="true">|</span><button type="button" aria-pressed="true" data-demo-thinking="medium">medium</button></span></p></div></div></div>
+  <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card picker-card model-picker-card" role="dialog" aria-modal="true" aria-label="Model &amp; thinking"><div class="modal-header"><label class="picker-line tree-session-input"><span>Model:</span><input type="search" aria-label="Search models" data-model-search data-modal-default-focus placeholder="type to filter"></label><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><div class="model-picker-controls"><div class="model-picker-list" role="listbox" aria-label="Models"><button type="button" class="picker-row model-picker-row" role="option" aria-selected="true" aria-current="true" data-demo-model="anthropic/claude-opus-5-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>claude-opus-5-5 <span class="model-picker-provider">[anthropic]</span></span></button><button type="button" class="picker-row model-picker-row" role="option" aria-selected="false" data-demo-model="openai-codex/gpt-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5 <span class="model-picker-provider">[openai-codex]</span></span></button></div><p class="picker-line model-picker-thinking"><span>Thinking:</span><span class="picker-line"><button type="button" aria-pressed="false" data-demo-thinking="off">off</button><span class="picker-separator" aria-hidden="true">|</span><button type="button" aria-pressed="true" data-demo-thinking="medium">medium</button></span></p></div></div></div>
   <div class="session-switch-overlay" role="status" aria-live="polite" aria-label="Loading"><div class="session-switch-indicator"><span class="session-switch-spinner" aria-hidden="true"></span> Loading…</div></div>
   <div class="browser-access-overlay" data-browser-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Browser access request</div><div class="browser-access-meta">A connected browser is requesting access.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-disabled>Deny</button><button type="button" data-demo-disabled>Allow</button></div></div></div>
   <div class="browser-access-overlay" data-workspace-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Workspace access request</div><div class="browser-access-meta">A trusted user is requesting this workspace.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-disabled>Deny</button><button type="button" data-demo-disabled>Allow</button></div></div></div>
