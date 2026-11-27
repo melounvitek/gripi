@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { closeSync, openSync, writeFileSync } from "node:fs";
 import {
   SettingsManager,
   type ExtensionAPI,
@@ -461,6 +462,22 @@ export default function (pi: ExtensionAPI) {
   registerBridgeCommand(pi, "gripi_history", "Report the current branch's latest entries to Gripi", (_requestPayload, ctx) => ({
     entries: history(ctx.sessionManager.getBranch()),
   }));
+
+  // Gripi continues a session that Pi keeps only in memory in a folder, as Pi's fork of this file there.
+  registerBridgeCommand(pi, "gripi_save_session", "Write the session that Pi keeps in memory to a new file for Gripi", (requestPayload, ctx) => {
+    if (!ctx.isIdle()) throw new Error("Session is busy");
+    const path = requestPayload.path;
+    const header = ctx.sessionManager.getHeader();
+    if (typeof path !== "string" || !path) throw new Error("File path is required");
+    if (!header) throw new Error("Session has no header");
+    const file = openSync(path, "wx", 0o600);
+    try {
+      for (const record of [header, ...ctx.sessionManager.getEntries()]) writeFileSync(file, `${JSON.stringify(record)}\n`);
+    } finally {
+      closeSync(file);
+    }
+    return {};
+  });
 
   registerBridgeCommand(pi, "gripi_history_image", "Report an image of a session entry to Gripi", (requestPayload, ctx) => {
     const entryId = requestPayload.entryId;
