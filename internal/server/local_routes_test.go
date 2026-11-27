@@ -130,7 +130,7 @@ func fakePiConfig(t *testing.T) (cfg config.Config, alpha, beta, project string)
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(home, ".pi", "gripi", "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
-		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
+		ScratchModelPath: filepath.Join(root, "scratch-model.json"), BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")},
 	}, alpha, beta, project
 }

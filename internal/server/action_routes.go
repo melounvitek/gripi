@@ -615,7 +615,9 @@ func (app *application) setModelSettings(response http.ResponseWriter, request *
 		if err != nil {
 			return err
 		}
-		choice, err = models.SetModel(request.Context(), provider, modelID, thinking)
+		if choice, err = models.SetModel(request.Context(), provider, modelID, thinking); err == nil {
+			app.rememberScratchModel(request, path, scratchModel{Provider: provider, ModelID: modelID, ThinkingLevel: choice.ThinkingLevel})
+		}
 		return err
 	})
 	if errors.Is(err, agent.ErrInvalidResponse) {
@@ -642,8 +644,14 @@ func (app *application) cycleThinking(response http.ResponseWriter, request *htt
 		if err != nil {
 			return err
 		}
-		level, err = models.CycleThinkingLevel(request.Context())
-		return err
+		if level, err = models.CycleThinkingLevel(request.Context()); err != nil || level == "" || !app.scratch.contains(path) {
+			return err
+		}
+		// A scratch session's next one gets the level with the model.
+		if status, err := client.LiveStatus(request.Context()); err == nil {
+			app.rememberScratchModel(request, path, scratchModel{Provider: status.Provider, ModelID: status.ModelID, ThinkingLevel: level})
+		}
+		return nil
 	})
 	if errors.Is(err, agent.ErrInvalidResponse) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not change thinking level"})

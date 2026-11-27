@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -178,6 +179,26 @@ func TestScratchSessionsBelongToTheirWorkspace(t *testing.T) {
 	if page := serveAction(handler, own); !strings.Contains(page.Body.String(), shown) {
 		t.Fatalf("its own workspace doesn't see the scratch session: %d", page.Code)
 	}
+
+	// The model chosen in one workspace's scratch session doesn't start another's.
+	choose := formActionRequest("/sessions/model_settings", map[string]string{"session": scratch["workspace-a"].Session, "provider": "e2e", "model": "contract-model", "thinking": "high"}, true)
+	choose.Header.Set("Cookie", "gripi_workspace=workspace-a")
+	if response := serveAction(handler, choose); response.Code != http.StatusOK {
+		t.Fatalf("choose a model = %d %s", response.Code, response.Body.String())
+	}
+	var next scratchPayload
+	for _, path := range []string{"/scratch/discard", "/scratch/new"} {
+		request := formActionRequest(path, nil, true)
+		request.Header.Set("Cookie", "gripi_workspace=workspace-b")
+		response := serveAction(handler, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, response.Code, response.Body.String())
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &next)
+	}
+	if model := scratchModel(t, handler, "workspace-b", next.Session); model != "e2e/fixture-model medium" {
+		t.Fatalf("another workspace's scratch session runs %s", model)
+	}
 }
 
 // Pi keeps a scratch session only in memory, so it is gone once its Pi ends, such as after a crash.
@@ -347,6 +368,98 @@ func TestScratchSessionImagesNeverReachDisk(t *testing.T) {
 	}
 	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Still there?"}, true)); prompt.Code != http.StatusOK {
 		t.Fatalf("prompt after refused ones = %d %s", prompt.Code, prompt.Body.String())
+	}
+}
+
+// scratchModel is the model and thinking level that the session of the workspace runs, as "provider/id level".
+func scratchModel(t *testing.T, handler http.Handler, workspace, session string) string {
+	t.Helper()
+	request := getActionRequest("/sessions/model_settings?session=" + url.QueryEscape(session))
+	if workspace != "" {
+		request.Header.Set("Cookie", "gripi_workspace="+workspace)
+	}
+	response := serveAction(handler, request)
+	var settings struct {
+		State struct {
+			Model struct {
+				Provider string `json:"provider"`
+				ID       string `json:"id"`
+			} `json:"model"`
+			ThinkingLevel string `json:"thinkingLevel"`
+		} `json:"state"`
+	}
+	decodeActionJSON(t, response, &settings)
+	return settings.State.Model.Provider + "/" + settings.State.Model.ID + " " + settings.State.ThinkingLevel
+}
+
+func TestAScratchSessionStartsOnTheModelLastChosenInOne(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	cfg, alpha, _, _ := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	choose := func(session string) {
+		t.Helper()
+		fields := map[string]string{"session": session, "provider": "e2e", "model": "contract-model", "thinking": "high"}
+		if response := serveAction(handler, formActionRequest("/sessions/model_settings", fields, true)); response.Code != http.StatusOK {
+			t.Fatalf("choose a model = %d %s", response.Code, response.Body.String())
+		}
+	}
+
+	// What is chosen in other sessions doesn't count.
+	choose(alpha)
+	first := startScratch(t, handler)
+	if model := scratchModel(t, handler, "", first.Session); model != "e2e/fixture-model medium" {
+		t.Fatalf("the first scratch session runs %s", model)
+	}
+	choose(first.Session)
+	discard := func() {
+		t.Helper()
+		if response := serveAction(handler, formActionRequest("/scratch/discard", nil, true)); response.Code != http.StatusOK {
+			t.Fatalf("discard = %d %s", response.Code, response.Body.String())
+		}
+	}
+	discard()
+	second := startScratch(t, handler)
+	if model := scratchModel(t, handler, "", second.Session); model != "e2e/contract-model high" {
+		t.Fatalf("the next scratch session runs %s", model)
+	}
+	if response := serveAction(handler, formActionRequest("/sessions/cycle_thinking", map[string]string{"session": second.Session}, true)); response.Code != http.StatusOK {
+		t.Fatalf("cycle thinking = %d %s", response.Code, response.Body.String())
+	}
+	discard()
+	if model := scratchModel(t, handler, "", startScratch(t, handler).Session); model != "e2e/contract-model off" {
+		t.Fatalf("the scratch session after a cycled thinking level runs %s", model)
+	}
+
+	// The choice outlasts the gateway.
+	_ = handler.(interface{ Close(context.Context) error }).Close(context.Background())
+	handler = startGateway(t, cfg)
+	if model := scratchModel(t, handler, "", startScratch(t, handler).Session); model != "e2e/contract-model off" {
+		t.Fatalf("the scratch session after a restart runs %s", model)
+	}
+}
+
+// A scratch session starts on Pi's default model when Pi can't choose the one last chosen, and a choice that ends Pi
+// doesn't end the next scratch session's too.
+func TestAScratchSessionStartsWithoutAModelThatPiCantChoose(t *testing.T) {
+	for _, test := range []struct{ name, model string }{{"gone", "gone-model"}, {"fatal", "fatal-model"}} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			cfg, _, _, _ := fakePiConfig(t)
+			if err := os.WriteFile(cfg.ScratchModelPath, []byte(`{"users":{"":{"provider":"e2e","modelId":"`+test.model+`","thinkingLevel":"high"}}}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			handler := startGateway(t, cfg)
+			scratch := startScratch(t, handler)
+			if test.model == "fatal-model" {
+				scratch = startScratch(t, handler)
+			}
+			if model := scratchModel(t, handler, "", scratch.Session); model != "e2e/fixture-model medium" {
+				t.Fatalf("the scratch session runs %s", model)
+			}
+			if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Hello"}, true)); prompt.Code != http.StatusOK {
+				t.Fatalf("prompt = %d %s", prompt.Code, prompt.Body.String())
+			}
+		})
 	}
 }
 

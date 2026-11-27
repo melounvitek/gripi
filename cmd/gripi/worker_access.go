@@ -41,7 +41,7 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, 
 		Placements: placements, StateDir: stateDir(cfg),
 		GatewayPaths: []string{
 			filepath.Dir(cfg.EnvPath), cfg.SessionCwdsPath, cfg.AttachmentsRoot, cfg.WebPushVAPIDPath, cfg.PushSubscriptionsPath, cfg.ReadStatePath,
-			cfg.PinnedSessionsPath, cfg.SessionTagsPath, cfg.EnvironmentPath, cfg.BrowserAccessPath, cfg.WorkspaceSecretPath, cfg.WorkspaceAccessPath,
+			cfg.PinnedSessionsPath, cfg.SessionTagsPath, cfg.EnvironmentPath, cfg.ScratchModelPath, cfg.BrowserAccessPath, cfg.WorkspaceSecretPath, cfg.WorkspaceAccessPath,
 			cfg.WorkspaceOwnershipPath, cfg.WorkersPath, cfg.WorkerPlacementsPath, cfg.RestartPath, cfg.SocketPath,
 		},
 		Pi:              remote.Pi{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, ExtensionDir: filepath.Dir(tree)},

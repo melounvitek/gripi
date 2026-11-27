@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/state"
 )
 
 // scratchSessions are the scratch sessions of the gateway's users, one each at most: sessions that Pi keeps only in
@@ -28,7 +29,68 @@ type scratchSessions struct {
 	byOwner map[string]*scratchSession
 	// ended holds the keys of the scratch sessions that ended or are ending. They stay scratch keys, so that a request
 	// that was already under way can't start a saved session under one.
-	ended map[string]bool
+	ended  map[string]bool
+	models scratchModels
+}
+
+// scratchModels keep the model and thinking level last chosen in each user's scratch session, by the user as in
+// environmentUser, for the next one to start with. Gripi chooses them through Pi's RPC, which leaves Pi's default model as it is.
+type scratchModels struct {
+	mu   sync.Mutex
+	file *state.File
+}
+
+type scratchModel struct {
+	Provider      string `json:"provider"`
+	ModelID       string `json:"modelId"`
+	ThinkingLevel string `json:"thinkingLevel"`
+}
+
+func (models *scratchModels) read() (map[string]scratchModel, error) {
+	var saved struct {
+		Users map[string]scratchModel `json:"users"`
+	}
+	contents, ok, err := models.file.Read()
+	if ok && err == nil {
+		err = json.Unmarshal(contents, &saved)
+	}
+	return saved.Users, err
+}
+
+func (models *scratchModels) get(owner string) (scratchModel, error) {
+	models.mu.Lock()
+	defer models.mu.Unlock()
+	users, err := models.read()
+	return users[owner], err
+}
+
+func (models *scratchModels) set(owner string, model scratchModel) error {
+	models.mu.Lock()
+	defer models.mu.Unlock()
+	users, err := models.read()
+	if err != nil {
+		return err
+	}
+	if users == nil {
+		users = make(map[string]scratchModel)
+	}
+	users[owner] = model
+	contents, err := json.Marshal(map[string]any{"users": users})
+	if err != nil {
+		return err
+	}
+	return models.file.Write(contents)
+}
+
+// rememberScratchModel keeps the model and thinking level just chosen in the session at path for the user's next
+// scratch session, when path is their current one.
+func (app *application) rememberScratchModel(request *http.Request, path string, model scratchModel) {
+	if model.Provider == "" || model.ModelID == "" || path != app.scratch.key(currentWorkspaceID(request)) {
+		return
+	}
+	if err := app.scratch.models.set(app.environmentUser(request), model); err != nil {
+		logInternalError("remember the scratch session's model", err)
+	}
 }
 
 type scratchSession struct {
@@ -287,7 +349,7 @@ func (app *application) startScratchSession(request *http.Request, owner, dir st
 	start := func(cwd string) (agent.Client, error) {
 		return app.adapter.StartInCWD(cwd, "", agent.StartOptions{Scratch: true, Env: variables, Diagnostics: app.rpcDiagnostics})
 	}
-	return agent.StartNewSession(request.Context(), filepath.Join(dir, "work"), start, app.sessionStore, app.rpcClients, app.pendingSessions, func(key string) (func() error, error) {
+	key, err := agent.StartNewSession(request.Context(), filepath.Join(dir, "work"), start, app.sessionStore, app.rpcClients, app.pendingSessions, func(key string) (func() error, error) {
 		// The key is a scratch key before its client is registered, so that nothing starts a saved session under it.
 		app.scratch.mu.Lock()
 		app.scratch.byOwner[owner] = &scratchSession{key: key, dir: dir}
@@ -300,6 +362,27 @@ func (app *application) startScratchSession(request *http.Request, owner, dir st
 			return nil
 		}, nil
 	})
+	if err != nil {
+		return "", err
+	}
+	user := app.environmentUser(request)
+	model, err := app.scratch.models.get(user)
+	if err == nil && model.Provider != "" {
+		err = app.withSynchronizedClient(request, key, func(client agent.Client) error {
+			return agent.ChooseForNewSession(request.Context(), client, agent.LiveStatus{Provider: model.Provider, ModelID: model.ModelID, ThinkingLevel: model.ThinkingLevel}, "")
+		})
+	}
+	if err != nil {
+		// The session keeps Pi's default model, such as when the one chosen is gone.
+		logInternalError("start the scratch session on the model last chosen in one", err)
+	}
+	// A choice that cost the session its Pi would cost the next one its Pi too.
+	if err != nil && app.scratchGone(key) {
+		if err := app.scratch.models.set(user, scratchModel{}); err != nil {
+			logInternalError("forget the model last chosen in a scratch session", err)
+		}
+	}
+	return key, nil
 }
 
 func (app *application) discardScratchSession(response http.ResponseWriter, request *http.Request) {
