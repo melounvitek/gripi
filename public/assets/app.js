@@ -3730,6 +3730,30 @@ document.addEventListener("click", async (event) => {
   await switchSession(link.href, { push: true, focus: true, findQuery, used: true });
 });
 
+// An agent's link to another session, which the gripi skill tells it how to write, opens the session in place.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest('.message-body--markdown a[href^="/sessions/"]');
+  if (!link || !normalLeftClick(event) || new URLSearchParams(window.location.search).get("session_only") === "1") return;
+
+  event.preventDefault();
+  openSessionLink(link.getAttribute("href"));
+});
+
+async function openSessionLink(href) {
+  // A session that opens while the link's session is looked up, such as from another link or the sidebar, stays open.
+  const generation = sessionSwitchGeneration.next();
+  let session = null;
+  try {
+    const response = await fetch(href, { headers: { "Accept": "application/json" } });
+    if (response.ok) ({ session } = await response.json());
+  } catch (_error) {
+  }
+  if (!sessionSwitchGeneration.current(generation)) return;
+  if (session) await switchSession(sessionUrl(session), { push: true, focus: true, used: true });
+  // The gateway's page says why there is no session to open.
+  else window.location.href = href;
+}
+
 document.addEventListener("submit", async (event) => {
   const form = event.target.closest('form[action="/sessions/new"]');
   if (!form) return;
