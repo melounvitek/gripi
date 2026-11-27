@@ -400,6 +400,38 @@ func TestRPCMaintenanceRetiresIdleFakePiClientAndShutdownIsIdempotent(t *testing
 	}
 }
 
+func TestASessionLinkOpensTheSessionThatItsIDOrAUniquePrefixNames(t *testing.T) {
+	cfg, alpha, beta, project := fakePiConfig(t)
+	// Its ID starts with alpha's whole ID, which still opens alpha.
+	writeLocalSession(t, filepath.Join(cfg.SessionsRoot, "alpha-twin.jsonl"), "alpha-00013", project, "2026-01-03T00:00:0")
+	handler := startGateway(t, cfg)
+	open := func(reference, accept string) *httptest.ResponseRecorder {
+		request := getActionRequest("/sessions/" + reference)
+		request.Header.Set("Accept", accept)
+		return serveAction(handler, request)
+	}
+
+	for reference, path := range map[string]string{"alpha-0001": alpha, "beta": beta} {
+		response := open(reference, "text/html")
+		if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/?session="+url.QueryEscape(path) {
+			t.Errorf("%s = %d to %q", reference, response.Code, response.Header().Get("Location"))
+		}
+	}
+	// A page that the link is on opens the session itself.
+	response := open("beta", "application/json")
+	var payload struct{ Session string }
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &payload) != nil || payload.Session != beta {
+		t.Errorf("JSON = %d %s", response.Code, response.Body.String())
+	}
+	// Sessions started close together share most of their IDs, so a prefix that fits two opens neither.
+	if response := open("alpha-000", "text/html"); response.Code != http.StatusConflict || response.Header().Get("Location") != "" {
+		t.Errorf("ambiguous prefix = %d %s", response.Code, response.Body.String())
+	}
+	if response := open("gamma", "text/html"); response.Code != http.StatusNotFound {
+		t.Errorf("unknown ID = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestMarkdownAcceptsBrowserMultipartFormData(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	handler := fixtureHandler(t, fixture)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
@@ -27,6 +28,7 @@ func (app *application) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sidebar", app.sidebar)
 	mux.HandleFunc("GET /new_session_modal", app.newSessionModal)
 	mux.HandleFunc("GET /sessions/palette", app.sessionPalette)
+	mux.HandleFunc("GET /sessions/{id}", app.sessionLink)
 	mux.HandleFunc("GET /session_fragment", app.sessionFragment)
 	mux.HandleFunc("GET /conversation_older", app.conversationOlder)
 	mux.HandleFunc("GET /attachments/{session_hash}/{file}", app.attachment)
@@ -134,6 +136,44 @@ func (app *application) sessionPalette(response http.ResponseWriter, request *ht
 		})
 	}
 	writePackedJSON(response, request, map[string]any{"sessions": entries})
+}
+
+// sessionLink opens the session of an ID, or of a unique prefix of one, as gripi commands take it, so that agents can
+// link to sessions. A page that the link is on asks for the path, to open the session itself.
+func (app *application) sessionLink(response http.ResponseWriter, request *http.Request) {
+	if !acquireRequestSlot(response, request, app.heavyRequests) {
+		return
+	}
+	defer releaseRequestSlot(app.heavyRequests)
+	reference := request.PathValue("id")
+	// The sessions that the sidebar lists, so a link opens none of another user's.
+	request.URL.RawQuery = "no_session=1"
+	view, err := app.preparePage(request, false)
+	if err != nil {
+		logInternalError("prepare session link", err)
+		http.Error(response, "Unable to read sessions", http.StatusInternalServerError)
+		return
+	}
+	var matches []*agent.Session
+	for _, session := range view.Sessions {
+		if session.ID == reference {
+			matches = []*agent.Session{session}
+			break
+		}
+		if strings.HasPrefix(session.ID, reference) {
+			matches = append(matches, session)
+		}
+	}
+	switch {
+	case len(matches) == 0:
+		http.Error(response, fmt.Sprintf("No session has the ID %q.", reference), http.StatusNotFound)
+	case len(matches) > 1:
+		http.Error(response, fmt.Sprintf("%q is the start of %d session IDs.", reference, len(matches)), http.StatusConflict)
+	case wantsJSON(request):
+		writeJSON(response, map[string]string{"session": matches[0].Path})
+	default:
+		http.Redirect(response, request, "/?session="+url.QueryEscape(matches[0].Path), http.StatusSeeOther)
+	}
 }
 
 // writePackedJSON is for the large, repetitive payloads: the session list and conversation HTML. Packed, they are a fifth of the size or less, which a slow link shows.
