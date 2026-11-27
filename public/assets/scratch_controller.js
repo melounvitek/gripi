@@ -2,11 +2,13 @@
 // frame over the page, which stays as it is. On that page, the controller passes on to the overlay what the page's
 // buttons, keys and links to sessions ask for.
 export class ScratchController {
-  constructor(documentObject, windowObject, focusConversation, openSessionLink) {
+  // continueInProject opens, over the overlay, the picker of the folder that the session, by its key, continues in.
+  constructor(documentObject, windowObject, focusConversation, openSessionLink, continueInProject) {
     this.document = documentObject;
     this.window = windowObject;
     this.focusConversation = focusConversation;
     this.openSessionLink = openSessionLink;
+    this.continueInProject = continueInProject;
     this.page = documentObject.body.classList.contains("scratch-page");
     this.overlay = null;
     this.frame = null;
@@ -39,6 +41,8 @@ export class ScratchController {
       if (event.data === "gripi:scratch-hide") this.hide();
       if (event.data === "gripi:scratch-discarded") this.discarded();
       if (event.data === "gripi:scratch-new-session") this.requestNewSession();
+      // The frame's page, rather than its src, names the session, which may have started over in it.
+      if (event.data === "gripi:scratch-continue") this.continueInProject(new URL(this.frame.contentWindow.location.href).searchParams.get("session"));
       if (event.data === "gripi:scratch-working") this.markWorking(true);
       if (event.data === "gripi:scratch-idle") this.markWorking(false);
       if (event.data === "gripi:scratch-gone") this.clearActivity();
@@ -145,6 +149,7 @@ export class ScratchController {
       if (event.target.closest("[data-scratch-hide]")) this.tellOverlay("gripi:scratch-hide");
       if (event.target.closest("[data-scratch-discard]")) this.discard().catch(() => {});
       if (event.target.closest("[data-scratch-restart]")) this.restart().catch(() => {});
+      if (event.target.closest("[data-scratch-continue]")) this.tellOverlay("gripi:scratch-continue");
     });
     this.window.addEventListener("message", (event) => {
       if (event.origin !== this.window.location.origin || event.source !== this.window.parent) return;

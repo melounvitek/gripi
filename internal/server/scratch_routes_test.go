@@ -314,6 +314,84 @@ func TestScratchSessionShowsItsConversationAfterAReload(t *testing.T) {
 	}
 }
 
+// A scratch session continues in a folder as Pi's fork of it there, a saved session, and the scratch session ends.
+func TestAScratchSessionContinuesInAFolder(t *testing.T) {
+	temporary := t.TempDir()
+	t.Setenv("TMPDIR", temporary)
+	cfg, _, _, project := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	scratch := startScratch(t, handler)
+	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Remember scratchpad"}, true)); prompt.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", prompt.Code, prompt.Body.String())
+	}
+	waitForFakePiSettled(t, handler, scratch.Session, 0)
+	if response := serveAction(handler, formActionRequest("/scratch/continue", map[string]string{"cwd": filepath.Join(project, "missing"), "fork_from": scratch.Session}, true)); response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("continue in a missing folder = %d %s", response.Code, response.Body.String())
+	}
+	// A page of a scratch session that has ended, such as in another tab, continues no other one.
+	if response := serveAction(handler, formActionRequest("/scratch/continue", map[string]string{"cwd": project, "fork_from": "ended.jsonl"}, true)); response.Code != http.StatusNotFound {
+		t.Fatalf("continue an ended scratch session = %d %s", response.Code, response.Body.String())
+	}
+
+	response := serveAction(handler, formActionRequest("/scratch/continue", map[string]string{"cwd": project, "fork_from": scratch.Session}, true))
+	var continued scratchPayload
+	decodeActionJSON(t, response, &continued)
+	if response.Code != http.StatusOK || continued.Session == "" || continued.Session == scratch.Session {
+		t.Fatalf("continue = %d %s", response.Code, response.Body.String())
+	}
+	contents, err := os.ReadFile(continued.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header struct {
+		CWD string `json:"cwd"`
+	}
+	if err := json.Unmarshal(bytes.SplitN(contents, []byte("\n"), 2)[0], &header); err != nil || header.CWD != project || !bytes.Contains(contents, []byte("Remember scratchpad")) {
+		t.Fatalf("the continued session's file = %s", contents)
+	}
+	if page := serveAction(handler, getActionRequest(continued.Redirect)).Body.String(); !strings.Contains(page, "Remember scratchpad") {
+		t.Fatalf("the continued session's page = %s", page)
+	}
+	if sidebar := serveAction(handler, getActionRequest("/sidebar")).Body.String(); !strings.Contains(sidebar, `data-session-path="`+continued.Session+`"`) {
+		t.Fatalf("the sidebar doesn't list the continued session: %s", sidebar)
+	}
+	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": continued.Session, "message": "Still there?"}, true)); prompt.Code != http.StatusOK {
+		t.Fatalf("prompt to the continued session = %d %s", prompt.Code, prompt.Body.String())
+	}
+
+	if ended := serveAction(handler, getActionRequest(scratch.Redirect)).Body.String(); !strings.Contains(ended, "data-scratch-gone>") {
+		t.Fatalf("the scratch session's page after it continued = %s", ended)
+	}
+	if folders, _ := filepath.Glob(filepath.Join(temporary, "gripi-scratch-*", "gateway-*", "session-*")); len(folders) != 0 {
+		t.Fatalf("continuing kept %v", folders)
+	}
+	if again := serveAction(handler, formActionRequest("/scratch/continue", map[string]string{"cwd": project, "fork_from": scratch.Session}, true)); again.Code != http.StatusNotFound {
+		t.Fatalf("continue without a scratch session = %d %s", again.Code, again.Body.String())
+	}
+}
+
+// While Pi works, the scratch session stays as it is.
+func TestAScratchSessionContinuesOnlyWhilePiWaits(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	cfg, _, _, project := fakePiConfig(t)
+	handler := startGateway(t, cfg)
+	scratch := startScratch(t, handler)
+	if prompt := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": scratch.Session, "message": "Start the abort scenario"}, true)); prompt.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", prompt.Code, prompt.Body.String())
+	}
+
+	response := serveAction(handler, formActionRequest("/scratch/continue", map[string]string{"cwd": project, "fork_from": scratch.Session}, true))
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Session is busy") {
+		t.Fatalf("continue while Pi works = %d %s", response.Code, response.Body.String())
+	}
+	if again := startScratch(t, handler); again.Session != scratch.Session {
+		t.Fatalf("the scratch session ended: %s, then %s", scratch.Session, again.Session)
+	}
+	if saved, _ := filepath.Glob(filepath.Join(cfg.SessionsRoot, "*", "*.jsonl")); len(saved) != 0 {
+		t.Fatalf("Pi saved %v", saved)
+	}
+}
+
 // A scratch session's images stay in memory: in the prompt, in Pi, and on their way to the page.
 func TestScratchSessionImagesNeverReachDisk(t *testing.T) {
 	temporary := t.TempDir()

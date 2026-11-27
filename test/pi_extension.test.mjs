@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -341,33 +341,54 @@ test("large native trees are compacted before crossing the extension bridge", as
 const MiB = 1024 * 1024;
 const pngData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-test("history bridge reads Pi's in-memory session in RPC mode", { timeout: 20_000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "gripi-history-extension-"));
-  const project = path.join(directory, "project");
-  await mkdir(project);
+// Pi in RPC mode in cwd, with the scripted model and Gripi's extension, and its agent folder in directory.
+function startTestPi(directory, cwd, args) {
   const child = spawn(piExecutable, [
-    "--mode", "rpc", "--no-session", "-ne", "--approve",
-    "--extension", path.resolve("test/helpers/fake_provider.ts"), "--extension", extensionPath, "--model", "fake/fake-1",
+    "--mode", "rpc", "-ne", "--approve",
+    "--extension", path.resolve("test/helpers/fake_provider.ts"), "--extension", extensionPath, "--model", "fake/fake-1", ...args,
   ], {
-    cwd: project,
+    cwd,
     env: { ...process.env, PI_CODING_AGENT_DIR: path.join(directory, "agent"), PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const records = rpcRecords(child);
-  const bridgeRequest = async (name, requestId, payload) => {
-    child.stdin.write(`${JSON.stringify({ id: requestId, type: "prompt", message: `/${name} ${requestId} ${Buffer.from(JSON.stringify(payload)).toString("base64url")}` })}\n`);
-    const [response, status] = await Promise.all([
-      records.next((record) => record.id === requestId),
-      records.next((record) => record.statusKey === `${name}:${requestId}`),
-    ]);
-    assert.equal(response.success, true, response.error);
-    return JSON.parse(status.statusText);
+  const request = (id, command) => {
+    child.stdin.write(`${JSON.stringify({ id, ...command })}\n`);
+    return records.next((record) => record.id === id);
   };
+  return {
+    records,
+    request,
+    // Runs the prompt, a bash call and a reply, with an image.
+    async run() {
+      const script = JSON.stringify([[{ name: "bash", arguments: { command: "echo hi" } }]]);
+      await request("run", { type: "prompt", message: `RUN ${script}`, images: [{ type: "image", data: pngData, mimeType: "image/png" }] });
+      await records.next((record) => record.type === "agent_settled");
+    },
+    async bridgeRequest(name, requestId, payload) {
+      const [response, status] = await Promise.all([
+        request(requestId, { type: "prompt", message: `/${name} ${requestId} ${Buffer.from(JSON.stringify(payload)).toString("base64url")}` }),
+        records.next((record) => record.statusKey === `${name}:${requestId}`),
+      ]);
+      assert.equal(response.success, true, response.error);
+      return JSON.parse(status.statusText);
+    },
+    async stop() {
+      child.kill("SIGTERM");
+      if (child.exitCode === null && child.signalCode === null) await new Promise((resolve) => child.once("exit", resolve));
+    },
+  };
+}
+
+test("history bridge reads Pi's in-memory session in RPC mode", { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-history-extension-"));
+  const project = path.join(directory, "project");
+  await mkdir(project);
+  const pi = startTestPi(directory, project, ["--no-session"]);
+  const { bridgeRequest } = pi;
 
   try {
-    const script = JSON.stringify([[{ name: "bash", arguments: { command: "echo hi" } }]]);
-    child.stdin.write(`${JSON.stringify({ id: "run", type: "prompt", message: `RUN ${script}`, images: [{ type: "image", data: pngData, mimeType: "image/png" }] })}\n`);
-    await records.next((record) => record.type === "agent_settled");
+    await pi.run();
 
     const history = await bridgeRequest("gripi_history", "a1", {});
     assert.equal(history.ok, true, history.error);
@@ -378,8 +399,62 @@ test("history bridge reads Pi's in-memory session in RPC mode", { timeout: 20_00
 
     assert.deepEqual(await bridgeRequest("gripi_history_image", "a2", { entryId: prompt.id, index: 0 }), { ok: true, data: pngData, mimeType: "image/png" });
   } finally {
-    child.kill("SIGTERM");
-    await new Promise((resolve) => child.once("exit", resolve));
+    await pi.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("save bridge writes Pi's in-memory session to a file that Pi forks into a folder", { timeout: 30_000 }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-save-extension-"));
+  const scratch = path.join(directory, "scratch");
+  const project = path.join(directory, "project");
+  const sessions = path.join(directory, "sessions");
+  await mkdir(scratch);
+  await mkdir(project);
+  const saved = path.join(directory, "saved.jsonl");
+  const memory = startTestPi(directory, scratch, ["--no-session"]);
+  let fork;
+
+  try {
+    await memory.run();
+    assert.deepEqual(await memory.bridgeRequest("gripi_save_session", "c1", { path: saved }), { ok: true });
+    assert.equal((await stat(saved)).mode & 0o777, 0o600);
+    // A file already there stays as it is.
+    await writeFile(saved, "other");
+    assert.equal((await memory.bridgeRequest("gripi_save_session", "c2", { path: saved })).ok, false);
+    assert.equal(await readFile(saved, "utf8"), "other");
+    await rm(saved);
+    assert.deepEqual(await memory.bridgeRequest("gripi_save_session", "c3", { path: saved }), { ok: true });
+
+    fork = startTestPi(directory, project, ["--fork", saved, "--session-dir", sessions]);
+    const { data } = await fork.request("messages", { type: "get_messages" });
+    const messages = data.messages.filter((message) => message.role !== "system");
+    assert.deepEqual(messages.map((message) => message.role), ["user", "assistant", "toolResult", "assistant"]);
+    assert.deepEqual(messages[0].content[1], { type: "image", data: pngData, mimeType: "image/png" });
+    const { data: state } = await fork.request("state", { type: "get_state" });
+    assert.equal(path.dirname(state.sessionFile), sessions);
+    assert.equal(JSON.parse((await readFile(state.sessionFile, "utf8")).split("\n")[0]).cwd, project);
+  } finally {
+    await memory.stop();
+    await fork?.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("save bridge leaves a busy session unsaved", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-save-busy-"));
+  const saved = path.join(directory, "saved.jsonl");
+  const commands = await loadTreeExtension();
+  let reply;
+  try {
+    await commands.get("gripi_save_session").handler(`abc ${Buffer.from(JSON.stringify({ path: saved })).toString("base64url")}`, {
+      isIdle: () => false,
+      sessionManager: { getHeader: () => ({ type: "session" }), getEntries: () => [] },
+      ui: { setStatus(_key, value) { reply = value; } },
+    });
+    assert.deepEqual(JSON.parse(reply), { ok: false, error: "Session is busy" });
+    assert.equal(existsSync(saved), false);
+  } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });

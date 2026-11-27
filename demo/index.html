@@ -164,6 +164,15 @@
     }
     .scratch-page-header h1 .scratch-glyph { color: var(--accent); }
     .scratch-note { color: var(--muted); font: 400 0.75rem var(--mono); }
+    .scratch-title { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+    .scratch-action.scratch-continue { font-size: 0.75rem; font-weight: 400; white-space: nowrap; }
+    body.scratch-gone :is(.scratch-continue, .scratch-continue-separator) { display: none; }
+    /* On a phone, the button goes below the title. */
+    @media (max-width: 760px) {
+      .scratch-title { flex-wrap: wrap; row-gap: 0; }
+      .scratch-continue-separator { display: none; }
+      .scratch-action.scratch-continue { margin-left: -0.35rem; }
+    }
     .scratch-gone-notice { grid-column: 1 / -1; margin: 0.4rem 0 0; color: var(--muted); font: 0.8rem var(--mono); }
     body.scratch-gone .prompt-form { display: none; }
     /* The panel has a column of its own on wide screens, lies over the conversation on narrower ones, and fills a phone's screen. */

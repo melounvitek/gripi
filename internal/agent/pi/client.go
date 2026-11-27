@@ -94,6 +94,10 @@ func (client *Client) MemoryImage(ctx context.Context, entryID string, index int
 	return data, stringValue(image["mimeType"]), nil
 }
 
+func (client *Client) SaveMemorySession(ctx context.Context, path string) error {
+	return answer(client.SaveSession(ctx, path))
+}
+
 func (client *Client) State(ctx context.Context) (agent.State, error) {
 	return stateOf(client.GetState(ctx))
 }

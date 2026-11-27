@@ -473,7 +473,7 @@ function acceptReloadBridge(command) {
 }
 
 function acceptTreeBridge(command) {
-  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)|gripi_scoped_models|gripi_history(?:_image)?) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
+  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)|gripi_scoped_models|gripi_history(?:_image)?|gripi_save_session) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
   if (!match) return false;
   respond(command, true);
   const [, name, requestId, encoded] = match;
@@ -484,7 +484,7 @@ function acceptTreeBridge(command) {
     emitTreeBridge(name, requestId, { ok: false, error: "Invalid extension request payload" });
     return true;
   }
-  if (["gripi_tree_navigate", "gripi_tree_label"].includes(name) && (busy || compacting)) {
+  if (["gripi_tree_navigate", "gripi_tree_label", "gripi_save_session"].includes(name) && (busy || compacting)) {
     emitTreeBridge(name, requestId, { ok: false, error: "Session is busy" });
     return true;
   }
@@ -505,6 +505,10 @@ function acceptTreeBridge(command) {
     // Like Gripi's extension, without its size limits.
     const withoutImageData = function (key, value) { return key === "data" && this.type === "image" && value ? "-" : value; };
     emitTreeBridge(name, requestId, { ok: true, entries: JSON.parse(JSON.stringify(branchEntries(), withoutImageData)) });
+  } else if (name === "gripi_save_session") {
+    // Like Gripi's extension: a new file, which only its user reads.
+    writeFileSync(payload.path, `${[header, ...entries].map((record) => JSON.stringify(record)).join("\n")}\n`, { flag: "wx", mode: 0o600 });
+    emitTreeBridge(name, requestId, { ok: true });
   } else if (name === "gripi_history_image") {
     const entry = entries.find((candidate) => candidate.id === payload.entryId);
     const content = entry?.type === "custom_message" ? entry.content : entry?.message?.content;

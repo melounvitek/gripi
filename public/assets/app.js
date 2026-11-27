@@ -69,7 +69,7 @@ const hermesPanelController = new HermesPanelController(document, window, curren
   notificationPresenceController.reportCurrent();
   markCurrentSessionRead();
 });
-const scratchController = new ScratchController(document, window, focusConversation, openSessionLink);
+const scratchController = new ScratchController(document, window, focusConversation, openSessionLink, (path) => openNewSessionModal({ path, scratch: true }));
 // The Hermes panel's page and the scratch overlay's share sessionStorage with the page around them, so they keep their
 // notification identity apart. Gripi notifies of nothing in a scratch session, so its page reports none.
 const notificationPresenceController = new NotificationPresenceController(document, window, scratchController.page ? () => "" : currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : scratchController.page ? ":scratch" : "", () => hermesPanelController.lookedAt());
@@ -3233,7 +3233,9 @@ function focusPromptAfterModalClose(modal) {
   } else if (["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) {
     if (!sessionActionsController.restoreFocus()) syncComposerFocus();
   } else if (["new-session-modal", "command-palette-modal", "environment-modal", "worker-modal"].includes(modal?.dataset.modal)) {
-    syncComposerFocus();
+    // The picker of the folder that the scratch session continues in goes back to the scratch session.
+    if (scratchController.shown()) scratchController.focusFrame();
+    else syncComposerFocus();
   }
 }
 
@@ -3534,6 +3536,8 @@ document.addEventListener("submit", async (event) => {
       return;
     }
     const payload = await response.json();
+    // The scratch session has ended, and goes on as the new session.
+    if (form.getAttribute("action") === "/scratch/continue") scratchController.discarded();
     closeModal(modal);
     await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
   } catch (_error) {
