@@ -3313,6 +3313,8 @@ function addSessionViewFormParams(formData) {
   if (project) formData.set("project", project);
   const sessionSearch = sidebarController.activeSearch();
   if (sessionSearch) formData.set("session_search", sessionSearch);
+  const sessionFound = new URLSearchParams(window.location.search).get("session_found");
+  if (sessionFound) formData.set("session_found", sessionFound);
   const tag = new URLSearchParams(window.location.search).get("tag");
   if (tag) formData.set("tag", tag);
   if (new URLSearchParams(window.location.search).get("session_only") === "1") formData.set("session_only", "1");

@@ -1946,7 +1946,7 @@ func (app *application) writePromptResult(response http.ResponseWriter, request 
 
 func (app *application) sessionRedirectPath(request *http.Request, path string) string {
 	values := url.Values{"session": []string{path}}
-	for _, key := range []string{"project", "session_search", "session_only", "tag"} {
+	for _, key := range []string{"project", "session_search", "session_found", "session_only", "tag"} {
 		if value := request.FormValue(key); value != "" && (key != "session_only" || value == "1") {
 			values.Set(key, value)
 		}

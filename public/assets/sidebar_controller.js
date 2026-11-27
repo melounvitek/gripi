@@ -25,6 +25,9 @@ export class SidebarController {
     // The parents whose sub-sessions are unfolded, which every redraw of the sidebar keeps.
     this.openWorkerFolds = new Set();
     this.listenersBound = false;
+    // Pi's search for the sessions about the search's text, and what it said about the last one.
+    this.piSearch = null;
+    this.piSearchNotice = null;
   }
 
   initialize() {
@@ -46,6 +49,7 @@ export class SidebarController {
     this.bindInteractionTracking();
     this.syncUnreadBadges();
     this.gatewayUpdateController.apply();
+    this.syncPiSearch();
     return this.element;
   }
 
@@ -103,10 +107,17 @@ export class SidebarController {
       const form = event.target.closest?.(".sidebar-session-search");
       if (!form) return;
       event.preventDefault();
+      // Enter asks Pi when the search's text matches no session.
+      const query = this.searchQuery(form);
+      if (query && query === this.activeSearch() && !this.piSearch && this.element?.querySelector("[data-sidebar-no-match]")) {
+        this.startPiSearch();
+        return;
+      }
       this.changeSearchFilter(form).catch(() => form.submit());
     });
     this.document.addEventListener("input", (event) => {
       if (!event.target.matches?.('.sidebar-session-search input[name="session_search"]')) return;
+      this.syncPiSearch();
       clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => this.changeSearchFilter(this.element?.querySelector(".sidebar-session-search"))?.catch(() => {}), 200);
     });
@@ -135,6 +146,21 @@ export class SidebarController {
         cliToggle.setAttribute("aria-pressed", String(show));
         this.document.cookie = `${CLI_SESSIONS_COOKIE}=1; path=/; max-age=${show ? 365 * 24 * 60 * 60 : 0}; samesite=lax`;
         this.refresh({ force: true }).catch(() => {});
+        return;
+      }
+
+      if (event.target.closest?.("[data-pi-search-start]")) {
+        this.startPiSearch();
+        return;
+      }
+      if (event.target.closest?.("[data-pi-search-stop]")) {
+        this.stopPiSearch();
+        return;
+      }
+      if (event.target.closest?.("[data-pi-search-clear]")) {
+        const targetUrl = new URL(this.window.location.href);
+        targetUrl.searchParams.delete("session_found");
+        this.applyFilters(targetUrl, { searchOnly: true }).catch(() => { this.window.location.href = targetUrl.href; });
         return;
       }
 
@@ -368,9 +394,83 @@ export class SidebarController {
 
     const targetUrl = new URL(this.window.location.href);
     const query = form.querySelector('input[name="session_search"]')?.value.trim() || "";
+    // What Pi found was for another text.
+    if (query !== this.activeSearch()) targetUrl.searchParams.delete("session_found");
     if (query) targetUrl.searchParams.set("session_search", query);
     else targetUrl.searchParams.delete("session_search");
     return this.applyFilters(targetUrl, { searchOnly: true });
+  }
+
+  searchQuery(form) {
+    return form.querySelector('input[name="session_search"]')?.value.trim().replace(/\s+/g, " ") || "";
+  }
+
+  // Asks a hidden Pi for the sessions about the search's text, which the sidebar then lists with those that match it.
+  async startPiSearch() {
+    const form = this.element?.querySelector(".sidebar-session-search");
+    const query = form ? this.searchQuery(form) : "";
+    if (!query) return;
+    this.piSearch?.controller.abort();
+    const search = { query, controller: new AbortController() };
+    this.piSearch = search;
+    this.piSearchNotice = null;
+    this.syncPiSearch();
+    const body = new URLSearchParams({ q: query });
+    const params = new URLSearchParams(this.window.location.search);
+    for (const key of ["project", "tag"]) {
+      if (params.get(key)) body.set(key, params.get(key));
+    }
+    let notice;
+    try {
+      const response = await fetch("/sessions/find_with_pi", { method: "POST", body, headers: { Accept: "application/json" }, signal: search.controller.signal });
+      const payload = await response.json().catch(() => ({}));
+      if (this.piSearch !== search) return;
+      if (response.ok && payload.sessions?.length) {
+        this.piSearch = null;
+        const targetUrl = new URL(this.window.location.href);
+        targetUrl.searchParams.set("session_search", query);
+        targetUrl.searchParams.set("session_found", payload.sessions.join(","));
+        await this.applyFilters(targetUrl, { searchOnly: true }).catch(() => { this.window.location.href = targetUrl.href; });
+        return;
+      }
+      notice = response.ok ? "Pi found no other sessions." : `Pi couldn’t search: ${payload.error || `error ${response.status}`}`;
+    } catch (error) {
+      if (this.piSearch !== search) return;
+      notice = `Pi couldn’t search: ${error.message}`;
+    }
+    this.piSearch = null;
+    this.piSearchNotice = { query, text: notice };
+    this.syncPiSearch();
+  }
+
+  stopPiSearch() {
+    if (!this.piSearch) return;
+    this.piSearch.controller.abort();
+    this.piSearch = null;
+    this.syncPiSearch();
+  }
+
+  // Shows Pi's search in the sidebar, which every redraw does again, and stops it once the search's text changes.
+  syncPiSearch() {
+    const form = this.element?.querySelector(".sidebar-session-search");
+    if (this.piSearch && (!form || this.searchQuery(form) !== this.piSearch.query)) {
+      this.stopPiSearch();
+      return;
+    }
+    if (!form) return;
+    const working = !!this.piSearch;
+    form.querySelectorAll("[data-pi-search-start], [data-pi-search-clear]").forEach((control) => { control.hidden = working; });
+    const stop = form.querySelector("[data-pi-search-stop]");
+    if (stop) stop.hidden = !working;
+    const notice = this.piSearchNotice?.query === this.searchQuery(form) ? this.piSearchNotice.text : "";
+    const text = working ? "Pi is searching conversations…" : notice;
+    const status = this.element.querySelector("[data-pi-search-status]");
+    if (status) {
+      status.textContent = text;
+      status.hidden = !text;
+    }
+    const noMatch = this.element.querySelector("[data-sidebar-no-match]");
+    if (noMatch) noMatch.hidden = !!text;
   }
 
   // A search-only change keeps the field being typed in and the scroll position, and skips the New session dialog, which follows only the project filter.

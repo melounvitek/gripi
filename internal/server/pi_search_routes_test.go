@@ -195,3 +195,32 @@ func TestAPiSearchSaysWhyItFailed(t *testing.T) {
 		}
 	}
 }
+
+func TestTheSidebarListsWhatPiFoundWithWhatMatchesTheText(t *testing.T) {
+	handler, alpha, beta, _ := fakePiGateway(t)
+	sidebar := func(values url.Values) string {
+		t.Helper()
+		values.Set("no_session", "1")
+		response := serveAction(handler, getActionRequest("/sidebar?"+values.Encode()))
+		if response.Code != http.StatusOK {
+			t.Fatalf("sidebar = %d %s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	listed := func(body, path string) bool { return strings.Contains(body, `data-session-path="`+path+`"`) }
+
+	body := sidebar(url.Values{"session_search": {"no-such-text"}, "session_found": {"alpha-0001,unknown"}})
+	if !listed(body, alpha) || listed(body, beta) {
+		t.Fatalf("the sidebar of Pi's search lists alpha %t and beta %t", listed(body, alpha), listed(body, beta))
+	}
+	// Its links and its project filter keep what Pi found.
+	if !strings.Contains(body, "session_found=alpha-0001%2Cunknown") || !strings.Contains(body, `name="session_found" value="alpha-0001,unknown"`) {
+		t.Fatalf("the sidebar dropped what Pi found: %s", body)
+	}
+
+	// Without the search's text, what Pi found filters nothing and stays nowhere.
+	body = sidebar(url.Values{"session_found": {"alpha-0001"}})
+	if !listed(body, alpha) || !listed(body, beta) || strings.Contains(body, "session_found") {
+		t.Fatalf("the sidebar without a search = %s", body)
+	}
+}
