@@ -15,6 +15,14 @@ function scratchButton(page) {
   return page.getByRole("button", { name: "Scratch session, not saved" });
 }
 
+// The button blinks while Pi works, and shows a dot when Pi finished while the overlay was hidden.
+function scratchButtonState(page) {
+  return scratchButton(page).evaluate((button) => {
+    if (getComputedStyle(button).animationName === "progress-blink") return "working";
+    return getComputedStyle(button, "::after").content === "none" ? "idle" : "finished";
+  });
+}
+
 function overlay(page) {
   return page.locator("[data-scratch-overlay]");
 }
@@ -112,6 +120,32 @@ test("a scratch session that works goes on while hidden, and Esc twice stops it,
   await page.keyboard.press("Escape");
   await expectRunFinished(frame);
   await expect(overlay(page)).toBeVisible();
+});
+
+test("a hidden scratch session shows on its button that Pi works, and then that it finished until it shows again", async ({ page }) => {
+  await openScratch(page);
+  const frame = scratch(page);
+  await sendPrompt(frame, prompts.longCommand);
+  await expect(frame.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await frame.getByRole("button", { name: "Hide the scratch session" }).click();
+  await expect(overlay(page)).toBeHidden();
+  await expect.poll(() => scratchButtonState(page)).toBe("working");
+
+  await expect.poll(() => scratchButtonState(page)).toBe("finished");
+  await openScratch(page);
+  await expectRunFinished(frame);
+  await frame.getByRole("button", { name: "Hide the scratch session" }).click();
+  await expect(overlay(page)).toBeHidden();
+  expect(await scratchButtonState(page)).toBe("idle");
+
+  // A session that ends elsewhere while Pi works there didn't finish.
+  await openScratch(page);
+  await sendPrompt(frame, prompts.abortStart);
+  await expect(frame.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await frame.getByRole("button", { name: "Hide the scratch session" }).click();
+  await expect.poll(() => scratchButtonState(page)).toBe("working");
+  expect((await page.request.post("/scratch/discard", { headers: { Accept: "application/json" } })).ok()).toBe(true);
+  await expect.poll(() => scratchButtonState(page)).toBe("idle");
 });
 
 test("in a scratch session, Ctrl+K does nothing and Ctrl+N starts it over", async ({ page }) => {

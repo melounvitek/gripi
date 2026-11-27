@@ -10,6 +10,7 @@ export class ScratchController {
     this.overlay = null;
     this.frame = null;
     this.returnFocus = null;
+    this.working = false;
   }
 
   initialize() {
@@ -37,6 +38,9 @@ export class ScratchController {
       if (event.data === "gripi:scratch-hide") this.hide();
       if (event.data === "gripi:scratch-discarded") this.discarded();
       if (event.data === "gripi:scratch-new-session") this.requestNewSession();
+      if (event.data === "gripi:scratch-working") this.markWorking(true);
+      if (event.data === "gripi:scratch-idle") this.markWorking(false);
+      if (event.data === "gripi:scratch-gone") this.clearActivity();
     });
   }
 
@@ -54,6 +58,7 @@ export class ScratchController {
     if (!this.overlay) return;
     this.returnFocus = this.document.activeElement;
     this.overlay.hidden = false;
+    this.document.body.classList.remove("scratch-done");
     this.setPageInert(true);
     const drawer = this.document.getElementById("mobile-session-toggle");
     if (drawer) drawer.checked = false;
@@ -73,6 +78,7 @@ export class ScratchController {
       return;
     }
     this.overlay.classList.add("is-loading");
+    this.clearActivity();
     this.frame.src = redirect;
   }
 
@@ -89,6 +95,7 @@ export class ScratchController {
   // The frame leaves the session before it ends, so that its page doesn't say that it has ended.
   async startOver() {
     this.frame.src = "about:blank";
+    this.clearActivity();
     this.overlay.classList.add("is-loading");
     await this.window.fetch("/scratch/discard", { method: "POST", headers: { Accept: "application/json" } });
     this.markExists(false);
@@ -103,6 +110,19 @@ export class ScratchController {
 
   markExists(exists) {
     for (const button of this.document.querySelectorAll("[data-scratch-toggle]")) button.classList.toggle("is-active", exists);
+    if (!exists) this.clearActivity();
+  }
+
+  // The button shows that Pi works, and then that it finished while the overlay was hidden, until the overlay shows.
+  // The body keeps this, as the sidebar, with its button, is rendered again as it refreshes.
+  markWorking(working) {
+    const body = this.document.body;
+    if (!working && body.classList.contains("scratch-working") && !this.shown()) body.classList.add("scratch-done");
+    body.classList.toggle("scratch-working", working);
+  }
+
+  clearActivity() {
+    this.document.body.classList.remove("scratch-working", "scratch-done");
   }
 
   setPageInert(inert) {
@@ -159,10 +179,18 @@ export class ScratchController {
     return true;
   }
 
+  // The page tells the overlay when Pi starts and stops working.
+  reportWorking(working) {
+    if (!this.page || working === this.working) return;
+    this.working = working;
+    this.tellOverlay(working ? "gripi:scratch-working" : "gripi:scratch-idle");
+  }
+
   // The session ended, such as with its Pi or in another tab.
   gone() {
     if (!this.page) return;
     this.document.body.classList.add("scratch-gone");
+    this.tellOverlay("gripi:scratch-gone");
     const notice = this.document.querySelector("[data-scratch-gone]");
     if (notice) notice.hidden = false;
   }

@@ -1122,6 +1122,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     composerStopButton.disabled = !taskBusy || stopping;
     composerStopButton.classList.toggle("is-visible", taskBusy);
   }
+  scratchController.reportWorking(taskBusy);
   if (promptTextarea) promptTextarea.disabled = submitting || stopping || waitingForHermes || sessionSyncBlocked();
   if (focus && state !== previousState) syncComposerFocus(state);
   const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]');
