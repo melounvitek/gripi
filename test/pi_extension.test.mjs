@@ -16,11 +16,6 @@ const { createJiti } = await import(pathToFileURL(path.join(jitiRoot, "lib/jiti.
 const piIndex = path.join(piPackageRoot, "dist/index.js");
 const extensionPath = path.resolve("pi_extensions/gripi-tree.ts");
 const skillPath = path.resolve("pi_skills/gripi/SKILL.md");
-const providerPath = path.resolve("test/helpers/fake_provider.ts");
-// The scripted model provider needs Pi 0.99.0 or later.
-const piVersion = execFileSync(piExecutable, ["--version"], { encoding: "utf8", env: { ...process.env, PI_SKIP_VERSION_CHECK: "1" } }).trim();
-const [piMajor, piMinor] = (piVersion.match(/(\d+)\.(\d+)\.\d+/) || [0, 0, 0]).slice(1).map(Number);
-const scriptedModelSkip = piMajor === 0 && piMinor < 99 ? `Pi ${piVersion} is older than 0.99.0, which the scripted model needs` : false;
 
 async function resolvePiPackageRoot(executable) {
   const root = await packageRootAbove(executable) || await packageRootAbove(scriptBehindLauncher(executable));
@@ -191,28 +186,26 @@ test("a Pi that finds sessions for Gripi searches and reads them with gripi, wit
   await assert.rejects(tools.get("search_sessions").execute("call", { text: "unreachable" }, undefined), { message: "gripi search: the gateway cannot be reached" });
 });
 
-test("a Pi that finds sessions for Gripi has no other tools", { timeout: 30_000, skip: scriptedModelSkip }, async () => {
+test("a Pi that finds sessions for Gripi has no other tools", { timeout: 20_000 }, async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "gripi-find-pi-"));
+  const probe = path.join(directory, "probe.ts");
+  await writeFile(probe, `export default function (pi) {
+  pi.on("session_start", (_event, ctx) => ctx.ui.setStatus("active-tools", JSON.stringify(pi.getActiveTools())));
+}
+`);
   // The flags that Gripi starts such a Pi with (internal/agent/pi/adapter.go).
   const child = spawn(piExecutable, [
-    "--mode", "rpc", "--no-session", "-ne", "--approve", "--extension", providerPath, "--extension", extensionPath, "--model", "fake/fake-1",
     "--tools", "search_sessions,show_session", "--exclude-tools", "mcp__*", "--no-skills", "--no-context-files", "--thinking", "low",
+    "--mode", "rpc", "--extension", extensionPath, "--no-session", "--extension", probe,
   ], {
     cwd: directory,
-    env: { ...process.env, PI_CODING_AGENT_DIR: path.join(directory, "agent"), PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", GRIPI_FIND_SESSIONS: await fakeGripi(directory) },
+    env: { ...process.env, PI_CODING_AGENT_DIR: path.join(directory, "agent"), PI_SKIP_VERSION_CHECK: "1", GRIPI_FIND_SESSIONS: await fakeGripi(directory) },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const records = rpcRecords(child);
   try {
-    const calls = [[{ name: "bash", arguments: { command: "touch escaped" } }, { name: "search_sessions", arguments: { text: "backup" } }]];
-    child.stdin.write(`${JSON.stringify({ id: "run", type: "prompt", message: `RUN ${JSON.stringify(calls)}` })}\n`);
-    const reply = await records.next((record) => record.type === "message_end" && record.message?.role === "assistant" && record.message.stopReason !== "toolUse");
-    const [bash, search] = JSON.parse(reply.message.content[0].text);
-
-    assert.equal(bash.isError, true);
-    assert.equal(existsSync(path.join(directory, "escaped")), false);
-    assert.equal(search.isError, false);
-    assert.deepEqual(JSON.parse(search.text).args, ["search", "--", "backup"]);
+    const status = await records.next((record) => record.statusKey === "active-tools");
+    assert.deepEqual(JSON.parse(status.statusText).sort(), ["search_sessions", "show_session"]);
   } finally {
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));

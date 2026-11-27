@@ -132,7 +132,7 @@ func (app *application) findSessionsWithPi(response http.ResponseWriter, request
 	}
 	ctx, cancel := context.WithCancelCause(request.Context())
 	defer cancel(nil)
-	finish, ok := app.piSearches.begin(currentWorkspaceID(request), cancel)
+	finish, ok := app.piSearches.begin(app.environmentUser(request), cancel)
 	if !ok {
 		writeJSONStatus(response, http.StatusServiceUnavailable, map[string]string{"error": "Gripi is stopping."})
 		return
@@ -160,20 +160,26 @@ func (app *application) findSessionsWithPi(response http.ResponseWriter, request
 		return
 	}
 
-	if !acquireRequestSlot(response, request, app.heavyRequests) {
+	// Only the sessions that the sidebar can list with its filters count, without marking any of them read.
+	values := url.Values{"no_session": {"1"}}
+	for _, key := range []string{"project", "tag"} {
+		if value := request.FormValue(key); value != "" {
+			values.Set(key, value)
+		}
+	}
+	sidebar := request.Clone(timed)
+	sidebar.URL = &url.URL{Path: "/sidebar", RawQuery: values.Encode()}
+	if !acquireRequestSlot(response, sidebar, app.heavyRequests) {
 		return
 	}
 	defer releaseRequestSlot(app.heavyRequests)
-	// Only the sessions that the user's sidebar lists count, without marking any of them read.
-	sidebar := request.Clone(request.Context())
-	sidebar.URL = &url.URL{Path: "/sidebar", RawQuery: "no_session=1"}
 	view, err := app.preparePage(sidebar, false)
 	if err != nil {
 		writeInternalError(response, "list the sessions that Pi found", err)
 		return
 	}
-	listed := make(map[string]bool, len(view.Sessions))
-	for _, session := range view.Sessions {
+	listed := make(map[string]bool, len(view.SessionPool))
+	for _, session := range view.SessionPool {
 		listed[session.ID] = true
 	}
 	found := []string{}
@@ -189,6 +195,10 @@ func (app *application) findSessionsWithPi(response http.ResponseWriter, request
 // askPiToFindSessions returns the last reply of a hidden Pi asked for the sessions about query. Pi and its folder are
 // gone when it returns.
 func (app *application) askPiToFindSessions(ctx context.Context, request *http.Request, query string) (string, error) {
+	// A newer search may have replaced this one while it waited for the older one.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	dir, err := app.scratch.folders.create()
 	if err != nil {
 		return "", err
@@ -212,6 +222,8 @@ func (app *application) askPiToFindSessions(ctx context.Context, request *http.R
 		return "", err
 	}
 	defer client.Close()
+	// Pi's answer to the prompt doesn't wait for ctx.
+	defer context.AfterFunc(ctx, func() { _ = client.Close() })()
 	if _, err := client.Prompt(ctx, agent.Prompt{Text: fmt.Sprintf(piSearchPrompt, query)}); err != nil {
 		return "", err
 	}

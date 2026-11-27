@@ -54,7 +54,7 @@ test("Enter asks Pi when the search matches no session, and its finds stay after
   await expect(page.getByRole("button", { name: "ask Pi" })).toBeVisible();
 });
 
-test("Pi's search shows while it runs, and stopping it or changing the search stops its Pi", async ({ page }) => {
+test("Pi's search shows while it runs, and stopping it, changing the search or a filter stops its Pi", async ({ page }) => {
   await page.goto("/");
   const field = await search(page, piSearch.slow);
   const status = page.getByRole("status").filter({ hasText: "Pi is searching conversations…" });
@@ -77,6 +77,15 @@ test("Pi's search shows while it runs, and stopping it or changing the search st
   await expect(status).toBeHidden();
   await expect(page.getByRole("button", { name: "Pi · stop" })).toBeHidden();
   await expect.poll(async () => [...(await piSearchRuns()).values()].slice(runs)).toEqual([true, true]);
+  await expect.poll(() => new URL(page.url()).searchParams.get("session_search")).toBe(`${piSearch.slow} more`);
+
+  await page.getByRole("button", { name: "ask Pi" }).click();
+  await expect(status).toBeVisible();
+  await page.getByRole("combobox", { name: "Filter sessions by project" }).click();
+  await page.getByRole("option").nth(1).click();
+
+  await expect(status).toBeHidden();
+  await expect.poll(async () => [...(await piSearchRuns()).values()].slice(runs)).toEqual([true, true, true]);
 });
 
 test("the sidebar says when Pi found nothing more, and why it couldn't search", async ({ page }) => {

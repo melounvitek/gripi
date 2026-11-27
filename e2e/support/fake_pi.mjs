@@ -305,6 +305,7 @@ function setModel(command) {
 
 function acceptPrompt(command) {
   if (acceptReloadBridge(command) || acceptTreeBridge(command)) return;
+  if (command.message?.includes(piSearch.unanswered)) return;
   if (command.message === "/immediate-command") {
     respond(command, true, { data: { disposition: "handled" } });
     return;

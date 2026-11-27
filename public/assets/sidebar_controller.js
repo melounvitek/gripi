@@ -402,24 +402,28 @@ export class SidebarController {
   }
 
   searchQuery(form) {
-    return form.querySelector('input[name="session_search"]')?.value.trim().replace(/\s+/g, " ") || "";
+    return form.querySelector('input[name="session_search"]')?.value.trim() || "";
+  }
+
+  // What Pi searches: the search's text within the sidebar's filters.
+  piSearchScope(form) {
+    const project = this.element.querySelector("[data-sidebar-project-filter]")?.value || "";
+    return { query: this.searchQuery(form), project, tag: this.element.dataset.selectedTag || "" };
   }
 
   // Asks a hidden Pi for the sessions about the search's text, which the sidebar then lists with those that match it.
   async startPiSearch() {
     const form = this.element?.querySelector(".sidebar-session-search");
-    const query = form ? this.searchQuery(form) : "";
-    if (!query) return;
+    const scope = form && this.piSearchScope(form);
+    if (!scope?.query) return;
     this.piSearch?.controller.abort();
-    const search = { query, controller: new AbortController() };
+    const search = { scope, controller: new AbortController() };
     this.piSearch = search;
     this.piSearchNotice = null;
     this.syncPiSearch();
-    const body = new URLSearchParams({ q: query });
-    const params = new URLSearchParams(this.window.location.search);
-    for (const key of ["project", "tag"]) {
-      if (params.get(key)) body.set(key, params.get(key));
-    }
+    const body = new URLSearchParams({ q: scope.query });
+    if (scope.project) body.set("project", scope.project);
+    if (scope.tag) body.set("tag", scope.tag);
     let notice;
     try {
       const response = await fetch("/sessions/find_with_pi", { method: "POST", body, headers: { Accept: "application/json" }, signal: search.controller.signal });
@@ -428,7 +432,7 @@ export class SidebarController {
       if (response.ok && payload.sessions?.length) {
         this.piSearch = null;
         const targetUrl = new URL(this.window.location.href);
-        targetUrl.searchParams.set("session_search", query);
+        targetUrl.searchParams.set("session_search", scope.query);
         targetUrl.searchParams.set("session_found", payload.sessions.join(","));
         await this.applyFilters(targetUrl, { searchOnly: true }).catch(() => { this.window.location.href = targetUrl.href; });
         return;
@@ -439,7 +443,7 @@ export class SidebarController {
       notice = `Pi couldn’t search: ${error.message}`;
     }
     this.piSearch = null;
-    this.piSearchNotice = { query, text: notice };
+    this.piSearchNotice = { scope, text: notice };
     this.syncPiSearch();
   }
 
@@ -450,10 +454,11 @@ export class SidebarController {
     this.syncPiSearch();
   }
 
-  // Shows Pi's search in the sidebar, which every redraw does again, and stops it once the search's text changes.
+  // Shows Pi's search in the sidebar, which every redraw does again, and stops it once the search or a filter changes.
   syncPiSearch() {
     const form = this.element?.querySelector(".sidebar-session-search");
-    if (this.piSearch && (!form || this.searchQuery(form) !== this.piSearch.query)) {
+    const scope = form && JSON.stringify(this.piSearchScope(form));
+    if (this.piSearch && JSON.stringify(this.piSearch.scope) !== scope) {
       this.stopPiSearch();
       return;
     }
@@ -462,7 +467,7 @@ export class SidebarController {
     form.querySelectorAll("[data-pi-search-start], [data-pi-search-clear]").forEach((control) => { control.hidden = working; });
     const stop = form.querySelector("[data-pi-search-stop]");
     if (stop) stop.hidden = !working;
-    const notice = this.piSearchNotice?.query === this.searchQuery(form) ? this.piSearchNotice.text : "";
+    const notice = JSON.stringify(this.piSearchNotice?.scope) === scope ? this.piSearchNotice.text : "";
     const text = working ? "Pi is searching conversations…" : notice;
     const status = this.element.querySelector("[data-pi-search-status]");
     if (status) {

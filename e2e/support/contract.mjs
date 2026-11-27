@@ -84,8 +84,9 @@ export const sessions = {
 export const refusal = "No API key found for e2e.";
 
 // The fake Pi answers a search for sessions with the search's words, one per line, so that the IDs among them are
-// the sessions it found. It never answers a search that holds slow, and fails one that holds fail.
-export const piSearch = { slow: "e2e-pi-search-slow", fail: "e2e-pi-search-fail" };
+// the sessions it found. It never answers a search that holds slow, never takes one that holds unanswered, and fails
+// one that holds fail.
+export const piSearch = { slow: "e2e-pi-search-slow", unanswered: "e2e-pi-search-unanswered", fail: "e2e-pi-search-fail" };
 
 export const footerModel = {
   id: `claude-opus-${"long-model-name-".repeat(15)}`,

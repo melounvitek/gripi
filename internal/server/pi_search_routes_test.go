@@ -16,25 +16,25 @@ import (
 	"github.com/melounvitek/gripi/internal/access"
 )
 
-// The fake Pi answers a search with its words, one per line, or never answers or fails for these.
-const piSearchSlow, piSearchFail = "e2e-pi-search-slow", "e2e-pi-search-fail"
+// The fake Pi answers a search with its words, one per line, or never answers, never takes it or fails for these.
+const piSearchSlow, piSearchUnanswered, piSearchFail = "e2e-pi-search-slow", "e2e-pi-search-unanswered", "e2e-pi-search-fail"
 
 type piSearchPayload struct {
 	Sessions []string `json:"sessions"`
 	Error    string   `json:"error"`
 }
 
-func piSearchRequest(ctx context.Context, query, cookie string) *http.Request {
-	request := formActionRequest("/sessions/find_with_pi", map[string]string{"q": query}, true)
+func piSearchRequest(ctx context.Context, fields map[string]string, cookie string) *http.Request {
+	request := formActionRequest("/sessions/find_with_pi", fields, true)
 	if cookie != "" {
 		request.Header.Set("Cookie", cookie)
 	}
 	return request.WithContext(ctx)
 }
 
-func findWithPi(t *testing.T, handler http.Handler, query, cookie string) (int, piSearchPayload) {
+func findWithPi(t *testing.T, handler http.Handler, fields map[string]string, cookie string) (int, piSearchPayload) {
 	t.Helper()
-	response := serveAction(handler, piSearchRequest(context.Background(), query, cookie))
+	response := serveAction(handler, piSearchRequest(context.Background(), fields, cookie))
 	var payload piSearchPayload
 	decodeActionJSON(t, response, &payload)
 	return response.Code, payload
@@ -114,12 +114,17 @@ func TestPiFindsOnlyTheUsersOwnSessions(t *testing.T) {
 	handler, _, _, secret := multiUserFakePiGateway(t)
 
 	// Of the IDs in Pi's answer, only alpha-0001 belongs to Alice; Bob owns beta-0002.
-	code, payload := findWithPi(t, handler, "beta-0002  alpha-0001\n unknown-0003", "gripi_workspace="+access.WorkspaceID(secret, alice))
+	cookie := "gripi_workspace=" + access.WorkspaceID(secret, alice)
+	code, payload := findWithPi(t, handler, map[string]string{"q": "beta-0002  alpha-0001\n unknown-0003"}, cookie)
 	if code != http.StatusOK || !slices.Equal(payload.Sessions, []string{"alpha-0001"}) {
 		t.Fatalf("Alice's search = %d %+v", code, payload)
 	}
+	// Nor do sessions that the sidebar's filters leave out.
+	if code, payload := findWithPi(t, handler, map[string]string{"q": "alpha-0001", "tag": "no-such-tag"}, cookie); code != http.StatusOK || len(payload.Sessions) != 0 {
+		t.Fatalf("Alice's search within a tag = %d %+v", code, payload)
+	}
 
-	for _, run := range waitForPiSearchRuns(t, allStopped(1)) {
+	for _, run := range waitForPiSearchRuns(t, allStopped(2)) {
 		for _, want := range []string{"--no-session", "--no-skills", "--no-context-files"} {
 			if !slices.Contains(run.args, want) {
 				t.Fatalf("Pi started with %v, without %s", run.args, want)
@@ -136,11 +141,12 @@ func TestAPiSearchEndsWithItsRequestANewerOneOrTheGateway(t *testing.T) {
 	temporary := t.TempDir()
 	t.Setenv("TMPDIR", temporary)
 	handler, _, _, _ := fakePiGateway(t)
-	start := func(ctx context.Context) <-chan *httptest.ResponseRecorder {
+	startSearch := func(ctx context.Context, query string) <-chan *httptest.ResponseRecorder {
 		done := make(chan *httptest.ResponseRecorder, 1)
-		go func() { done <- serveAction(handler, piSearchRequest(ctx, piSearchSlow, "")) }()
+		go func() { done <- serveAction(handler, piSearchRequest(ctx, map[string]string{"q": query}, "")) }()
 		return done
 	}
+	start := func(ctx context.Context) <-chan *httptest.ResponseRecorder { return startSearch(ctx, piSearchSlow) }
 	ended := func(done <-chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
 		t.Helper()
 		select {
@@ -152,30 +158,38 @@ func TestAPiSearchEndsWithItsRequestANewerOneOrTheGateway(t *testing.T) {
 		}
 	}
 
+	// Also before Pi takes the prompt, which Gripi otherwise waits for.
 	ctx, cancel := context.WithCancel(context.Background())
-	cancelled := start(ctx)
+	unanswered := startSearch(ctx, piSearchUnanswered)
 	waitForPiSearchRuns(t, started(1))
 	cancel()
-	ended(cancelled)
+	ended(unanswered)
 	waitForPiSearchRuns(t, allStopped(1))
 
-	older := start(context.Background())
+	ctx, cancel = context.WithCancel(context.Background())
+	cancelled := start(ctx)
 	waitForPiSearchRuns(t, started(2))
-	if code, payload := findWithPi(t, handler, "alpha-0001", ""); code != http.StatusOK || !slices.Equal(payload.Sessions, []string{"alpha-0001"}) {
+	cancel()
+	ended(cancelled)
+	waitForPiSearchRuns(t, allStopped(2))
+
+	older := start(context.Background())
+	waitForPiSearchRuns(t, started(3))
+	if code, payload := findWithPi(t, handler, map[string]string{"q": "alpha-0001"}, ""); code != http.StatusOK || !slices.Equal(payload.Sessions, []string{"alpha-0001"}) {
 		t.Fatalf("the newer search = %d %+v", code, payload)
 	}
 	if response := ended(older); response.Code == http.StatusOK {
 		t.Fatalf("the replaced search = %d %s", response.Code, response.Body.String())
 	}
-	waitForPiSearchRuns(t, allStopped(3))
+	waitForPiSearchRuns(t, allStopped(4))
 
 	running := start(context.Background())
-	waitForPiSearchRuns(t, started(4))
+	waitForPiSearchRuns(t, started(5))
 	if err := handler.(interface{ Close(context.Context) error }).Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	ended(running)
-	waitForPiSearchRuns(t, allStopped(4))
+	waitForPiSearchRuns(t, allStopped(5))
 	assertNoPiSearchFolders(t, temporary)
 }
 
@@ -183,14 +197,14 @@ func TestAPiSearchSaysWhyItFailed(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	handler, _, _, _ := fakePiGateway(t)
 
-	if code, payload := findWithPi(t, handler, piSearchFail, ""); code != http.StatusBadGateway || payload.Error != "No API key found for e2e." {
+	if code, payload := findWithPi(t, handler, map[string]string{"q": piSearchFail}, ""); code != http.StatusBadGateway || payload.Error != "No API key found for e2e." {
 		t.Fatalf("failed search = %d %+v", code, payload)
 	}
-	if code, payload := findWithPi(t, handler, "nothing-0003", ""); code != http.StatusOK || payload.Sessions == nil || len(payload.Sessions) != 0 {
+	if code, payload := findWithPi(t, handler, map[string]string{"q": "nothing-0003"}, ""); code != http.StatusOK || payload.Sessions == nil || len(payload.Sessions) != 0 {
 		t.Fatalf("search that found nothing = %d %+v", code, payload)
 	}
 	for _, query := range []string{" \n ", strings.Repeat("a", 201)} {
-		if response := serveAction(handler, piSearchRequest(context.Background(), query, "")); response.Code != http.StatusBadRequest {
+		if response := serveAction(handler, piSearchRequest(context.Background(), map[string]string{"q": query}, "")); response.Code != http.StatusBadRequest {
 			t.Fatalf("search for %q = %d %s", url.QueryEscape(query), response.Code, response.Body.String())
 		}
 	}
