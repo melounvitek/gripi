@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { activeRecovery, footerModel, footerStatus, live, mobileSubagents, nativeBash, paginatedSubagent, prompts, refusal, replies, subagents, tool, writeTool } from "./contract.mjs";
+import { activeRecovery, footerModel, footerStatus, live, mobileSubagents, nativeBash, paginatedSubagent, piSearch, prompts, refusal, replies, subagents, tool, writeTool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -42,7 +42,7 @@ if (sessionPath && existsSync(sessionPath)) loadSession(sessionPath);
 else if (forkSource) forkSession(forkSource);
 // Like Pi, a --session file that does not exist yet gets a new session, which Pi saves there.
 else prepareNewSession(sessionPath);
-log({ event: "started", sessionPath, cwd: process.cwd() });
+log({ event: "started", sessionPath, cwd: process.cwd(), args: process.argv.slice(2) });
 process.once("exit", () => log({ event: "stopped" }));
 
 attachJsonlReader(process.stdin, handleCommand);
@@ -305,6 +305,7 @@ function setModel(command) {
 
 function acceptPrompt(command) {
   if (acceptReloadBridge(command) || acceptTreeBridge(command)) return;
+  if (command.message?.includes(piSearch.unanswered)) return;
   if (command.message === "/immediate-command") {
     respond(command, true, { data: { disposition: "handled" } });
     return;
@@ -418,6 +419,11 @@ function acceptPrompt(command) {
     return;
   }
   if (startLiveScenario(command.message)) return;
+  const sessionSearch = command.message.match(/^Find the Gripi sessions about: (.*)$/m)?.[1];
+  if (sessionSearch !== undefined) {
+    findSessions(sessionSearch);
+    return;
+  }
 
   let reply = replies.standard;
   if (path.basename(process.cwd()).startsWith("new-session-")) reply = replies.newSession;
@@ -440,6 +446,18 @@ function acceptPrompt(command) {
   } else {
     schedule(120, () => completeWithTool(reply));
   }
+}
+
+// Gripi's sidebar asks a Pi that has only the tools of Gripi's extension, which it turns on with GRIPI_FIND_SESSIONS.
+function findSessions(query) {
+  if (query.includes(piSearch.slow)) return;
+  schedule(50, () => {
+    const failed = query.includes(piSearch.fail) || !process.env.GRIPI_FIND_SESSIONS;
+    const text = failed ? "" : query.split(/\s+/).join("\n");
+    const reply = assistantMessage(failed ? [] : [{ type: "text", text }], failed ? "error" : "stop");
+    emit({ type: "message_start", message: reply });
+    finishAssistant(failed ? { ...reply, errorMessage: process.env.GRIPI_FIND_SESSIONS ? refusal : "Pi has no tools to search sessions." } : reply);
+  });
 }
 
 function acceptReloadBridge(command) {

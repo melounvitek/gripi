@@ -3044,6 +3044,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   const scrollSnapshot = preserveScroll ? conversationScrollSnapshot() : null;
   persistStoredComposerDraft();
   sidebarController.invalidate({ clearSessionsLimit: true });
+  sidebarController.stopPiSearchOutside(url);
   sessionSwitchAbortController?.abort();
   // A press that did not end in a click right away leaves a copy that may be out of date.
   const preload = sessionPreload?.url === url && performance.now() - sessionPreload.startedAt < SESSION_PRELOAD_MAX_AGE_MS ? sessionPreload : null;
@@ -3313,6 +3314,8 @@ function addSessionViewFormParams(formData) {
   if (project) formData.set("project", project);
   const sessionSearch = sidebarController.activeSearch();
   if (sessionSearch) formData.set("session_search", sessionSearch);
+  const sessionFound = new URLSearchParams(window.location.search).get("session_found");
+  if (sessionFound) formData.set("session_found", sessionFound);
   const tag = new URLSearchParams(window.location.search).get("tag");
   if (tag) formData.set("tag", tag);
   if (new URLSearchParams(window.location.search).get("session_only") === "1") formData.set("session_only", "1");

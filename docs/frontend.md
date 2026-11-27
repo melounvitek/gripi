@@ -8,7 +8,7 @@ Page-lifetime listeners are registered once by `public/assets/app.js`. Replaceab
 
 `app.js` coordinates session navigation, event polling, composer behavior, modal policy, status, and notifications. Feature modules own narrower lifecycles:
 
-- `SidebarController` owns sidebar refreshes and replacement.
+- `SidebarController` owns sidebar refreshes and replacement, and Pi's search for sessions, whose state it keeps across replacements.
 - `ConversationController` owns viewport state, history loading, and scrolling.
 - `CurrentSessionFindController` owns conversation find state and highlights.
 - `LiveMessageParser` interprets Pi event and message shapes without touching the DOM.

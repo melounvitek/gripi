@@ -20,7 +20,7 @@
 
 ## Features
 
-- All Pi sessions on the gateway machine in one sidebar, with search, project and tag filters, pinning, and unread markers.
+- All Pi sessions on the gateway machine in one sidebar, with search, project and tag filters, pinning, and unread markers. When the search finds nothing, [Pi can search the conversations](docs/configuration.md#asking-pi-to-find-sessions).
 - A Pi-style composer with slash commands, `@` file completion, `!` shell commands, and image attachments.
 - Steer Pi or queue follow-ups while it is running.
 - A [scratch session](docs/configuration.md#scratch-sessions) for a quick question to Pi outside any project, in a window over the page, which Gripi never saves or lists.

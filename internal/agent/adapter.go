@@ -26,6 +26,8 @@ type StartOptions struct {
 	CWD string
 	// Scratch starts a new session that the agent keeps only in memory.
 	Scratch bool
+	// FindSessions limits the agent of a new scratch session to searching and reading the user's sessions.
+	FindSessions bool
 	// Env holds extra NAME=value variables for the agent.
 	Env         []string
 	Diagnostics *Diagnostics

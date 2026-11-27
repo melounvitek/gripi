@@ -150,6 +150,69 @@ test("Pi loads Gripi's skill unless the user has a skill of that name", { timeou
   }
 });
 
+// A gripi command that prints its arguments, or fails as gripi does when it can't reach the gateway.
+async function fakeGripi(directory) {
+  const command = path.join(directory, "gripi");
+  await writeFile(command, `#!/usr/bin/env node
+if (process.argv.includes("unreachable")) {
+  process.stderr.write("gripi search: the gateway cannot be reached\\n");
+  process.exit(1);
+}
+console.log(JSON.stringify({ args: process.argv.slice(2), token: process.env.GRIPI_USER_TOKEN }));
+`, { mode: 0o755 });
+  return command;
+}
+
+test("a Pi that finds sessions for Gripi searches and reads them with gripi, within the sidebar's filters", async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-find-tools-"));
+  const variables = { GRIPI_FIND_SESSIONS: await fakeGripi(directory), GRIPI_FIND_CWD: "/home/me/project", GRIPI_FIND_TAG: "bug", GRIPI_USER_TOKEN: "piu_alice" };
+  const previous = Object.fromEntries(Object.keys(variables).map((name) => [name, process.env[name]]));
+  t.after(async () => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  assert.deepEqual([...(await loadTreeExtension()).tools.keys()], []);
+  Object.assign(process.env, variables);
+  const { tools } = await loadTreeExtension();
+  assert.deepEqual([...tools.keys()], ["search_sessions", "show_session"]);
+  const text = async (name, params) => JSON.parse((await tools.get(name).execute("call", params, undefined)).content[0].text);
+
+  assert.deepEqual(await text("search_sessions", { text: "--all backup" }), { args: ["search", "--cwd", "/home/me/project", "--tag", "bug", "--", "--all backup"], token: "piu_alice" });
+  assert.deepEqual(await text("show_session", { id: "01a2-b3" }), { args: ["show", "--all", "--", "01a2-b3"], token: "piu_alice" });
+  await assert.rejects(tools.get("search_sessions").execute("call", { text: "unreachable" }, undefined), { message: "gripi search: the gateway cannot be reached" });
+});
+
+test("a Pi that finds sessions for Gripi has no other tools", { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-find-pi-"));
+  const probe = path.join(directory, "probe.ts");
+  await writeFile(probe, `export default function (pi) {
+  pi.on("session_start", (_event, ctx) => ctx.ui.setStatus("active-tools", JSON.stringify(pi.getActiveTools())));
+}
+`);
+  // The flags that Gripi starts such a Pi with (internal/agent/pi/adapter.go).
+  const child = spawn(piExecutable, [
+    "--tools", "search_sessions,show_session", "--exclude-tools", "mcp__*", "--no-skills", "--no-context-files", "--thinking", "low",
+    "--mode", "rpc", "--extension", extensionPath, "--no-session", "--extension", probe,
+  ], {
+    cwd: directory,
+    env: { ...process.env, PI_CODING_AGENT_DIR: path.join(directory, "agent"), PI_SKIP_VERSION_CHECK: "1", GRIPI_FIND_SESSIONS: await fakeGripi(directory) },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const records = rpcRecords(child);
+  try {
+    const status = await records.next((record) => record.statusKey === "active-tools");
+    assert.deepEqual(JSON.parse(status.statusText).sort(), ["search_sessions", "show_session"]);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function rpcRecords(child) {
   let buffer = "";
   let stderr = "";
@@ -380,8 +443,9 @@ async function loadTreeExtension() {
   const jiti = createJiti(import.meta.url, { interopDefault: true, alias: { "@earendil-works/pi-coding-agent": piIndex } });
   const loadExtension = await jiti.import(extensionPath, { default: true });
   const commands = new Map();
-  loadExtension({ registerCommand(name, command) { commands.set(name, command); }, on() {}, setLabel() {} });
-  return commands;
+  const tools = new Map();
+  loadExtension({ registerCommand(name, command) { commands.set(name, command); }, registerTool(tool) { tools.set(tool.name, tool); }, on() {}, setLabel() {} });
+  return Object.assign(commands, { tools });
 }
 
 // Runs a bridge command as Gripi sends it and returns the extension's reply.

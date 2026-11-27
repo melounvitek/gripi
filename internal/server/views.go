@@ -95,6 +95,7 @@ type pageView struct {
 	ProjectMonograms          map[string]string
 	SelectedProject           string
 	SearchQuery               string
+	SessionFound              string // the IDs of the sessions that Pi found for SearchQuery, separated by commas
 	SelectedTag               string
 	SessionTags               map[string][]string
 	SessionParents            map[string]string
@@ -309,6 +310,9 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil, ScratchPage: scratchPage, ScratchGone: scratchPage && !scratchOwned, ScratchExists: app.scratch.key(currentWorkspaceID(request)) != ""}
 	view.ExternalFollow = externalFollow
+	if view.SearchQuery != "" {
+		view.SessionFound = params.Get("session_found")
+	}
 	if notifier := app.completionNotifications; notifier != nil {
 		notifier.mu.Lock()
 		notifier.pruneClientsLocked()
@@ -626,6 +630,12 @@ func (view *pageView) prepareSidebar() {
 	view.CLISessionsShown = err == nil && cookie.Value == "1"
 	var pool []*agent.Session
 	query := strings.ToLower(view.SearchQuery)
+	// The sessions that Pi found are listed with those that match the text.
+	found := make(map[string]bool)
+	ids := strings.FieldsFunc(view.SessionFound, func(r rune) bool { return r == ',' })
+	for _, id := range ids[:min(len(ids), piSearchResults)] {
+		found[id] = true
+	}
 	for _, session := range view.Sessions {
 		// A linked session shows under its parent instead.
 		if view.Pinned[session.Path] || nestedUnder[session.Path] != "" {
@@ -640,7 +650,7 @@ func (view *pageView) prepareSidebar() {
 		if view.SelectedProject != "" && session.CWD != view.SelectedProject {
 			continue
 		}
-		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
+		if query != "" && !found[session.ID] && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
 			continue
 		}
 		// A tag filter lists its Pi CLI sessions too, so a tagged group shows whole.
@@ -922,9 +932,7 @@ func sessionURL(view *pageView, session *agent.Session) string {
 		if view.SelectedProject != "" {
 			values.Set("project", view.SelectedProject)
 		}
-		if view.SearchQuery != "" {
-			values.Set("session_search", view.SearchQuery)
-		}
+		setSearch(values, view)
 		if retained := retainedSessionsLimit(view, session); retained != "" {
 			values.Set("sidebar_sessions_limit", retained)
 		}
@@ -979,12 +987,21 @@ func sidebarLoadURL(view *pageView) string {
 	if view.SelectedProject != "" {
 		values.Set("project", view.SelectedProject)
 	}
-	if view.SearchQuery != "" {
-		values.Set("session_search", view.SearchQuery)
-	}
+	setSearch(values, view)
 	values.Set("sidebar_sessions_limit", strconv.Itoa(min(view.SessionsLimit+sessionPageSize, view.SessionPoolLength)))
 	return "/?" + values.Encode()
 }
+
+// setSearch keeps the search's text and the sessions that Pi found for it.
+func setSearch(values url.Values, view *pageView) {
+	if view.SearchQuery != "" {
+		values.Set("session_search", view.SearchQuery)
+	}
+	if view.SessionFound != "" {
+		values.Set("session_found", view.SessionFound)
+	}
+}
+
 func filtersClearURL(view *pageView) string {
 	values := url.Values{}
 	if view.Selected != nil {

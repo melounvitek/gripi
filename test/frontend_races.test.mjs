@@ -192,6 +192,69 @@ test("obsolete sidebar filter failure does not cancel a newer filter", async () 
   }
 });
 
+test("a filter change stops Pi's search, whose late answer would undo it", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const input = { value: "backup broke again" };
+  const select = { value: "", closest: () => null };
+  const form = { querySelector: (selector) => (selector.startsWith("input") ? input : null), querySelectorAll: () => [] };
+  const sidebar = {
+    dataset: { selectedTag: "" },
+    classList: { toggle() {} },
+    querySelector: (selector) => ({ ".sidebar-session-search": form, "[data-sidebar-project-filter]": select })[selector] || null,
+  };
+  const document = { hidden: false, hasFocus: () => true, dispatchEvent() {}, querySelector: () => null };
+  const replaced = [];
+  const window = {
+    location: { href: "https://example.test/?session_search=backup+broke+again", origin: "https://example.test", search: "?session_search=backup+broke+again" },
+    history: { state: null, replaceState(_state, _title, url) { replaced.push(String(url)); } },
+    CustomEvent: class {},
+  };
+  const controller = new SidebarController(document, window, {}, {}, () => {});
+  controller.element = sidebar;
+  controller.replace = () => {};
+  controller.scheduleRefresh = () => {};
+
+  const piAnswer = deferred();
+  let sidebarAnswer = deferred();
+  const requested = [];
+  globalThis.window = window;
+  globalThis.fetch = (url, { signal } = {}) => {
+    requested.push(String(url));
+    if (String(url) === "/sessions/find_with_pi") {
+      signal.addEventListener("abort", () => piAnswer.reject(new DOMException("Aborted", "AbortError")));
+      return piAnswer.promise;
+    }
+    return sidebarAnswer.promise;
+  };
+
+  try {
+    const searching = controller.startPiSearch();
+    select.value = "/home/me/project";
+    const filtering = controller.changeProjectFilter(select);
+    piAnswer.resolve({ ok: true, json: async () => ({ sessions: ["readme-backup"] }) });
+    await new Promise((resolve) => setTimeout(resolve));
+    sidebarAnswer.resolve({ ok: true, text: async () => "project sidebar" });
+    await Promise.all([searching, filtering]);
+
+    assert.equal(requested.some((url) => url.includes("session_found")), false);
+    assert.deepEqual(replaced, ["https://example.test/?session_search=backup+broke+again&project=%2Fhome%2Fme%2Fproject"]);
+
+    // Nor does a search start while the filters change.
+    sidebarAnswer = deferred();
+    select.value = "";
+    const unfiltering = controller.changeProjectFilter(select);
+    await controller.startPiSearch();
+    sidebarAnswer.resolve({ ok: true, text: async () => "sidebar" });
+    await unfiltering;
+    assert.equal(requested.filter((url) => url === "/sessions/find_with_pi").length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("history reconciliation is included in preserved viewport measurements", () => {
   const fragment = { querySelectorAll: () => [] };
   const document = {

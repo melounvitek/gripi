@@ -455,6 +455,13 @@
     .sidebar-session-search { display: none; align-items: center; gap: 0.4rem; margin: 0; }
     .sidebar-session-search.is-open { display: flex; }
     .sidebar-session-search input { flex: 1 1 auto; min-width: 0; padding: 0.5rem calc(0.5rem - 1px); color: var(--text); font-size: 0.8rem; background: var(--bg); }
+    .sidebar-pi-search { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.45rem; border: 1px solid var(--accent-line-55); border-radius: 0.3rem; background: none; color: var(--accent); font: 500 0.68rem var(--mono); letter-spacing: 0; text-transform: none; white-space: nowrap; }
+    .sidebar-pi-search:hover { background: var(--accent-tint-08); }
+    .sidebar-pi-search.is-working { border-color: var(--border-strong); color: var(--muted); }
+    .sidebar-pi-search.is-working:hover { background: #ffffff08; }
+    .sidebar-pi-search-dot { width: 0.4rem; height: 0.4rem; border-radius: 999px; background: var(--accent); animation: progress-blink 1000ms ease-in-out infinite; }
+    .sidebar-session-search input:placeholder-shown ~ :is([data-pi-search-start], [data-pi-search-clear]) { display: none; }
+    .sidebar-filters .sidebar-search-empty { margin: 0 0.5rem; }
     .sidebar-search-toggle { min-width: 1.65rem; padding: 0.2rem 0.45rem; font-size: 1rem; }
     .sidebar-search-toggle.is-active { color: var(--accent); }
     .sidebar-project-filter-form { margin: 0; }
@@ -1128,7 +1135,7 @@
     /* revealGrowth in dom.js wipes newly streamed blocks in from the top by animating this soft edge. */
     @property --reveal-edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
     .message-body--revealing { -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); }
-    @media (prefers-reduced-motion: reduce) { body.scratch-working .sidebar-scratch-button, .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .voice-call-view[data-state] .voice-call-state::before, .voice-call-view[data-state] .voice-call-bars span, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { body.scratch-working .sidebar-scratch-button, .sidebar-pi-search-dot, .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .voice-call-view[data-state] .voice-call-state::before, .voice-call-view[data-state] .voice-call-bars span, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
       /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */
       .session-row { min-height: 2.75rem; padding: 0 2.9rem 0 0.5rem; }
@@ -1294,6 +1301,7 @@
       .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-cli-toggle, .sidebar-search-toggle) { position: relative; }
       .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-cli-toggle, .sidebar-search-toggle)::after { content: ""; position: absolute; inset: -4px 0; }
       .sidebar-session-search input { font-size: 16px; }
+      .sidebar-pi-search { min-height: 2.75rem; padding: 0 0.6rem; }
       .header-tags :is(.session-tag-icon, .tag-overflow) { min-width: 44px; min-height: 44px; }
       .tag-overflow { min-height: 44px; }
       .tag-picker { font-size: 0.95rem; }

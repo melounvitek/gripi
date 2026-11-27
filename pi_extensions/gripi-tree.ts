@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import {
   SettingsManager,
   type ExtensionAPI,
@@ -27,6 +28,8 @@ const HISTORY_ENTRY_CHARACTERS = 4 * 1024 * 1024;
 const HISTORY_STRING_CHARACTERS = 1024 * 1024;
 const HISTORY_SHORT_STRING_CHARACTERS = 1024;
 const HISTORY_IMAGE_CHARACTERS = 48 * 1024 * 1024;
+// What a tool of a Pi that finds sessions passes on of gripi's output.
+const FIND_OUTPUT_CHARACTERS = 30_000;
 // Gripi shows inline images of these types only, and numbers them among themselves.
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
@@ -346,8 +349,42 @@ function registerBridgeCommand(pi: ExtensionAPI, name: string, description: stri
   });
 }
 
+// Gripi's sidebar asks a hidden Pi for the sessions about a search, with GRIPI_FIND_SESSIONS set to the gripi command.
+// That Pi has only these tools, which search the user's sessions within the sidebar's filters and read any of them.
+function registerFindTools(pi: ExtensionAPI, gripi: string): void {
+  const filters = [
+    ...(process.env.GRIPI_FIND_CWD ? ["--cwd", process.env.GRIPI_FIND_CWD] : []),
+    ...(process.env.GRIPI_FIND_TAG ? ["--tag", process.env.GRIPI_FIND_TAG] : []),
+  ];
+  const run = (args: string[], signal: AbortSignal | undefined, empty: string) => new Promise<{ content: { type: "text"; text: string }[]; details: Record<string, never> }>((resolve, reject) => {
+    execFile(gripi, args, { signal, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr.trim() || error.message));
+        return;
+      }
+      const text = stdout.length > FIND_OUTPUT_CHARACTERS ? `${stdout.slice(0, FIND_OUTPUT_CHARACTERS)}\n[cut]` : stdout;
+      resolve({ content: [{ type: "text", text: text || empty }], details: {} });
+    });
+  });
+  pi.registerTool({
+    name: "search_sessions",
+    label: "Search sessions",
+    description: "Lists the user's sessions whose conversation holds a text, ignoring case: the 20 most recently active, each with its ID, state, age, project and name, and its latest matches.",
+    parameters: { type: "object", properties: { text: { type: "string", description: "The literal text to find" } }, required: ["text"] },
+    execute: (_toolCallId, params, signal) => run(["search", ...filters, "--", params.text], signal, "No session holds this text."),
+  });
+  pi.registerTool({
+    name: "show_session",
+    label: "Show session",
+    description: "Prints the recent conversation of one of the user's sessions.",
+    parameters: { type: "object", properties: { id: { type: "string", description: "The session's ID" } }, required: ["id"] },
+    execute: (_toolCallId, params, signal) => run(["show", "--all", "--", params.id], signal, "The session has no messages."),
+  });
+}
+
 export default function (pi: ExtensionAPI) {
   let settingsManager: SettingsManager;
+  if (process.env.GRIPI_FIND_SESSIONS) registerFindTools(pi, process.env.GRIPI_FIND_SESSIONS);
 
   pi.on("session_start", (_event, ctx) => {
     settingsManager = SettingsManager.create(ctx.cwd, undefined, { projectTrusted: ctx.isProjectTrusted() });

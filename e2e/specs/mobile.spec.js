@@ -558,6 +558,21 @@ test("filter sessions while typing without closing the drawer or leaving the sea
   await expect(page.locator("#mobile-session-toggle")).toBeChecked();
 });
 
+test("one tap asks Pi for the sessions about a search, and keeps the drawer open", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("button", { name: "Search sessions" }).tap();
+  // The fake Pi answers with the search's words, among which is the session's ID.
+  await page.getByRole("searchbox", { name: "Search sessions" }).fill("e2e-mobile");
+  await expect.poll(() => new URL(page.url()).searchParams.get("session_search")).toBe("e2e-mobile");
+
+  await page.getByRole("button", { name: "ask Pi" }).tap();
+
+  await expect(page.getByRole("link", { name: new RegExp(sessions.mobile) })).toBeVisible();
+  await expect(page.getByRole("button", { name: "found by Pi" })).toBeVisible();
+  await expect(page.locator("#mobile-session-toggle")).toBeChecked();
+});
+
 test("navigate and complete a conversation from the mobile session drawer", async ({ page }) => {
   await page.goto("/?show_all_sessions=1");
 

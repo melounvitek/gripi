@@ -105,6 +105,16 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	if err != nil {
 		return nil, err
 	}
+	if options.FindSessions {
+		executable, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		// Gripi's extension then offers the tools that search and read sessions with the gripi command, which is the
+		// gateway's executable. Pi gets no other tools, nor skills or context files that would tell it to use them.
+		command = append(slices.Clone(adapter.command), "--tools", "search_sessions,show_session", "--exclude-tools", "mcp__*", "--no-skills", "--no-context-files", "--thinking", "low")
+		options.Env = append(slices.Clone(options.Env), "GRIPI_FIND_SESSIONS="+executable)
+	}
 	return start(adapter.store.Home, options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
 		return rpc.StartInCWD(cwd, forkFrom, options.Scratch, command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})

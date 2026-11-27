@@ -245,9 +245,7 @@ func sessionViewURL(view *pageView) string {
 	if view.SelectedProject != "" {
 		values.Set("project", view.SelectedProject)
 	}
-	if view.SearchQuery != "" {
-		values.Set("session_search", view.SearchQuery)
-	}
+	setSearch(values, view)
 	if view.SelectedTag != "" {
 		values.Set("tag", view.SelectedTag)
 	}
